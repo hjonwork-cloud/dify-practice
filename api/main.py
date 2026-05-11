@@ -249,8 +249,9 @@ def _extract_monthly_sales_value(row: dict) -> float:
 
 
 def _format_value(value: float) -> str:
-    rounded = round(float(value), 1)
-    return f"{rounded:.1f}"
+    """억원 단위 값 → 백만원 정수(천단위 쉼표) 변환. 예: 49.63 → '4,963'"""
+    val_man = round(float(value) * 100)
+    return f"{val_man:,}"
 
 
 def _safe_query(sql: str, *, raw: bool = False) -> list[dict]:
