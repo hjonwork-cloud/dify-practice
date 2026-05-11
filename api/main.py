@@ -3572,12 +3572,19 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                             )
                         else:
                             _user_pending_candidates[user_id] = {
-                                c[0]: c[2] for c in _candidates
+                                "month_num": month_num,
+                                "yearmonth": yearmonth,
+                                "candidates": {c[0]: c[2] for c in _candidates},
                             }
                             qr_btns = [{"label": c[0], "action": "message", "messageText": c[0]} for c in _candidates]
+                            candidate_lines = "\n".join(
+                                f"  {i+1}. {c[0]} [{c[2]}]" for i, c in enumerate(_candidates)
+                            )
                             _send_kakao_callback_qr(
                                 callback_url,
-                                f"'{brand_name}'과(와) 유사한 항목입니다. 하나를 선택해주세요.",
+                                f"'{brand_name}'과(와) 유사한 항목입니다. 하나를 선택해주세요.\n\n"
+                                f"{candidate_lines}\n\n"
+                                f"버튼으로 선택하거나 정확한 이름으로 입력해주세요.",
                                 qr_btns,
                                 "브랜드매출",
                             )
@@ -3653,12 +3660,19 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                                 return
                             else:
                                 _user_pending_candidates[user_id] = {
-                                    c[0]: c[2] for c in _candidates2
+                                    "month_num": _mo_now,
+                                    "yearmonth": _ym_now,
+                                    "candidates": {c[0]: c[2] for c in _candidates2},
                                 }
                                 qr_btns2 = [{"label": c[0], "action": "message", "messageText": c[0]} for c in _candidates2]
+                                candidate_lines2 = "\n".join(
+                                    f"  {i+1}. {c[0]} [{c[2]}]" for i, c in enumerate(_candidates2)
+                                )
                                 _send_kakao_callback_qr(
                                     callback_url,
-                                    f"'{_bnm}'과(와) 유사한 항목입니다. 하나를 선택해주세요.",
+                                    f"'{_bnm}'과(와) 유사한 항목입니다. 하나를 선택해주세요.\n\n"
+                                    f"{candidate_lines2}\n\n"
+                                    f"버튼으로 선택하거나 정확한 이름으로 입력해주세요.",
                                     qr_btns2,
                                     "브랜드매출",
                                 )
@@ -4280,7 +4294,15 @@ async def kakao_skill(request: Request, background_tasks: BackgroundTasks):
         # ── 3-0z) 퍼지 확인 인터셉터 (예/아니오 + 다수후보 직접조회) ──
         # A) 다수 후보: 버튼에서 후보명 직접 선택
         if user_id in _user_pending_candidates:
-            _cands = _user_pending_candidates[user_id]
+            _pending_cands = _user_pending_candidates[user_id]
+            if isinstance(_pending_cands, dict) and "candidates" in _pending_cands:
+                _cands = _pending_cands.get("candidates", {})
+                _cand_ym = str(_pending_cands.get("yearmonth", time.strftime("%Y%m")))
+                _cand_mo = int(_pending_cands.get("month_num", int(time.strftime("%m"))))
+            else:
+                _cands = _pending_cands
+                _cand_ym = time.strftime("%Y%m")
+                _cand_mo = int(time.strftime("%m"))
             _matched_cand = None
             for _cand_name in _cands:
                 if _cand_name in utterance or utterance in _cand_name:
@@ -4289,8 +4311,6 @@ async def kakao_skill(request: Request, background_tasks: BackgroundTasks):
             if _matched_cand:
                 _cand_level = _cands[_matched_cand]
                 _user_pending_candidates.pop(user_id, None)
-                _ym_now2 = time.strftime("%Y%m")
-                _mo_now2 = int(time.strftime("%m"))
                 # 직접 쿼리
                 try:
                     if _cand_level == "단일 거래처":
@@ -4299,7 +4319,7 @@ async def kakao_skill(request: Request, background_tasks: BackgroundTasks):
                             FROM {T_MAIN}
                             WHERE `사업부명` = '외식식재사업부'
                               AND `거래처명` = '{_matched_cand}'
-                              AND `년월` = '{_ym_now2}'
+                              AND `년월` = '{_cand_ym}'
                         """)
                     elif _cand_level == "거래처(ZA)":
                         _c_rows = _safe_query(f"""
@@ -4307,7 +4327,7 @@ async def kakao_skill(request: Request, background_tasks: BackgroundTasks):
                             FROM {T_MAIN}
                             WHERE `사업부명` = '외식식재사업부'
                               AND `ZA거래처명` = '{_matched_cand}'
-                              AND `년월` = '{_ym_now2}'
+                              AND `년월` = '{_cand_ym}'
                         """)
                     else:
                         _c_rows = _safe_query(f"""
@@ -4315,11 +4335,11 @@ async def kakao_skill(request: Request, background_tasks: BackgroundTasks):
                             FROM {T_MAIN}
                             WHERE `사업부명` = '외식식재사업부'
                               AND `ZC본부명` = '{_matched_cand}'
-                              AND `년월` = '{_ym_now2}'
+                              AND `년월` = '{_cand_ym}'
                         """)
                     _c_sales = float(_c_rows[0]["sales"]) if _c_rows else 0.0
                     _c_card = (
-                        f"{_matched_cand}의 {_mo_now2}월 매출액은 "
+                        f"{_matched_cand}의 {_cand_mo}월 매출액은 "
                         f"{_format_value(_c_sales)}억원입니다."
                         f"\n📌 집계단위: {_cand_level}"
                     )
