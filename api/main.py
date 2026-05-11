@@ -1080,6 +1080,11 @@ def _fuzzy_search_candidates(name_query: str, yearmonth: str) -> list[tuple[str,
             seen.add(n)
             results.append((n, float(r["sales"]), "단일 거래처"))
 
+    # 거래처명에서 결과가 나왔으면 ZA/ZC 추가검색 생략 (속도 최적화)
+    if results:
+        results.sort(key=lambda x: x[1], reverse=True)
+        return results[:8]
+
     # 2) ZA거래처명 검색
     if len(results) < 8:
         rows2 = _safe_query(f"""
@@ -3514,7 +3519,11 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                 yearmonth = f"{cur_year}{month_num:02d}"
                 logger.info(f"[콜백] 브랜드매출 직접 처리: brand={brand_name}, ym={yearmonth}")
                 try:
-                    res = _fetch_brand_monthly_sales(brand_name, yearmonth)
+                    # 공백 포함 브랜드명은 ZC명이 아니므로 퍼지검색으로 직행 (DB쿼리 절감)
+                    if ' ' in brand_name:
+                        res = None
+                    else:
+                        res = _fetch_brand_monthly_sales(brand_name, yearmonth)
                     if isinstance(res, list):
                         # 여러 브랜드가 매칭 → 확인 질문
                         options = "\n".join(f"  {i+1}. {n}" for i, n in enumerate(res))
@@ -3593,7 +3602,11 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                 if _bnm and _bnm not in _BRAND_BYPASS_BLACKLIST and len(_bnm) >= 2:
                     logger.info(f"[콜백] 브랜드매출(월미명시) 직접 처리: brand={_bnm}, ym={_ym_now}")
                     try:
-                        res = _fetch_brand_monthly_sales(_bnm, _ym_now)
+                        # 공백 포함 브랜드명은 ZC명이 아니므로 퍼지검색으로 직행 (DB쿼리 절감)
+                        if ' ' in _bnm:
+                            res = None
+                        else:
+                            res = _fetch_brand_monthly_sales(_bnm, _ym_now)
                         if isinstance(res, list):
                             options = "\n".join(f"  {i+1}. {n}" for i, n in enumerate(res))
                             card = (
