@@ -249,11 +249,8 @@ def _extract_monthly_sales_value(row: dict) -> float:
 
 
 def _format_value(value: float) -> str:
-    rounded = round(float(value), 2)
-    text = f"{rounded:.2f}".rstrip("0").rstrip(".")
-    if "." not in text:
-        text += ".0"
-    return text
+    rounded = round(float(value), 1)
+    return f"{rounded:.1f}"
 
 
 def _safe_query(sql: str, *, raw: bool = False) -> list[dict]:
@@ -556,7 +553,7 @@ def _build_new_sales_markdown(rows: list[dict], original_sql: str = "") -> str:
     brand_label = f"신규브랜드: {cust_count}개"
     if personal_count > 0:
         brand_label += f" (개인형 {personal_count}개 합산)"
-    summary = [f"총 신규매출: {_format_value(grand_total)}억원",
+    summary = [f"총 신규매출: {_format_value(grand_total)}백만원",
                brand_label]
     if display_stores > 0:
         summary.append(f"가맹점: {display_stores}개")
@@ -631,7 +628,7 @@ def _build_new_sales_markdown(rows: list[dict], original_sql: str = "") -> str:
         cmp_parts = []
         if avg_sales > 0:
             cmp_parts.append(
-                f"매출 {_format_value(my_sales)}억({(my_sales/avg_sales-1)*100:+.0f}%)"
+                f"매출 {_format_value(my_sales)}백만({(my_sales/avg_sales-1)*100:+.0f}%)"
             )
         if avg_stores > 0:
             cmp_parts.append(
@@ -684,7 +681,7 @@ def _build_new_sales_markdown(rows: list[dict], original_sql: str = "") -> str:
                     cust_points.append("당월 거래 중단")
                 elif chg <= -30:
                     cust_points.append(
-                        f"매출 급감 ({_format_value(prev)}→{_format_value(last)}억, {chg:+.0f}%)"
+                        f"매출 급감 ({_format_value(prev)}→{_format_value(last)}백만, {chg:+.0f}%)"
                     )
                 elif chg <= -10:
                     # 연속 하락 확인
@@ -770,7 +767,7 @@ def _build_team_new_sales_markdown(rows: list[dict], original_sql: str = "") -> 
     title = f"📊 {team_name} 영업사원별 신규매출 현황 ({year_label}년)" if team_name else f"📊 영업사원별 신규매출 현황 ({year_label}년)"
     lines.append(title)
     lines.append("")
-    lines.append(f"총 신규매출: {_format_value(grand_total)}억원 | 영업사원: {sp_count}명")
+    lines.append(f"총 신규매출: {_format_value(grand_total)}백만원 | 영업사원: {sp_count}명")
     lines.append("")
 
     # 표
@@ -797,11 +794,11 @@ def _build_team_new_sales_markdown(rows: list[dict], original_sql: str = "") -> 
     # 간단한 인사이트
     if sorted_sps:
         top = sorted_sps[0]
-        lines.append(f"💡 최고 실적: {top} ({_format_value(totals[top])}억원)")
+        lines.append(f"💡 최고 실적: {top} ({_format_value(totals[top])}백만원)")
         if len(sorted_sps) >= 2:
             avg = grand_total / sp_count
             above_avg = sum(1 for s in sp_set if totals[s] >= avg)
-            lines.append(f"   평균 {_format_value(avg)}억원 이상: {above_avg}명/{sp_count}명")
+            lines.append(f"   평균 {_format_value(avg)}백만원 이상: {above_avg}명/{sp_count}명")
 
     return "\n".join(lines)
 
@@ -1169,15 +1166,15 @@ def _build_monthly_sales_markdown(rows: list[dict]) -> str:
     prev = cmp["전월"]
     yoy  = cmp["전년동월"]
 
-    parts = [f"{target_name}의 {month_label} 매출액은 {_format_value(sales)}억원입니다."]
+    parts = [f"{target_name}의 {month_label} 매출액은 {_format_value(sales)}백만원입니다."]
     if prev > 0:
         chg_mom = (sales - prev) / prev * 100
         word = "증가" if chg_mom >= 0 else "감소"
-        parts.append(f"전월 {_format_value(prev)}억 대비 {chg_mom:+.1f}% {word}.")
+        parts.append(f"전월 {_format_value(prev)}백만 대비 {chg_mom:+.1f}% {word}.")
     if yoy > 0:
         chg_yoy = (sales - yoy) / yoy * 100
         word = "증가했습니다." if chg_yoy >= 0 else "감소했습니다."
-        parts.append(f"전년 동월 {_format_value(yoy)}억 대비 {chg_yoy:+.1f}% {word}")
+        parts.append(f"전년 동월 {_format_value(yoy)}백만 대비 {chg_yoy:+.1f}% {word}")
 
     text = "\n".join(parts)
     text += "\n\n💡 증가/감소 사유가 궁금하시면 \"증가사유 알려줘\" 라고 입력하세요."
@@ -1290,80 +1287,80 @@ def _fetch_sales_reason(target_key: str, target_name: str, yearmonth: str) -> st
     lines.append(f"【전월({prev_month_label}) 대비】")
     mom_net = round(sum(x["diff"] for x in mom_list), 2)
     mom_sign = "+" if mom_net >= 0 else ""
-    lines.append(f"  💰 전월 대비 순증감: {mom_sign}{_format_value(mom_net)}억")
+    lines.append(f"  💰 전월 대비 순증감: {mom_sign}{_format_value(mom_net)}백만")
 
     # 증가 TOP3
     ib = _brand(mom_inc);  ip = _pers(mom_inc)
     if ib or ip:
         lines.append(f"  📈 증가 TOP 3")
         for x in ib[:3]:
-            lines.append(f"    · {x['name']}  +{_format_value(x['diff'])}억 (당월 {_format_value(x['cur'])}억)")
+            lines.append(f"    · {x['name']}  +{_format_value(x['diff'])}백만 (당월 {_format_value(x['cur'])}백만)")
         if len(ib) > 3:
             lines.append(f"    · 브랜드 외 {len(ib)-3}개")
         if ip:
-            lines.append(f"    · 개인형 {len(ip)}개  +{_format_value(_sum_sales(ip))}억")
+            lines.append(f"    · 개인형 {len(ip)}개  +{_format_value(_sum_sales(ip))}백만")
 
     # 감소 TOP3
     db = _brand(mom_dec);  dp = _pers(mom_dec)
     if db or dp:
         lines.append(f"  📉 감소 TOP 3")
         for x in db[:3]:
-            lines.append(f"    · {x['name']}  {_format_value(x['diff'])}억 (당월 {_format_value(x['cur'])}억)")
+            lines.append(f"    · {x['name']}  {_format_value(x['diff'])}백만 (당월 {_format_value(x['cur'])}백만)")
         if len(db) > 3:
             lines.append(f"    · 브랜드 외 {len(db)-3}개")
         if dp:
-            lines.append(f"    · 개인형 {len(dp)}개  {_format_value(_sum_sales(dp))}억")
+            lines.append(f"    · 개인형 {len(dp)}개  {_format_value(_sum_sales(dp))}백만")
 
     lines.append("")
 
     # ─── 섹션 2: 전년 대비 ────────────────────────────────
     lines.append(f"【전년({yoy_label}) 대비】")
     sign = "+" if yoy_net >= 0 else ""
-    lines.append(f"  💰 전년 동월 순증감: {sign}{_format_value(yoy_net)}억")
+    lines.append(f"  💰 전년 동월 순증감: {sign}{_format_value(yoy_net)}백만")
 
     # 신규 브랜드
     if new_rows:
         nb = _brand(new_rows);  np_ = _pers(new_rows)
         total_new = _sum_sales(new_rows)
-        lines.append(f"  🆕 신규 브랜드 ({len(new_rows)}개  +{_format_value(total_new)}억)")
+        lines.append(f"  🆕 신규 브랜드 ({len(new_rows)}개  +{_format_value(total_new)}백만)")
         for x in nb[:3]:
-            lines.append(f"    · {x['name']}  +{_format_value(x['sales'])}억")
+            lines.append(f"    · {x['name']}  +{_format_value(x['sales'])}백만")
         if len(nb) > 3:
             lines.append(f"    · 브랜드 외 {len(nb)-3}개")
         if np_:
-            lines.append(f"    · 개인형 {len(np_)}개  +{_format_value(_sum_sales(np_))}억")
+            lines.append(f"    · 개인형 {len(np_)}개  +{_format_value(_sum_sales(np_))}백만")
 
     # 중단 브랜드
     if stopped_rows:
         sb = _brand(stopped_rows);  sp_ = _pers(stopped_rows)
         total_stop = _sum_sales(stopped_rows)
-        lines.append(f"  🔻 중단 브랜드 ({len(stopped_rows)}개  -{_format_value(total_stop)}억)")
+        lines.append(f"  🔻 중단 브랜드 ({len(stopped_rows)}개  -{_format_value(total_stop)}백만)")
         for x in sb[:3]:
-            lines.append(f"    · {x['name']}  -{_format_value(x['sales'])}억")
+            lines.append(f"    · {x['name']}  -{_format_value(x['sales'])}백만")
         if len(sb) > 3:
             lines.append(f"    · 브랜드 외 {len(sb)-3}개")
         if sp_:
-            lines.append(f"    · 개인형 {len(sp_)}개  -{_format_value(_sum_sales(sp_))}억")
+            lines.append(f"    · 개인형 {len(sp_)}개  -{_format_value(_sum_sales(sp_))}백만")
 
     # 기존 브랜드 증감
     if exist_rows:
         exist_total = round(sum(x["diff"] for x in exist_rows), 2)
         sign = "+" if exist_total >= 0 else ""
-        lines.append(f"  🔄 기존 브랜드 증감 ({sign}{_format_value(exist_total)}억)")
+        lines.append(f"  🔄 기존 브랜드 증감 ({sign}{_format_value(exist_total)}백만)")
         eib = _brand(exist_inc);  eip = _pers(exist_inc)
         edb = _brand(exist_dec);  edp = _pers(exist_dec)
         if eib or eip:
             lines.append(f"    증가 TOP3")
             for x in eib[:3]:
-                lines.append(f"      · {x['name']}  +{_format_value(x['diff'])}억")
+                lines.append(f"      · {x['name']}  +{_format_value(x['diff'])}백만")
             if eip:
-                lines.append(f"      · 개인형 {len(eip)}개  +{_format_value(sum(x['diff'] for x in eip))}억")
+                lines.append(f"      · 개인형 {len(eip)}개  +{_format_value(sum(x['diff'] for x in eip))}백만")
         if edb or edp:
             lines.append(f"    감소 TOP3")
             for x in edb[:3]:
-                lines.append(f"      · {x['name']}  {_format_value(x['diff'])}억")
+                lines.append(f"      · {x['name']}  {_format_value(x['diff'])}백만")
             if edp:
-                lines.append(f"      · 개인형 {len(edp)}개  {_format_value(sum(x['diff'] for x in edp))}억")
+                lines.append(f"      · 개인형 {len(edp)}개  {_format_value(sum(x['diff'] for x in edp))}백만")
 
     return "\n".join(lines)
 
@@ -1446,9 +1443,9 @@ def _build_product_ranking_markdown(rows: list[dict],
     month = int(yearmonth[4:6])
     total = sum(float(r.get("매출_억", 0)) for r in rows)
     lines = [f"📦 {target_name} {month}월 자재그룹별 매출 TOP{len(rows)}", ""]
-    lines.append(f"총 매출: {_format_value(total)}억원")
+    lines.append(f"총 매출: {_format_value(total)}백만원")
     lines.append("")
-    lines.append("| 자재그룹 | 매출(억) | 비중 | 품목수 |")
+    lines.append("| 자재그룹 | 매출(백만) | 비중 | 품목수 |")
     lines.append("| --- | ---: | ---: | ---: |")
     for r in rows:
         s = float(r.get("매출_억", 0))
@@ -1471,7 +1468,7 @@ def _build_product_detail_markdown(rows: list[dict],
         qty   = int(r.get("총수량", 0))
         custs = int(r.get("거래처수", 0))
         lines.append(f"• {name}")
-        lines.append(f"  분류: {group} | 매출: {_format_value(sales)}억 | 수량: {qty:,} | 거래처: {custs}개")
+        lines.append(f"  분류: {group} | 매출: {_format_value(sales)}백만 | 수량: {qty:,} | 거래처: {custs}개")
     return "\n".join(lines)
 
 
@@ -1520,10 +1517,10 @@ def _build_generic_margin_markdown(data: dict,
     lines = [
         f"💰 {target_name} {month}월 범용상품 수익성 (FC전용 제외)",
         "",
-        f"매출: {_format_value(ts)}억 | 원가: {_format_value(tc)}억 | "
+        f"매출: {_format_value(ts)}백만 | 원가: {_format_value(tc)}백만 | "
         f"GP: {_format_value(gp)}억 ({gp_rate:.1f}%)",
         "",
-        "| 자재그룹 | 매출(억) | 원가(억) | GP(억) | GP율 | 품목수 |",
+        "| 자재그룹 | 매출(백만) | 원가(백만) | GP(백만) | GP율 | 품목수 |",
         "| --- | ---: | ---: | ---: | ---: | ---: |",
     ]
     for r in rows:
@@ -1758,8 +1755,8 @@ def _build_region_sales_markdown(rows: list[dict], keyword: str,
     title = (f"📍 {month}월 시도별 매출 현황" if is_ranking
              else f"📍 '{keyword}' {month}월 매출 현황")
     col_label = "지역" if loc_key == "시도" else "판매구역"
-    lines = [title, "", f"총 매출: {_format_value(total)}억원", ""]
-    lines.append(f"| {col_label} | 매출(억) | 비중 | 브랜드 | 거래처 |")
+    lines = [title, "", f"총 매출: {_format_value(total)}백만원", ""]
+    lines.append(f"| {col_label} | 매출(백만) | 비중 | 브랜드 | 거래처 |")
     lines.append("| --- | ---: | ---: | ---: | ---: |")
     for r in rows:
         s   = float(r.get("매출_억", 0))
@@ -1828,7 +1825,7 @@ def _build_org_ranking_markdown(rows: list[dict],
         _order_map = {name: i for i, name in enumerate(_TEAM_ORDER)}
         rows = sorted(rows, key=lambda r: _order_map.get(str(r.get("부서명", "")), 99))
     lines = [f"🏢 외식식재사업부 {period_str} 팀별 매출", ""]
-    lines.append(f"총 매출: {_format_value(total)}억원")
+    lines.append(f"총 매출: {_format_value(total)}백만원")
     lines.append("")
     for r in rows:
         s   = float(r.get("매출_억", 0))
@@ -1836,7 +1833,7 @@ def _build_org_ranking_markdown(rows: list[dict],
         sp  = int(r.get("사원수", 0))
         bc  = int(r.get("브랜드수", 0))
         lines.append(
-            f"■ {r.get(org_key, '')} ({_format_value(s)}억, {pct:.1f}%)"
+            f"■ {r.get(org_key, '')} ({_format_value(s)}백만, {pct:.1f}%)"
         )
     return "\n".join(lines)
 
@@ -1885,9 +1882,9 @@ def _build_zp_ranking_markdown(rows: list[dict], yearmonth: str) -> str:
     month = int(yearmonth[4:6])
     total = sum(float(r.get("매출_억", 0)) for r in rows)
     lines = [f"🏬 {month}월 ZA본사별 매출 TOP{len(rows)}", ""]
-    lines.append(f"총 매출: {_format_value(total)}억원")
+    lines.append(f"총 매출: {_format_value(total)}백만원")
     lines.append("")
-    lines.append("| ZA본사 | 매출(억) | 거래처 | 가맹점 |")
+    lines.append("| ZA본사 | 매출(백만) | 거래처 | 가맹점 |")
     lines.append("| --- | ---: | ---: | ---: |")
     for r in rows:
         s    = float(r.get("매출_억", 0))
@@ -1906,9 +1903,9 @@ def _build_customer_tier_markdown(rows: list[dict], yearmonth: str) -> str:
     month = int(yearmonth[4:6])
     total = sum(float(r.get("매출_억", 0)) for r in rows)
     lines = [f"👥 {month}월 고객계층별 매출", ""]
-    lines.append(f"총 매출: {_format_value(total)}억원")
+    lines.append(f"총 매출: {_format_value(total)}백만원")
     lines.append("")
-    lines.append("| 고객계층 | 매출(억) | 비중 | 브랜드 | 거래처 |")
+    lines.append("| 고객계층 | 매출(백만) | 비중 | 브랜드 | 거래처 |")
     lines.append("| --- | ---: | ---: | ---: | ---: |")
     for r in rows:
         s   = float(r.get("매출_억", 0))
@@ -2462,9 +2459,9 @@ def _to_kakao_text(answer: str) -> str:
 
                 # ── 메인 라인: 값 + 비중/GP ──
                 if pct_val:
-                    out.append(f'■ {brand} ({total_val}억, {pct_val})')
+                    out.append(f'■ {brand} ({total_val}백만, {pct_val})')
                 else:
-                    out.append(f'■ {brand} ({total_val}억)')
+                    out.append(f'■ {brand} ({total_val}백만)')
 
                 # 월별 추이
                 month_parts = []
@@ -2501,7 +2498,7 @@ def _to_kakao_text(answer: str) -> str:
             in_table = False
             # 생략된 브랜드 요약 추가
             if skipped_brands:
-                summary_parts = [f'{n}({v}억)' for n, v in skipped_brands]
+                summary_parts = [f'{n}({v}백만)' for n, v in skipped_brands]
                 out.append(f'외 {len(skipped_brands)}개: {", ".join(summary_parts)}')
                 out.append('')
                 skipped_brands = []
@@ -2527,7 +2524,7 @@ def _to_kakao_text(answer: str) -> str:
     # 테이블이 파일 끝까지면 닫기
     if in_table:
         if skipped_brands:
-            summary_parts = [f'{n}({v}억)' for n, v in skipped_brands]
+            summary_parts = [f'{n}({v}백만)' for n, v in skipped_brands]
             out.append(f'외 {len(skipped_brands)}개: {", ".join(summary_parts)}')
             out.append('')
         # 테이블 끝 처리 완료
@@ -2623,7 +2620,7 @@ def _format_dify_rows(rows: list[dict], query: str = "") -> str:
             unit = ""
             vc_lower = str(vc)
             if "억" in vc_lower:
-                unit = "억원"
+                unit = "백만원"
             elif "원" in vc_lower and "억" not in vc_lower:
                 unit = "원"
             elif "%" in vc_lower or "율" in vc_lower or "비중" in vc_lower:
@@ -2856,7 +2853,7 @@ def _build_personal_detail(sp_compact: str) -> str:
         lines.append("| " + " | ".join([c] + vals + [total]) + " |")
 
     lines.append("")
-    lines.append(f"개인형 합계: {_format_value(grand)}억원")
+    lines.append(f"개인형 합계: {_format_value(grand)}백만원")
     return "\n".join(lines)
 
 
@@ -3052,7 +3049,7 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                       AND `대금청구일` = '{_date_str_st}'
                 """)
                 sales_st = float((rows_st[0].get("sales") or 0) if rows_st else 0)
-                text_st = f"{_specific_team_m}의 {_label_st} 매출액은 {_format_value(sales_st)}억원입니다."
+                text_st = f"{_specific_team_m}의 {_label_st} 매출액은 {_format_value(sales_st)}백만원입니다."
             else:
                 _, ym_st = _extract_month_year(query)
                 rows_st = _safe_query(f"""
@@ -3064,7 +3061,7 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                 """)
                 sales_st = float((rows_st[0].get("sales") or 0) if rows_st else 0)
                 month_st = int(ym_st[4:6])
-                text_st = f"{_specific_team_m}의 {month_st}월 매출액은 {_format_value(sales_st)}억원입니다."
+                text_st = f"{_specific_team_m}의 {month_st}월 매출액은 {_format_value(sales_st)}백만원입니다."
             _send_kakao_callback(callback_url, text_st, "팀단독매출")
         except Exception as e:
             logger.error(f"[콜백] 팀단독매출 오류: {e}")
@@ -3295,8 +3292,8 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                     total_bm = sum(float(r.get("매출액_억원", 0)) for r in rows_bm)
                     lines_bm = [f"📊 [{name_bm}] 담당 브랜드 매출 ({_period_bm})\n"]
                     for i, r in enumerate(rows_bm, 1):
-                        lines_bm.append(f"{i}. {r['ZC본부명']} — {_format_value(float(r['매출액_억원']))}억원")
-                    lines_bm.append(f"\n요약: {len(rows_bm)}개 브랜드 | 합계 {_format_value(total_bm)}억원")
+                        lines_bm.append(f"{i}. {r['ZC본부명']} — {_format_value(float(r['매출액_억원']))}백만원")
+                    lines_bm.append(f"\n요약: {len(rows_bm)}개 브랜드 | 합계 {_format_value(total_bm)}백만원")
                     _send_kakao_callback_qr(callback_url, "\n".join(lines_bm), _bm_follow_qr, "담당브랜드")
                 else:
                     _send_kakao_callback_qr(
@@ -3351,8 +3348,8 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                     total_tm = sum(float(r.get("매출액_억원", 0)) for r in rows_tm)
                     lines_tm = [f"📊 [{team_tm}] 브랜드 매출 ({_period_tm})\n"]
                     for i, r in enumerate(rows_tm, 1):
-                        lines_tm.append(f"{i}. {r['ZC본부명']} — {_format_value(float(r['매출액_억원']))}억원")
-                    lines_tm.append(f"\n요약: {len(rows_tm)}개 브랜드 | 합계 {_format_value(total_tm)}억원")
+                        lines_tm.append(f"{i}. {r['ZC본부명']} — {_format_value(float(r['매출액_억원']))}백만원")
+                    lines_tm.append(f"\n요약: {len(rows_tm)}개 브랜드 | 합계 {_format_value(total_tm)}백만원")
                     _send_kakao_callback_qr(callback_url, "\n".join(lines_tm), _tm_follow_qr, "소속팀브랜드")
                 else:
                     _send_kakao_callback_qr(
@@ -3419,8 +3416,8 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                     lines_tt = [f"📊 외식식재사업부 팀별 매출 ({_period_tt} 누계)\n※ SAP 기준, 당일 매출은 익일 반영\n"]
                     for i, r in enumerate(rows_tt, 1):
                         my_mark = " ◀" if team_tt and team_tt in r['팀'] else ""
-                        lines_tt.append(f"{i}. {r['팀']} — {_format_value(float(r['매출액_억원']))}억원{my_mark}")
-                    lines_tt.append(f"\n합계: {_format_value(total_tt)}억원 | {len(rows_tt)}개 팀")
+                        lines_tt.append(f"{i}. {r['팀']} — {_format_value(float(r['매출액_억원']))}백만원{my_mark}")
+                    lines_tt.append(f"\n합계: {_format_value(total_tt)}백만원 | {len(rows_tt)}개 팀")
                     _send_kakao_callback_qr(callback_url, "\n".join(lines_tt), _tt_follow_qr, "팀전체매출")
                 else:
                     _send_kakao_callback_qr(
@@ -3470,7 +3467,7 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                     elif isinstance(_br_res, tuple):
                         _br_matched, _br_val, _br_level = _br_res
                         _send_kakao_callback_qr(callback_url,
-                            f"{_br_matched}의 {_br_date_label} 매출액은 {_format_value(_br_val)}억원입니다.\n📌 집계단위: {_br_level}",
+                            f"{_br_matched}의 {_br_date_label} 매출액은 {_format_value(_br_val)}백만원입니다.\n📌 집계단위: {_br_level}",
                             _SALES_FOLLOW_QR, "브랜드매출")
                     else:
                         _send_kakao_callback_qr(callback_url,
@@ -3536,7 +3533,7 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                         matched_name, sales, level_label = res
                         card = (
                             f"{matched_name}의 {month_num}월 매출액은 "
-                            f"{_format_value(sales)}억원입니다."
+                            f"{_format_value(sales)}백만원입니다."
                             f"\n📌 집계단위: {level_label}"
                         )
                         # 후속 증가사유 질문용 컨텍스트
@@ -3627,7 +3624,7 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                             matched_name, sales, level_label = res
                             card = (
                                 f"{matched_name}의 {_mo_now}월 매출액은 "
-                                f"{_format_value(sales)}억원입니다."
+                                f"{_format_value(sales)}백만원입니다."
                                 f"\n📌 집계단위: {level_label}"
                             )
                             _user_last_sales[user_id] = {
@@ -3809,7 +3806,7 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                     {"label": "📅 올해 전체", "action": "message", "messageText": f"{_sp_t} 매출 올해"},
                     {"label": "🏠 메인 메뉴", "action": "message", "messageText": "메뉴"},
                 ]
-                card = f"{_real_sp}님의 {_period_sp} 매출액은 {_format_value(_sp_sales)}억원입니다."
+                card = f"{_real_sp}님의 {_period_sp} 매출액은 {_format_value(_sp_sales)}백만원입니다."
                 _send_kakao_callback_qr(callback_url, card, _sp_tot_qr, "영업사원총매출")
             except Exception as e:
                 logger.error(f"[콜백] 영업사원 총매출 오류: {e}")
@@ -4340,7 +4337,7 @@ async def kakao_skill(request: Request, background_tasks: BackgroundTasks):
                     _c_sales = float(_c_rows[0]["sales"]) if _c_rows else 0.0
                     _c_card = (
                         f"{_matched_cand}의 {_cand_mo}월 매출액은 "
-                        f"{_format_value(_c_sales)}억원입니다."
+                        f"{_format_value(_c_sales)}백만원입니다."
                         f"\n📌 집계단위: {_cand_level}"
                     )
                     return _kakao_quickreply(_c_card, _SALES_FOLLOW_QR)
@@ -4384,7 +4381,7 @@ async def kakao_skill(request: Request, background_tasks: BackgroundTasks):
                     _p_sales = float(_p_rows[0]["sales"]) if _p_rows else 0.0
                     _p_card = (
                         f"{_p_name}의 {_p_mo}월 매출액은 "
-                        f"{_format_value(_p_sales)}억원입니다."
+                        f"{_format_value(_p_sales)}백만원입니다."
                         f"\n📌 집계단위: {_p_level}"
                     )
                     return _kakao_quickreply(_p_card, _SALES_FOLLOW_QR)
