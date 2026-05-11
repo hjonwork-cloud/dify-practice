@@ -3200,7 +3200,7 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
         _unshipped_ctx_qr = [
             {"label": "🔴 귀책만 보기",  "action": "message", "messageText": f"{_name_prefix}귀책 미출고 알려줘"},
             {"label": "📅 어제 현황",    "action": "message", "messageText": f"{_name_prefix}어제 미출고 알려줘"},
-            {"label": "🏠 메인 메뉴",    "action": "message", "messageText": "메인메뉴"},
+            {"label": "🏠 메인 메뉴",    "action": "message", "messageText": "메뉴"},
         ]
         try:
             if is_team:
@@ -4125,7 +4125,7 @@ async def kakao_skill(request: Request, background_tasks: BackgroundTasks):
                 )
 
         # ── 3-0) 메뉴 키워드 → 메인 메뉴 즉시 표시 ──
-        if re.match(r'^(메뉴|메인|main|menu|홈|처음으로|도움말)[\s!~]*$', utterance.strip(), re.IGNORECASE):
+        if re.match(r'^(메뉴|메인메뉴|메인\s*메뉴|메인|main|menu|홈|처음으로|도움말)[\s!~]*$', utterance.strip(), re.IGNORECASE):
             _reg_info_tmp = _load_users().get(user_id, {})
             _name_tmp = _reg_info_tmp.get("name", "")
             _team_tmp = _reg_info_tmp.get("team", "")
