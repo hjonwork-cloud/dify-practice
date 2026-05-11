@@ -845,9 +845,9 @@ def _fetch_monthly_total(target_key: str, target_name: str, yearmonth: str) -> l
     # 데이터가 없어도 0으로 채운 행 반환 (빈 월 표시용)
     return [{target_key: target_name, "년월": yearmonth, "매출액_억원": 0.0}]
 
-def _fetch_brand_daily_sales(brand_name: str, date_str: str) -> tuple[str, float] | None | list[str]:
+def _fetch_brand_daily_sales(brand_name: str, date_str: str) -> tuple[str, float, str] | None | list[str]:
     """대금청구일 기준 브랜드 일별 매출 (YYYYMMDD 형식)
-    - 정확히 1건 매칭 → (브랜드명, 매출) 반환
+    - 정확히 1건 매칭 → (브랜드명, 매출, 집계단위) 반환
     - 2건 이상 매칭   → 후보 브랜드명 리스트 반환
     - 0건             → None
     """
@@ -863,7 +863,7 @@ def _fetch_brand_daily_sales(brand_name: str, date_str: str) -> tuple[str, float
             GROUP BY `ZC본부명`
         """)
         if rows and float(rows[0].get("sales", 0)) > 0:
-            return str(rows[0]["name"]), float(rows[0]["sales"])
+            return str(rows[0]["name"]), float(rows[0]["sales"]), "브랜드(ZC)"
     like_rows = _safe_query(f"""
         SELECT `ZC본부명` AS name,
                ROUND(COALESCE(SUM(`매출액`), 0) / 1000000, 4) AS sales
@@ -894,12 +894,18 @@ def _fetch_brand_daily_sales(brand_name: str, date_str: str) -> tuple[str, float
         if not cust_rows:
             return None
         if len(cust_rows) == 1:
-            return str(cust_rows[0]["name"]), float(cust_rows[0]["sales"])
+            return str(cust_rows[0]["name"]), float(cust_rows[0]["sales"]), "단일 거래처"
         # 4) 동일 ZC 다건 → ZC 아래 전체 거래처가 검색어 포함 시만 ZC 집계로 승격
         zc_names = {str(r.get("zc", "") or "") for r in cust_rows}
         zc_names.discard("")
         if len(zc_names) == 1:
             zc_name = zc_names.pop()
+            # ZC 승격 가드: 검색어 토큰이 ZC명에 포함돼야 승격 허용
+            _zc_guard = any(t in zc_name for t in brand_name.replace('(', '').replace(')', '').split())
+            if not _zc_guard:
+                total_sales = sum(float(r.get("sales", 0)) for r in cust_rows)
+                display_name = f"{brand_name} (전체 {len(cust_rows)}개 점포 합계)"
+                return display_name, total_sales, "점포합산"
             _bn_ns2 = brand_name.replace(' ', '')
             all_custs = _safe_query(f"""
                 SELECT DISTINCT `거래처명`
@@ -924,20 +930,20 @@ def _fetch_brand_daily_sales(brand_name: str, date_str: str) -> tuple[str, float
                     GROUP BY `ZC본부명`
                 """)
                 if zc_row and float(zc_row[0].get("sales", 0)) > 0:
-                    return str(zc_row[0]["name"]), float(zc_row[0]["sales"])
+                    return str(zc_row[0]["name"]), float(zc_row[0]["sales"]), "브랜드(ZC)"
             else:
                 total_sales = sum(float(r.get("sales", 0)) for r in cust_rows)
                 display_name = f"{brand_name} (전체 {len(cust_rows)}개 점포 합계)"
-                return display_name, total_sales
+                return display_name, total_sales, "점포합산"
         return [str(r["name"]) for r in cust_rows]
     if len(like_rows) == 1:
-        return str(like_rows[0]["name"]), float(like_rows[0]["sales"])
+        return str(like_rows[0]["name"]), float(like_rows[0]["sales"]), "브랜드(ZC)"
     return [str(r["name"]) for r in like_rows]
 
 
-def _fetch_brand_monthly_sales(brand_name: str, yearmonth: str) -> tuple[str, float] | None | list[str]:
+def _fetch_brand_monthly_sales(brand_name: str, yearmonth: str) -> tuple[str, float, str] | None | list[str]:
     """ZC본부명 LIKE 유사검색 (외식식재사업부 한정)
-    - 정확히 1건 매칭 → (브랜드명, 매출) 반환
+    - 정확히 1건 매칭 → (브랜드명, 매출, 집계단위) 반환
     - 2건 이상 매칭   → 후보 브랜드명 리스트 반환  (list[str])
     - 0건             → None
     """
@@ -954,7 +960,7 @@ def _fetch_brand_monthly_sales(brand_name: str, yearmonth: str) -> tuple[str, fl
             GROUP BY `ZC본부명`
         """)
         if rows and float(rows[0].get("sales", 0)) > 0:
-            return str(rows[0]["name"]), float(rows[0]["sales"])
+            return str(rows[0]["name"]), float(rows[0]["sales"]), "브랜드(ZC)"
 
     # 2) LIKE 유사검색
     like_rows = _safe_query(f"""
@@ -988,13 +994,19 @@ def _fetch_brand_monthly_sales(brand_name: str, yearmonth: str) -> tuple[str, fl
         if not cust_rows:
             return None
         if len(cust_rows) == 1:
-            return str(cust_rows[0]["name"]), float(cust_rows[0]["sales"])
+            return str(cust_rows[0]["name"]), float(cust_rows[0]["sales"]), "단일 거래처"
         # 4) 동일 ZC 다건 → ZC 아래 전체 거래처가 검색어 포함 시만 ZC 집계로 승격
         #    그렇지 않으면 매칭 거래처명들 합산 반환
         zc_names = {str(r.get("zc", "") or "") for r in cust_rows}
         zc_names.discard("")
         if len(zc_names) == 1:
             zc_name = zc_names.pop()
+            # ZC 승격 가드: 검색어 토큰이 ZC명에 포함돼야 승격 허용
+            _zc_guard = any(t in zc_name for t in brand_name.replace('(', '').replace(')', '').split())
+            if not _zc_guard:
+                total_sales = sum(float(r.get("sales", 0)) for r in cust_rows)
+                display_name = f"{brand_name} (전체 {len(cust_rows)}개 점포 합계)"
+                return display_name, total_sales, "점포합산"
             # ZC 아래 거래처가 모두 검색어 포함인지 확인
             _bn_ns2 = brand_name.replace(' ', '')
             all_custs = _safe_query(f"""
@@ -1010,7 +1022,7 @@ def _fetch_brand_monthly_sales(brand_name: str, yearmonth: str) -> tuple[str, fl
                 for r in all_custs
             )
             if all_match:
-                # ZC 전체 集계 승격
+                # ZC 전체 집계 승격
                 zc_row = _safe_query(f"""
                     SELECT `ZC본부명` AS name,
                            ROUND(COALESCE(SUM(`매출액`), 0) / 1000000, 2) AS sales
@@ -1021,17 +1033,122 @@ def _fetch_brand_monthly_sales(brand_name: str, yearmonth: str) -> tuple[str, fl
                     GROUP BY `ZC본부명`
                 """)
                 if zc_row and float(zc_row[0].get("sales", 0)) > 0:
-                    return str(zc_row[0]["name"]), float(zc_row[0]["sales"])
+                    return str(zc_row[0]["name"]), float(zc_row[0]["sales"]), "브랜드(ZC)"
             else:
                 # ZC 아래 다른 브랜드 포함 → 매칭 거래처명만 합산
                 total_sales = sum(float(r.get("sales", 0)) for r in cust_rows)
                 display_name = f"{brand_name} (전체 {len(cust_rows)}개 점포 합계)"
-                return display_name, total_sales
+                return display_name, total_sales, "점포합산"
         return [str(r["name"]) for r in cust_rows]
     if len(like_rows) == 1:
-        return str(like_rows[0]["name"]), float(like_rows[0]["sales"])
+        return str(like_rows[0]["name"]), float(like_rows[0]["sales"]), "브랜드(ZC)"
     # 여러 건 → 후보 리스트 반환
     return [str(r["name"]) for r in like_rows]
+
+
+def _fuzzy_search_candidates(name_query: str, yearmonth: str) -> list[tuple[str, float, str]]:
+    """
+    토큰 분리 후 LIKE 패턴 조합으로 거래처명/ZA/ZC 3단계 검색
+    Returns: list of (name, sales, level_label) sorted by sales desc, max 8
+    """
+    tokens = name_query.replace('(', '').replace(')', '').split()
+    if not tokens:
+        return []
+
+    def make_like(toks):
+        return '%' + '%'.join(toks) + '%'
+
+    like_fwd = make_like(tokens)
+    like_rev = make_like(list(reversed(tokens)))
+
+    results: list[tuple[str, float, str]] = []
+    seen: set[str] = set()
+
+    # 1) 거래처명 검색
+    rows1 = _safe_query(f"""
+        SELECT `거래처명` AS name,
+               ROUND(COALESCE(SUM(`매출액`), 0) / 1000000, 2) AS sales
+        FROM {T_MAIN}
+        WHERE `사업부명` = '외식식재사업부' AND `년월` = '{yearmonth}'
+          AND (`거래처명` LIKE '{like_fwd}' OR `거래처명` LIKE '{like_rev}')
+        GROUP BY `거래처명`
+        ORDER BY SUM(`매출액`) DESC LIMIT 8
+    """)
+    for r in rows1:
+        n = str(r["name"])
+        if n not in seen and float(r.get("sales", 0)) > 0:
+            seen.add(n)
+            results.append((n, float(r["sales"]), "단일 거래처"))
+
+    # 2) ZA거래처명 검색
+    if len(results) < 8:
+        rows2 = _safe_query(f"""
+            SELECT `ZA거래처명` AS name,
+                   ROUND(COALESCE(SUM(`매출액`), 0) / 1000000, 2) AS sales
+            FROM {T_MAIN}
+            WHERE `사업부명` = '외식식재사업부' AND `년월` = '{yearmonth}'
+              AND (`ZA거래처명` LIKE '{like_fwd}' OR `ZA거래처명` LIKE '{like_rev}')
+            GROUP BY `ZA거래처명`
+            ORDER BY SUM(`매출액`) DESC LIMIT 8
+        """)
+        for r in rows2:
+            n = str(r["name"])
+            if n not in seen and float(r.get("sales", 0)) > 0:
+                seen.add(n)
+                results.append((n, float(r["sales"]), "거래처(ZA)"))
+
+    # 3) ZC본부명 검색
+    if len(results) < 8:
+        rows3 = _safe_query(f"""
+            SELECT `ZC본부명` AS name,
+                   ROUND(COALESCE(SUM(`매출액`), 0) / 1000000, 2) AS sales
+            FROM {T_MAIN}
+            WHERE `사업부명` = '외식식재사업부' AND `년월` = '{yearmonth}'
+              AND (`ZC본부명` LIKE '{like_fwd}' OR `ZC본부명` LIKE '{like_rev}')
+            GROUP BY `ZC본부명`
+            ORDER BY SUM(`매출액`) DESC LIMIT 8
+        """)
+        for r in rows3:
+            n = str(r["name"])
+            if n not in seen and float(r.get("sales", 0)) > 0:
+                seen.add(n)
+                results.append((n, float(r["sales"]), "브랜드(ZC)"))
+
+    # 단일 토큰이면 ZC명 앞부분으로 자동 분리 시도
+    if len(tokens) == 1 and not results:
+        raw = tokens[0]
+        zc_rows = _safe_query(f"""
+            SELECT DISTINCT `ZC본부명` FROM {T_MAIN}
+            WHERE `사업부명` = '외식식재사업부'
+              AND `ZC본부명` LIKE '%{raw[:4]}%'
+              AND `년월` = '{yearmonth}'
+            LIMIT 5
+        """)
+        for zr in zc_rows:
+            zc_n = str(zr.get("ZC본부명", ""))
+            zc_clean = re.sub(r'[()（）].*', '', zc_n).strip()
+            if zc_clean and zc_clean != raw and zc_clean in raw:
+                remainder = raw[len(zc_clean):]
+                if len(remainder) >= 2:
+                    sub_tokens = [zc_clean, remainder]
+                    sub_fwd = make_like(sub_tokens)
+                    sub_rows = _safe_query(f"""
+                        SELECT `거래처명` AS name,
+                               ROUND(COALESCE(SUM(`매출액`), 0) / 1000000, 2) AS sales
+                        FROM {T_MAIN}
+                        WHERE `사업부명` = '외식식재사업부' AND `년월` = '{yearmonth}'
+                          AND `거래처명` LIKE '{sub_fwd}'
+                        GROUP BY `거래처명`
+                        ORDER BY SUM(`매출액`) DESC LIMIT 8
+                    """)
+                    for r in sub_rows:
+                        n = str(r["name"])
+                        if n not in seen and float(r.get("sales", 0)) > 0:
+                            seen.add(n)
+                            results.append((n, float(r["sales"]), "단일 거래처"))
+
+    results.sort(key=lambda x: x[1], reverse=True)
+    return results[:8]
 
 
 def _build_monthly_sales_markdown(rows: list[dict]) -> str:
@@ -2634,6 +2751,8 @@ def _register_and_callback(
 # ─── 개인형 세부내역 ────────────────────────────────────────
 _user_last_sp: dict[str, str] = {}    # user_id → 최근 조회 영업사원명(공백제거)
 _user_last_sales: dict[str, dict] = {}  # user_id → {target_key, target_name, yearmonth}
+_user_pending_confirm: dict[str, dict] = {}    # user_id → {exact_name, month_num, yearmonth, level_label}
+_user_pending_candidates: dict[str, dict] = {} # user_id → {이름 → level_label}
 
 _PERSONAL_DETAIL_PATTERN = re.compile(
     r'개인형\s*(세부|내역|상세|세부내역|디테일|목록)',
@@ -3343,10 +3462,10 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                         _send_kakao_callback(callback_url,
                             f"'{_br_name}'와(과) 유사한 브랜드가 여러 개 있습니다.\n{options}\n\n정확한 브랜드명을 입력해주세요.",
                             "브랜드매출")
-                    elif _br_res:
-                        _br_matched, _br_val = _br_res
+                    elif isinstance(_br_res, tuple):
+                        _br_matched, _br_val, _br_level = _br_res
                         _send_kakao_callback_qr(callback_url,
-                            f"{_br_matched}의 {_br_date_label} 매출액은 {_format_value(_br_val)}억원입니다.",
+                            f"{_br_matched}의 {_br_date_label} 매출액은 {_format_value(_br_val)}억원입니다.\n📌 집계단위: {_br_level}",
                             _SALES_FOLLOW_QR, "브랜드매출")
                     else:
                         _send_kakao_callback_qr(callback_url,
@@ -3374,7 +3493,8 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
         bm_m = _BRAND_SALES_PATTERN.search(query_for_brand)
         if bm_m:
             if bm_m.group(1) and bm_m.group(2):
-                brand_name = bm_m.group(1).strip()
+                _prefix    = query_for_brand[:bm_m.start()].strip()
+                brand_name = (f"{_prefix} {bm_m.group(1).strip()}".strip() if _prefix else bm_m.group(1).strip())
                 month_num  = int(bm_m.group(2))
             elif bm_m.group(3) and bm_m.group(4):
                 month_num  = int(bm_m.group(3))
@@ -3403,11 +3523,12 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                             f"{options}\n\n"
                             f"정확한 브랜드명을 입력해주세요. (예: \"{res[0]} {month_num}월 매출\")"
                         )
-                    elif res:
-                        matched_name, sales = res
+                    elif isinstance(res, tuple):
+                        matched_name, sales, level_label = res
                         card = (
                             f"{matched_name}의 {month_num}월 매출액은 "
                             f"{_format_value(sales)}억원입니다."
+                            f"\n📌 집계단위: {level_label}"
                         )
                         # 후속 증가사유 질문용 컨텍스트
                         _user_last_sales[user_id] = {
@@ -3417,11 +3538,40 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                         }
                         _send_kakao_callback_qr(callback_url, card, _SALES_FOLLOW_QR, "브랜드매출")
                     else:
-                        card = (
-                            f"'{brand_name}' ZC본부명을 찾을 수 없습니다.\n"
-                            f"정확한 브랜드명으로 다시 입력해주세요."
-                        )
-                        _send_kakao_callback(callback_url, card, "브랜드매출")
+                        # None → 퍼지 검색
+                        _candidates = _fuzzy_search_candidates(brand_name, yearmonth)
+                        if not _candidates:
+                            card = (
+                                f"'{brand_name}' 관련 항목을 찾을 수 없습니다.\n"
+                                f"정확한 브랜드명으로 다시 입력해주세요."
+                            )
+                            _send_kakao_callback(callback_url, card, "브랜드매출")
+                        elif len(_candidates) == 1:
+                            exact_name, _, exact_level = _candidates[0]
+                            _user_pending_confirm[user_id] = {
+                                "exact_name": exact_name,
+                                "month_num": month_num,
+                                "yearmonth": yearmonth,
+                                "level_label": exact_level,
+                            }
+                            _send_kakao_callback_qr(
+                                callback_url,
+                                f"'{exact_name}'을(를) 원하시는 것 맞나요?",
+                                [{"label": "예", "action": "message", "messageText": "예"},
+                                 {"label": "아니오", "action": "message", "messageText": "아니오"}],
+                                "브랜드매출",
+                            )
+                        else:
+                            _user_pending_candidates[user_id] = {
+                                c[0]: c[2] for c in _candidates
+                            }
+                            qr_btns = [{"label": c[0], "action": "message", "messageText": c[0]} for c in _candidates]
+                            _send_kakao_callback_qr(
+                                callback_url,
+                                f"'{brand_name}'과(와) 유사한 항목입니다. 하나를 선택해주세요.",
+                                qr_btns,
+                                "브랜드매출",
+                            )
                 except Exception as e:
                     logger.error(f"[콜백] 브랜드매출 직접 조회 오류: {e}")
                     _send_kakao_callback(callback_url, "⚠️ 브랜드 매출 조회 중 오류가 발생했습니다.", "브랜드매출")
@@ -3453,11 +3603,12 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                             )
                             _send_kakao_callback(callback_url, card, "브랜드매출")
                             return
-                        elif res:
-                            matched_name, sales = res
+                        elif isinstance(res, tuple):
+                            matched_name, sales, level_label = res
                             card = (
                                 f"{matched_name}의 {_mo_now}월 매출액은 "
                                 f"{_format_value(sales)}억원입니다."
+                                f"\n📌 집계단위: {level_label}"
                             )
                             _user_last_sales[user_id] = {
                                 "target_key": "사업부명",
@@ -3466,6 +3617,39 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                             }
                             _send_kakao_callback_qr(callback_url, card, _SALES_FOLLOW_QR, "브랜드매출")
                             return
+                        else:
+                            # None → 퍼지 검색
+                            _candidates2 = _fuzzy_search_candidates(_bnm, _ym_now)
+                            if not _candidates2:
+                                pass  # fall through to 영업사원 총매출 bypass
+                            elif len(_candidates2) == 1:
+                                exact_name2, _, exact_level2 = _candidates2[0]
+                                _user_pending_confirm[user_id] = {
+                                    "exact_name": exact_name2,
+                                    "month_num": _mo_now,
+                                    "yearmonth": _ym_now,
+                                    "level_label": exact_level2,
+                                }
+                                _send_kakao_callback_qr(
+                                    callback_url,
+                                    f"'{exact_name2}'을(를) 원하시는 것 맞나요?",
+                                    [{"label": "예", "action": "message", "messageText": "예"},
+                                     {"label": "아니오", "action": "message", "messageText": "아니오"}],
+                                    "브랜드매출",
+                                )
+                                return
+                            else:
+                                _user_pending_candidates[user_id] = {
+                                    c[0]: c[2] for c in _candidates2
+                                }
+                                qr_btns2 = [{"label": c[0], "action": "message", "messageText": c[0]} for c in _candidates2]
+                                _send_kakao_callback_qr(
+                                    callback_url,
+                                    f"'{_bnm}'과(와) 유사한 항목입니다. 하나를 선택해주세요.",
+                                    qr_btns2,
+                                    "브랜드매출",
+                                )
+                                return
                         # res is None → ZC 없음 → fall through to 영업사원 총매출 bypass
                     except Exception as e:
                         logger.error(f"[콜백] 브랜드매출(월미명시) 오류: {e}")
@@ -4079,6 +4263,103 @@ async def kakao_skill(request: Request, background_tasks: BackgroundTasks):
         _reg_info = _reg_users.get(user_id, {})
         _reg_name = _reg_info.get("name", "")
         _reg_team = _reg_info.get("team", "")
+
+        # ── 3-0z) 퍼지 확인 인터셉터 (예/아니오 + 다수후보 직접조회) ──
+        # A) 다수 후보: 버튼에서 후보명 직접 선택
+        if user_id in _user_pending_candidates:
+            _cands = _user_pending_candidates[user_id]
+            _matched_cand = None
+            for _cand_name in _cands:
+                if _cand_name in utterance or utterance in _cand_name:
+                    _matched_cand = _cand_name
+                    break
+            if _matched_cand:
+                _cand_level = _cands[_matched_cand]
+                _user_pending_candidates.pop(user_id, None)
+                _ym_now2 = time.strftime("%Y%m")
+                _mo_now2 = int(time.strftime("%m"))
+                # 직접 쿼리
+                try:
+                    if _cand_level == "단일 거래처":
+                        _c_rows = _safe_query(f"""
+                            SELECT ROUND(COALESCE(SUM(`매출액`), 0) / 1000000, 2) AS sales
+                            FROM {T_MAIN}
+                            WHERE `사업부명` = '외식식재사업부'
+                              AND `거래처명` = '{_matched_cand}'
+                              AND `년월` = '{_ym_now2}'
+                        """)
+                    elif _cand_level == "거래처(ZA)":
+                        _c_rows = _safe_query(f"""
+                            SELECT ROUND(COALESCE(SUM(`매출액`), 0) / 1000000, 2) AS sales
+                            FROM {T_MAIN}
+                            WHERE `사업부명` = '외식식재사업부'
+                              AND `ZA거래처명` = '{_matched_cand}'
+                              AND `년월` = '{_ym_now2}'
+                        """)
+                    else:
+                        _c_rows = _safe_query(f"""
+                            SELECT ROUND(COALESCE(SUM(`매출액`), 0) / 1000000, 2) AS sales
+                            FROM {T_MAIN}
+                            WHERE `사업부명` = '외식식재사업부'
+                              AND `ZC본부명` = '{_matched_cand}'
+                              AND `년월` = '{_ym_now2}'
+                        """)
+                    _c_sales = float(_c_rows[0]["sales"]) if _c_rows else 0.0
+                    _c_card = (
+                        f"{_matched_cand}의 {_mo_now2}월 매출액은 "
+                        f"{_format_value(_c_sales)}억원입니다."
+                        f"\n📌 집계단위: {_cand_level}"
+                    )
+                    return _kakao_quickreply(_c_card, _SALES_FOLLOW_QR)
+                except Exception as _e_ci:
+                    logger.error(f"[퍼지인터셉터] 다수후보 직접조회 오류: {_e_ci}")
+
+        # B) 예/아니오 처리
+        if user_id in _user_pending_confirm:
+            _utt_s = utterance.strip()
+            if re.match(r'^(예|네|ㅇ|ㅇㅇ|응|맞아|맞아요|맞습)[\s!~]*$', _utt_s):
+                _pending = _user_pending_confirm.pop(user_id)
+                _p_name  = _pending["exact_name"]
+                _p_ym    = _pending["yearmonth"]
+                _p_mo    = _pending["month_num"]
+                _p_level = _pending["level_label"]
+                try:
+                    if _p_level == "단일 거래처":
+                        _p_rows = _safe_query(f"""
+                            SELECT ROUND(COALESCE(SUM(`매출액`), 0) / 1000000, 2) AS sales
+                            FROM {T_MAIN}
+                            WHERE `사업부명` = '외식식재사업부'
+                              AND `거래처명` = '{_p_name}'
+                              AND `년월` = '{_p_ym}'
+                        """)
+                    elif _p_level == "거래처(ZA)":
+                        _p_rows = _safe_query(f"""
+                            SELECT ROUND(COALESCE(SUM(`매출액`), 0) / 1000000, 2) AS sales
+                            FROM {T_MAIN}
+                            WHERE `사업부명` = '외식식재사업부'
+                              AND `ZA거래처명` = '{_p_name}'
+                              AND `년월` = '{_p_ym}'
+                        """)
+                    else:
+                        _p_rows = _safe_query(f"""
+                            SELECT ROUND(COALESCE(SUM(`매출액`), 0) / 1000000, 2) AS sales
+                            FROM {T_MAIN}
+                            WHERE `사업부명` = '외식식재사업부'
+                              AND `ZC본부명` = '{_p_name}'
+                              AND `년월` = '{_p_ym}'
+                        """)
+                    _p_sales = float(_p_rows[0]["sales"]) if _p_rows else 0.0
+                    _p_card = (
+                        f"{_p_name}의 {_p_mo}월 매출액은 "
+                        f"{_format_value(_p_sales)}억원입니다."
+                        f"\n📌 집계단위: {_p_level}"
+                    )
+                    return _kakao_quickreply(_p_card, _SALES_FOLLOW_QR)
+                except Exception as _e_pi:
+                    logger.error(f"[퍼지인터셉터] 예/아니오 직접조회 오류: {_e_pi}")
+            elif re.match(r'^(아니|아니오|ㄴ|취소)[\s!~]*$', _utt_s):
+                _user_pending_confirm.pop(user_id, None)
+                return _kakao_quickreply("다시 정확한 이름으로 입력해주세요.", _MAIN_MENU_QR)
 
         # ── 3-1) 인사/잡담 즉시 응답 (DB/Dify 불필요) ──
         _GREET_M = re.search(
