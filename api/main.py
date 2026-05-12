@@ -4497,6 +4497,9 @@ async def kakao_skill(request: Request, background_tasks: BackgroundTasks):
                             f"{_format_value(_c_sales)}백만원입니다."
                             f"\n📌 집계단위: {_cand_level}"
                         )
+                    if callback_url:
+                        _send_kakao_callback_qr(callback_url, _c_card, _SALES_FOLLOW_QR, "브랜드매출")
+                        return {"version": "2.0", "useCallback": True}
                     return _kakao_quickreply(_c_card, _SALES_FOLLOW_QR)
                 except Exception as _e_ci:
                     logger.error(f"[퍼지인터셉터] 다수후보 직접조회 오류: {_e_ci}")
@@ -4536,16 +4539,37 @@ async def kakao_skill(request: Request, background_tasks: BackgroundTasks):
                               AND `년월` = '{_p_ym}'
                         """)
                     _p_sales = float(_p_rows[0]["sales"]) if _p_rows else 0.0
-                    _p_card = (
-                        f"{_p_name}의 {_p_mo}월 매출액은 "
-                        f"{_format_value(_p_sales)}백만원입니다."
-                        f"\n📌 집계단위: {_p_level}"
-                    )
+                    _p_cur_ym = time.strftime("%Y%m")
+                    if _p_ym == _p_cur_ym:
+                        try:
+                            _p_today = _dt_mod.date.today()
+                            _p_card = _build_brand_forecast_card(
+                                _p_name, _p_sales, _p_ym, _p_today
+                            )
+                            _p_card += f"\n📌 집계단위: {_p_level}"
+                        except Exception:
+                            _p_card = (
+                                f"{_p_name}의 {_p_mo}월 매출액은 "
+                                f"{_format_value(_p_sales)}백만원입니다."
+                                f"\n📌 집계단위: {_p_level}"
+                            )
+                    else:
+                        _p_card = (
+                            f"{_p_name}의 {_p_mo}월 매출액은 "
+                            f"{_format_value(_p_sales)}백만원입니다."
+                            f"\n📌 집계단위: {_p_level}"
+                        )
+                    if callback_url:
+                        _send_kakao_callback_qr(callback_url, _p_card, _SALES_FOLLOW_QR, "브랜드매출")
+                        return {"version": "2.0", "useCallback": True}
                     return _kakao_quickreply(_p_card, _SALES_FOLLOW_QR)
                 except Exception as _e_pi:
                     logger.error(f"[퍼지인터셉터] 예/아니오 직접조회 오류: {_e_pi}")
             elif re.match(r'^(아니|아니오|ㄴ|취소)[\s!~]*$', _utt_s):
                 _user_pending_confirm.pop(user_id, None)
+                if callback_url:
+                    _send_kakao_callback_qr(callback_url, "다시 정확한 이름으로 입력해주세요.", _MAIN_MENU_QR, "안내")
+                    return {"version": "2.0", "useCallback": True}
                 return _kakao_quickreply("다시 정확한 이름으로 입력해주세요.", _MAIN_MENU_QR)
 
         # ── 3-1) 인사/잡담 즉시 응답 (DB/Dify 불필요) ──
