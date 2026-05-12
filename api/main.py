@@ -12,6 +12,8 @@ from databricks.sdk import WorkspaceClient
 from databricks import sql as dbsql
 import os, logging, time, hashlib
 import re
+import calendar
+import datetime as _dt_mod
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 import urllib.request
@@ -937,6 +939,119 @@ def _fetch_brand_daily_sales(brand_name: str, date_str: str) -> tuple[str, float
     if len(like_rows) == 1:
         return str(like_rows[0]["name"]), float(like_rows[0]["sales"]), "브랜드(ZC)"
     return [str(r["name"]) for r in like_rows]
+
+
+def _build_brand_forecast_card(matched_name: str, sales_so_far: float,
+                               ym_now: str, today: _dt_mod.date) -> str:
+    """당월 누계+v7 예측+비교 카드 문자열 반환.
+    sales_so_far : 억원 단위 (월별 집계 실적)
+    ym_now       : 'YYYYMM'
+    today        : 예측 기준일
+    """
+    mo   = today.month
+    year = today.year
+    day  = today.day
+
+    # v7 예측 호출
+    fc_result = None
+    try:
+        import forecast_engine_v7 as _fe_v7
+        fc_result = _fe_v7.predict_single_brand(matched_name, today, _safe_query)
+    except Exception as _e:
+        logger.warning(f"[\uc608\uce21\uce74\ub4dc] predict_single_brand \uc2e4\ud328: {_e}")
+
+    prev_date = (today.replace(day=1) - _dt_mod.timedelta(days=1))
+    prev_ym   = prev_date.strftime("%Y%m")
+    prev_mo   = prev_date.month
+    yoy_ym    = f"{year - 1}{mo:02d}"
+
+    # 전월 전체 매출
+    prev_total = 0.0
+    try:
+        r = _safe_query(f"""
+            SELECT ROUND(COALESCE(SUM(`\ub9e4\ucd9c\uc561`),0)/1000000,2) AS sales
+            FROM {T_MAIN}
+            WHERE `\uc0ac\uc5c5\ubd80\uba85`='\uc678\uc2dd\uc2dd\uc7ac\uc0ac\uc5c5\ubd80' AND `ZC\ubcf8\ubd80\uba85`='{matched_name}'
+              AND `\ub144\uc6d4`='{prev_ym}'""");
+        prev_total = float(r[0]["sales"]) if r else 0.0
+    except Exception: pass
+
+    # 전년동월 전체 매출
+    yoy_total = 0.0
+    try:
+        r = _safe_query(f"""
+            SELECT ROUND(COALESCE(SUM(`\ub9e4\ucd9c\uc561`),0)/1000000,2) AS sales
+            FROM {T_MAIN}
+            WHERE `\uc0ac\uc5c5\ubd80\uba85`='\uc678\uc2dd\uc2dd\uc7ac\uc0ac\uc5c5\ubd80' AND `ZC\ubcf8\ubd80\uba85`='{matched_name}'
+              AND `\ub144\uc6d4`='{yoy_ym}'""");
+        yoy_total = float(r[0]["sales"]) if r else 0.0
+    except Exception: pass
+
+    # 올해 YTD (완성 월 Jan~prev + 당월 누계)
+    ytd_this = sales_so_far
+    if mo > 1:
+        try:
+            r = _safe_query(f"""
+                SELECT ROUND(COALESCE(SUM(`\ub9e4\ucd9c\uc561`),0)/1000000,2) AS sales
+                FROM {T_MAIN}
+                WHERE `\uc0ac\uc5c5\ubd80\uba85`='\uc678\uc2dd\uc2dd\uc7ac\uc0ac\uc5c5\ubd80' AND `ZC\ubcf8\ubd80\uba85`='{matched_name}'
+                  AND `\ub144\uc6d4` >= '{year}01' AND `\ub144\uc6d4` < '{ym_now}'""");
+            ytd_this += float(r[0]["sales"]) if r else 0.0
+        except Exception: pass
+
+    # 전년 동기 YTD (Jan~prev월 + 당월 1~day일)
+    ytd_last = 0.0
+    try:
+        if mo > 1:
+            r = _safe_query(f"""
+                SELECT ROUND(COALESCE(SUM(`\ub9e4\ucd9c\uc561`),0)/1000000,2) AS sales
+                FROM {T_MAIN}
+                WHERE `\uc0ac\uc5c5\ubd80\uba85`='\uc678\uc2dd\uc2dd\uc7ac\uc0ac\uc5c5\ubd80' AND `ZC\ubcf8\ubd80\uba85`='{matched_name}'
+                  AND `\ub144\uc6d4` >= '{year-1}01' AND `\ub144\uc6d4` < '{yoy_ym}'""");
+            ytd_last += float(r[0]["sales"]) if r else 0.0
+        day_from = f"{year-1}{mo:02d}01"
+        day_to   = f"{year-1}{mo:02d}{day:02d}"
+        r = _safe_query(f"""
+            SELECT ROUND(COALESCE(SUM(`\ub9e4\ucd9c\uc561`),0)/1000000,2) AS sales
+            FROM {T_MAIN}
+            WHERE `\uc0ac\uc5c5\ubd80\uba85`='\uc678\uc2dd\uc2dd\uc7ac\uc0ac\uc5c5\ubd80' AND `ZC\ubcf8\ubd80\uba85`='{matched_name}'
+              AND `\ub300\uae08\uccad\uad6c\uc77c` BETWEEN '{day_from}' AND '{day_to}'""");
+        ytd_last += float(r[0]["sales"]) if r else 0.0
+    except Exception: pass
+
+    # 예측값 결정
+    if fc_result and fc_result.get("forecast") is not None:
+        forecast = fc_result["forecast"]
+    else:
+        days_in_m = calendar.monthrange(year, mo)[1]
+        forecast  = (sales_so_far / day * days_in_m) if day > 0 else sales_so_far
+
+    def _pct(new_val, old_val):
+        if old_val <= 0: return "N/A"
+        rate = (new_val - old_val) / old_val * 100
+        arrow = "↑" if rate >= 0 else "↓"
+        return f"{rate:+.1f}% {arrow}"
+
+    so_far_s   = f"{_format_value(sales_so_far)}\ubc31\ub9cc"
+    forecast_s = f"{_format_value(forecast)}\ubc31\ub9cc"
+    prev_s     = f"{_format_value(prev_total)}\ubc31\ub9cc"
+    yoy_s      = f"{_format_value(yoy_total)}\ubc31\ub9cc"
+    ytd_this_s = f"{_format_value(ytd_this)}\ubc31\ub9cc"
+    ytd_last_s = f"{_format_value(ytd_last)}\ubc31\ub9cc"
+
+    lines = [
+        f"\U0001f4ca {matched_name} \ub9e4\ucd9c \ud604\ud669 ({mo}\uc6d4 1~{day}\uc77c \uae30\uc900)\n",
+        f"\uc774\ubc88\ub2ec \ub204\uacc4       {so_far_s}",
+        f"\uc774\ubc88\ub2ec \uc608\uc0c1       {forecast_s}",
+        "",
+        f"\uc804\uc6d4({prev_mo}\uc6d4) \u6bd4      {prev_s} \u2192 {_pct(forecast, prev_total)}  (\uc608\uc0c1 \uae30\uc900)",
+        f"\uc804\ub144 \ub3d9\uc6d4 \u6bd4      {yoy_s} \u2192 {_pct(forecast, yoy_total)}  (\uc608\uc0c1 \uae30\uc900)",
+        "",
+        "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",
+        f"\uc62c\ud574 \ub204\uacc4         {ytd_this_s} (1\uc6d4~{mo}\uc6d4 {day}\uc77c)",
+        f"\uc804\ub144 \ub3d9\uae30 \u6bd4      {ytd_last_s} \u2192 {_pct(ytd_this, ytd_last)}",
+    ]
+    return "\n".join(lines)
 
 
 def _fetch_brand_monthly_sales(brand_name: str, yearmonth: str) -> tuple[str, float, str] | None | list[str]:
@@ -3623,11 +3738,19 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                             return
                         elif isinstance(res, tuple):
                             matched_name, sales, level_label = res
-                            card = (
-                                f"{matched_name}의 {_mo_now}월 매출액은 "
-                                f"{_format_value(sales)}백만원입니다."
-                                f"\n📌 집계단위: {level_label}"
-                            )
+                            _today_dt = _dt_mod.date.today()
+                            try:
+                                card = _build_brand_forecast_card(
+                                    matched_name, sales, _ym_now, _today_dt
+                                )
+                                card += f"\n📌 집계단위: {level_label}"
+                            except Exception as _ce:
+                                logger.warning(f"[브랜드카드] 빌드 실패({_ce}), 기본 포맷 사용")
+                                card = (
+                                    f"{matched_name}의 {_mo_now}월 매출액은 "
+                                    f"{_format_value(sales)}백만원입니다."
+                                    f"\n📌 집계단위: {level_label}"
+                                )
                             _user_last_sales[user_id] = {
                                 "target_key": "사업부명",
                                 "target_name": "외식식재사업부",

@@ -56,7 +56,7 @@ from collections import defaultdict
 
 sys.path.insert(0, os.path.dirname(__file__))
 from dotenv import load_dotenv; load_dotenv()
-from main import run_query
+# run_query 는 메인 루프 또는 predict_single_brand() 호출 시 파라미터로 전달
 
 # ──────────────────────────────────────────────
 # 설정
@@ -839,13 +839,148 @@ def backtest(actual, brand_type):
     mape = {k: (sum(v) / len(v) if v else None) for k, v in errs.items()}
     return mape, detail
 
+
+# ══════════════════════════════════════════════════════════════════════
+# 단일 브랜드 예측 API  (main.py 에서 임포트하여 사용)
+# ══════════════════════════════════════════════════════════════════════
+T_MAIN_FE = "h_hmfo.gd_dcube.`01_sap_sales_custmasters`"
+
+def predict_single_brand(zc_name: str, today: date, run_q) -> dict | None:
+    """
+    zc_name : ZC본부명 (정확히 일치)
+    today   : 예측 기준일 (당월 경과일수 결정)
+    run_q   : SQL 실행 callable (→ list[dict]), e.g. main._safe_query
+    Returns : {
+        'forecast'   : float (억원),   # 당월 최종 예측
+        'so_far'     : float (억원),   # 당월 현재까지 실적
+        'stat_pred'  : float | None,   # 통계 앙상블 단독 예측
+        'brand_type' : str,
+        'days_so_far': int,
+    } | None (데이터 없음)
+    """
+    cur_ym        = today.strftime("%Y%m")
+    days_so_far   = today.day
+    days_in_month = calendar.monthrange(today.year, today.month)[1]
+
+    # 월별 매출+점포 (~ cur_ym 포함)
+    sql1 = f"""
+SELECT `년월`,
+       SUM(`매출액`) / 1000000 AS sales,
+       COUNT(DISTINCT `ZB본지점`) AS stores
+FROM {T_MAIN_FE}
+WHERE `사업부명` = '외식식재사업부' AND `ZC본부명` = '{zc_name}'
+  AND `년월` <= '{cur_ym}'
+GROUP BY `년월` ORDER BY `년월`
+"""
+    try:
+        rows1 = run_q(sql1)
+    except Exception:
+        return None
+    actual_raw = {}
+    for r in rows1:
+        s  = float(r.get("sales") or 0)
+        st = int(r.get("stores") or 0)
+        if st == 0: continue
+        actual_raw[str(r["년월"])] = {"sales": s, "stores": st, "per_store": s / st}
+    if not actual_raw:
+        return None
+
+    # 당월 so_far (월 집계)
+    so_far_rows = [v["sales"] for k, v in actual_raw.items() if k == cur_ym]
+    so_far = so_far_rows[0] if so_far_rows else 0.0
+
+    # 통계 학습은 cur_ym 제외
+    actual_for_stat = {k: v for k, v in actual_raw.items() if k < cur_ym}
+    if not actual_for_stat:
+        return {"forecast": so_far, "so_far": so_far, "stat_pred": None,
+                "brand_type": "NASCENT", "days_so_far": days_so_far}
+
+    actual, _ = preprocess_actual(actual_for_stat)
+    if not actual:
+        return None
+    brand_type, metrics = classify_brand(actual)
+
+    # 직전 6개월 일별 (DOW채움 + DOW가중 런레이트용)
+    last_6m = add_months(cur_ym, -6)
+    sql3 = f"""
+SELECT `대금청구일` AS date, SUM(`매출액`)/1000000 AS sales
+FROM {T_MAIN_FE}
+WHERE `사업부명` = '외식식재사업부' AND `ZC본부명` = '{zc_name}'
+  AND `년월` >= '{last_6m}' AND `년월` < '{cur_ym}'
+GROUP BY `대금청구일` ORDER BY `대금청구일`
+"""
+    try:
+        rows3 = run_q(sql3)
+        dow_weights = compute_dow_weights(rows3)
+    except Exception:
+        rows3, dow_weights = [], None
+
+    stat_pre = pred_ensemble(actual, cur_ym, brand_type)
+
+    # DOW 채움 (월초 소표본)
+    fill_rr, fill_meta = None, {}
+    if days_so_far <= FILL_THRESHOLD and rows3:
+        fill_rr, fill_meta = pred_dow_fill(so_far, rows3, today, brand_type)
+
+    # cap 체크
+    if fill_rr is not None and stat_pre is not None and stat_pre > 0:
+        ratio = fill_rr / stat_pre
+        if ratio > FILL_CAP_RATIO or ratio < FILL_FLOOR_RATIO:
+            fill_rr, fill_meta = None, {}
+
+    # 적응형 블렌딩
+    effective_fill_w = 0.0
+    if fill_rr is not None and stat_pre is not None and stat_pre > 0:
+        divergence       = abs(fill_rr - stat_pre) / stat_pre
+        fill_conf        = max(0.0, 1.0 - divergence)
+        effective_fill_w = _get_fill_blend_w(days_so_far) * fill_conf
+
+    # DOW 가중 런레이트 (v6 기존)
+    dow_rr  = pred_run_rate_dow(so_far, today, dow_weights) if dow_weights else None
+    USE_DOW = (dow_rr is not None and (
+        brand_type == "NASCENT" or
+        metrics["n_months"] < 12 or
+        metrics["store_last"] < 20
+    ))
+
+    # 최종 예측
+    if fill_rr is not None and stat_pre is not None and effective_fill_w > 0:
+        forecast = stat_pre * (1 - effective_fill_w) + fill_rr * effective_fill_w
+    else:
+        day_ratio = days_so_far / days_in_month
+        rr_weight = day_ratio ** 1.5
+        run_rate  = dow_rr if USE_DOW else (
+            (so_far / days_so_far * days_in_month) if days_so_far else 0
+        )
+        if stat_pre is None:
+            forecast = run_rate
+        else:
+            forecast = stat_pre * (1 - rr_weight) + run_rate * rr_weight
+
+    return {
+        "forecast":    forecast,
+        "so_far":      so_far,
+        "stat_pred":   stat_pre,
+        "brand_type":  brand_type,
+        "days_so_far": days_so_far,
+    }
+
+
 # ──────────────────────────────────────────────
-# 메인 루프
+# 메인 루프  (스크립트 직접 실행 시에만 동작)
 # ──────────────────────────────────────────────
+_SCRIPT_MODE = __name__ == '__main__'
+if _SCRIPT_MODE:
+    from main import run_query  # noqa: E402
+else:
+    run_query = None  # type: ignore[assignment]
+
 summary_rows   = []
 anomaly_report = []
 
 for ZC_CODE, BRAND_NAME in BRANDS:
+    if not _SCRIPT_MODE:
+        break  # 모듈로 임포트 시 루프 본문 실행 안 함
     # SQL1: 월별 매출+점포
     sql1 = f"""
 SELECT `년월`,
@@ -1070,66 +1205,61 @@ GROUP BY `대금청구일` ORDER BY `대금청구일`
     })
 
 # ═══════════════════════════════════════════════════════════════════
-# 종합 요약
+# 종합 요약 / 이상치 리포트 (스크립트 직접 실행 시에만)
 # ═══════════════════════════════════════════════════════════════════
-print(f"\n\n{'═'*140}")
-print(f"  v6 종합 요약  | 시뮬: 2026-04-14 | 백테스트: 2025.01~2026.03 | 총 {len(summary_rows)}개 브랜드")
-print(f"  v4 전처리 적용: 파일럳 첫 달 드롭 / 반월치 보정 / 단절 후 복귀 구간 정리")
-print(f"  v4 전처리 적용: 파일럿 첫 달 드롭 / 반월치 보정 / 단절 후 복귀 구간 정리")
-print(f"{'═'*140}")
-print(f"  {'브랜드':<16} {'유형':<12} {'개월':>5} {'평균YoY':>9} {'앙상블MAPE':>11} "
-      f"{'예측(4/14)':>10} {'실제202604':>11} {'오차':>7} {'드롭월':>5}")
-print(f"  {'─'*106}")
-for r in summary_rows:
-    drop_str = f"{r['dropped']}개월" if r['dropped'] > 0 else "—"
-    print(f"  {r['brand']:<16} {r['type']:<12} {r['months']:>5} {r['avg_yoy']:>9} "
-          f"{r['ens_mape']:>11} {r['final_pred']:>10} {r['actual_apr']:>11} {r['apr_err']:>7} {drop_str:>5}")
+if _SCRIPT_MODE:
+    print(f"\n\n{'═'*140}")
+    print(f"  v6 종합 요약  | 시뮬: 2026-04-14 | 백테스트: 2025.01~2026.03 | 총 {len(summary_rows)}개 브랜드")
+    print(f"  v4 전처리 적용: 파일럳 첫 달 드롭 / 반월치 보정 / 단절 후 복귀 구간 정리")
+    print(f"  v4 전처리 적용: 파일럿 첫 달 드롭 / 반월치 보정 / 단절 후 복귀 구간 정리")
+    print(f"{'═'*140}")
+    print(f"  {'브랜드':<16} {'유형':<12} {'개월':>5} {'평균YoY':>9} {'앙상블MAPE':>11} "
+          f"{'예측(4/14)':>10} {'실제202604':>11} {'오차':>7} {'드롭월':>5}")
+    print(f"  {'─'*106}")
+    for r in summary_rows:
+        drop_str = f"{r['dropped']}개월" if r['dropped'] > 0 else "—"
+        print(f"  {r['brand']:<16} {r['type']:<12} {r['months']:>5} {r['avg_yoy']:>9} "
+              f"{r['ens_mape']:>11} {r['final_pred']:>10} {r['actual_apr']:>11} {r['apr_err']:>7} {drop_str:>5}")
 
-# 오차 집계
-compare_rows = [r for r in summary_rows if r['apr_err'] not in ("—","N/A")]
-accurate    = [r for r in compare_rows if abs(float(r['apr_err'].rstrip('%'))) <= 5]
-near_ok     = [r for r in compare_rows if 5 < abs(float(r['apr_err'].rstrip('%'))) <= 10]
-problematic = [r for r in compare_rows if abs(float(r['apr_err'].rstrip('%'))) > 10]
+    compare_rows = [r for r in summary_rows if r['apr_err'] not in ("—","N/A")]
+    accurate    = [r for r in compare_rows if abs(float(r['apr_err'].rstrip('%'))) <= 5]
+    near_ok     = [r for r in compare_rows if 5 < abs(float(r['apr_err'].rstrip('%'))) <= 10]
+    problematic = [r for r in compare_rows if abs(float(r['apr_err'].rstrip('%'))) > 10]
 
-print(f"\n  ■ 202604 예측 정확도:")
-print(f"    ✓ 오차≤5%({len(accurate)}개): {', '.join(r['brand'] for r in accurate)}")
-print(f"    △ 5~10%({len(near_ok)}개):  {', '.join(r['brand']+'('+r['apr_err']+')' for r in near_ok)}")
-print(f"    ✗ 10%초과({len(problematic)}개): {', '.join(r['brand']+'('+r['apr_err']+')' for r in problematic)}")
+    print(f"\n  ■ 202604 예측 정확도:")
+    print(f"    ✓ 오차≤5%({len(accurate)}개): {', '.join(r['brand'] for r in accurate)}")
+    print(f"    △ 5~10%({len(near_ok)}개):  {', '.join(r['brand']+'('+r['apr_err']+')' for r in near_ok)}")
+    print(f"    ✗ 10%초과({len(problematic)}개): {', '.join(r['brand']+'('+r['apr_err']+')' for r in problematic)}")
 
-# 유형별 MAPE
-type_mapes = defaultdict(list)
-for r in summary_rows:
-    if r['ens_mape'] != "N/A":
-        type_mapes[r['type']].append(float(r['ens_mape'].rstrip('%')))
-print(f"\n  ■ 유형별 앙상블 MAPE:")
-for t, vals in sorted(type_mapes.items()):
-    marker = " ← 개선필요" if sum(vals)/len(vals) > 15 else ""
-    print(f"    {t:<12} avg={sum(vals)/len(vals):.1f}%  ({len(vals)}개){marker}")
+    type_mapes = defaultdict(list)
+    for r in summary_rows:
+        if r['ens_mape'] != "N/A":
+            type_mapes[r['type']].append(float(r['ens_mape'].rstrip('%')))
+    print(f"\n  ■ 유형별 앙상블 MAPE:")
+    for t, vals in sorted(type_mapes.items()):
+        marker = " ← 개선필요" if sum(vals)/len(vals) > 15 else ""
+        print(f"    {t:<12} avg={sum(vals)/len(vals):.1f}%  ({len(vals)}개){marker}")
 
-# v4 전처리 요약
-dropped_brands = [r for r in summary_rows if r['dropped'] > 0]
-if dropped_brands:
-    print(f"\n  ■ v4 전처리 드롭 현황 ({len(dropped_brands)}개 브랜드):")
-    for r in dropped_brands:
-        print(f"    {r['brand']}: {r['dropped']}개월 드롭")
+    dropped_brands = [r for r in summary_rows if r['dropped'] > 0]
+    if dropped_brands:
+        print(f"\n  ■ v4 전처리 드롭 현황 ({len(dropped_brands)}개 브랜드):")
+        for r in dropped_brands:
+            print(f"    {r['brand']}: {r['dropped']}개월 드롭")
 
-# ═══════════════════════════════════════════════════════════════════
-# 이상치 전체 리포트
-# ═══════════════════════════════════════════════════════════════════
-print(f"\n\n{'░'*140}")
-print(f"  [이상치 감지 리포트]  v4: 임계 완화(YoY±100%, MoM±60%, 점포±50%), 첫 달MoM 제외")
-print(f"{'░'*140}")
-for brand, zc, btype, flags in anomaly_report:
-    btype_label = BRAND_TYPES.get(btype, btype)
-    recent_flags = [(ym, t, desc) for ym, t, desc in flags if ym >= "202401"]
-    if not recent_flags:
-        continue
-    print(f"\n  [{brand}] ({zc}) [{btype_label}]")
-    by_ym = defaultdict(list)
-    for ym, t, desc in recent_flags:
-        by_ym[ym].append(f"{t}:{desc}")
-    for ym in sorted(by_ym.keys()):
-        print(f"    {ym}  " + "  /  ".join(by_ym[ym]))
+    print(f"\n\n{'░'*140}")
+    print(f"  [이상치 감지 리포트]  v4: 임계 완화(YoY±100%, MoM±60%, 점포±50%), 첫 달MoM 제외")
+    print(f"{'░'*140}")
+    for brand, zc, btype, flags in anomaly_report:
+        btype_label = BRAND_TYPES.get(btype, btype)
+        recent_flags = [(ym, t, desc) for ym, t, desc in flags if ym >= "202401"]
+        if not recent_flags:
+            continue
+        print(f"\n  [{brand}] ({zc}) [{btype_label}]")
+        by_ym = defaultdict(list)
+        for ym, t, desc in recent_flags:
+            by_ym[ym].append(f"{t}:{desc}")
+        for ym in sorted(by_ym.keys()):
+            print(f"    {ym}  " + "  /  ".join(by_ym[ym]))
 
-print(f"\n  총 이상치 브랜드: {len([b for b,_,_,f in anomaly_report if any(ym>='202401' for ym,_,_ in f)])}개")
-print()
+    print(f"\n  총 이상치 브랜드: {len([b for b,_,_,f in anomaly_report if any(ym>='202401' for ym,_,_ in f)])}개")
+    print()
