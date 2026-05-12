@@ -3638,13 +3638,22 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                     else:
                         res = _fetch_brand_monthly_sales(brand_name, yearmonth)
                     if isinstance(res, list):
-                        # 여러 브랜드가 매칭 → 확인 질문
-                        options = "\n".join(f"  {i+1}. {n}" for i, n in enumerate(res))
+                        # 여러 브랜드가 매칭 → QR 버튼 + pending 저장
+                        _short = res[:5]
+                        options = "\n".join(f"  {i+1}. {n}" for i, n in enumerate(_short))
+                        _user_pending_candidates[user_id] = {
+                            "month_num": month_num,
+                            "yearmonth": yearmonth,
+                            "candidates": {n: "브랜드(ZC)" for n in _short},
+                        }
+                        _qr_list = [{"label": n, "action": "message", "messageText": n} for n in _short]
                         card = (
                             f"'{brand_name}'와(과) 유사한 브랜드가 여러 개 있습니다.\n"
                             f"{options}\n\n"
-                            f"정확한 브랜드명을 입력해주세요. (예: \"{res[0]} {month_num}월 매출\")"
+                            f"버튼으로 선택하거나 정확한 이름으로 입력해주세요."
                         )
+                        _send_kakao_callback_qr(callback_url, card, _qr_list, "브랜드매출")
+                        return
                     elif isinstance(res, tuple):
                         matched_name, sales, level_label = res
                         card = (
@@ -3728,13 +3737,20 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                         else:
                             res = _fetch_brand_monthly_sales(_bnm, _ym_now)
                         if isinstance(res, list):
-                            options = "\n".join(f"  {i+1}. {n}" for i, n in enumerate(res))
+                            _short2 = res[:5]
+                            options = "\n".join(f"  {i+1}. {n}" for i, n in enumerate(_short2))
+                            _user_pending_candidates[user_id] = {
+                                "month_num": _mo_now,
+                                "yearmonth": _ym_now,
+                                "candidates": {n: "브랜드(ZC)" for n in _short2},
+                            }
+                            _qr_list2 = [{"label": n, "action": "message", "messageText": n} for n in _short2]
                             card = (
                                 f"'{_bnm}'와(과) 유사한 브랜드가 여러 개 있습니다.\n"
                                 f"{options}\n\n"
-                                f"정확한 브랜드명을 입력해주세요. (예: \"{res[0]} {_mo_now}월 매출\")"
+                                f"버튼으로 선택하거나 정확한 이름으로 입력해주세요."
                             )
-                            _send_kakao_callback(callback_url, card, "브랜드매출")
+                            _send_kakao_callback_qr(callback_url, card, _qr_list2, "브랜드매출")
                             return
                         elif isinstance(res, tuple):
                             matched_name, sales, level_label = res
@@ -4459,11 +4475,28 @@ async def kakao_skill(request: Request, background_tasks: BackgroundTasks):
                               AND `년월` = '{_cand_ym}'
                         """)
                     _c_sales = float(_c_rows[0]["sales"]) if _c_rows else 0.0
-                    _c_card = (
-                        f"{_matched_cand}의 {_cand_mo}월 매출액은 "
-                        f"{_format_value(_c_sales)}백만원입니다."
-                        f"\n📌 집계단위: {_cand_level}"
-                    )
+                    _cur_ym_now = time.strftime("%Y%m")
+                    if _cand_ym == _cur_ym_now:
+                        # 이번달 → 예측 카드
+                        try:
+                            _c_today = _dt_mod.date.today()
+                            _c_card = _build_brand_forecast_card(
+                                _matched_cand, _c_sales, _cand_ym, _c_today
+                            )
+                            _c_card += f"\n📌 집계단위: {_cand_level}"
+                        except Exception as _e_cc:
+                            logger.warning(f"[pending후보] 카드빌드 실패({_e_cc})")
+                            _c_card = (
+                                f"{_matched_cand}의 {_cand_mo}월 매출액은 "
+                                f"{_format_value(_c_sales)}백만원입니다."
+                                f"\n📌 집계단위: {_cand_level}"
+                            )
+                    else:
+                        _c_card = (
+                            f"{_matched_cand}의 {_cand_mo}월 매출액은 "
+                            f"{_format_value(_c_sales)}백만원입니다."
+                            f"\n📌 집계단위: {_cand_level}"
+                        )
                     return _kakao_quickreply(_c_card, _SALES_FOLLOW_QR)
                 except Exception as _e_ci:
                     logger.error(f"[퍼지인터셉터] 다수후보 직접조회 오류: {_e_ci}")
