@@ -2866,6 +2866,116 @@ def _register_and_callback(
         )
 
 
+def _bg_candidate_query(
+    matched_cand: str, cand_level: str, cand_ym: str, cand_mo: int,
+    callback_url: str,
+):
+    """백그라운드: pending_candidates 후보 선택 후 DB 조회 → 콜백 전송"""
+    try:
+        if cand_level == "단일 거래처":
+            rows = _safe_query(f"""
+                SELECT ROUND(COALESCE(SUM(`매출액`), 0) / 1000000, 2) AS sales
+                FROM {T_MAIN}
+                WHERE `사업부명` = '외식식재사업부'
+                  AND `거래처명` = '{matched_cand}'
+                  AND `년월` = '{cand_ym}'
+            """)
+        elif cand_level == "거래처(ZA)":
+            rows = _safe_query(f"""
+                SELECT ROUND(COALESCE(SUM(`매출액`), 0) / 1000000, 2) AS sales
+                FROM {T_MAIN}
+                WHERE `사업부명` = '외식식재사업부'
+                  AND `ZA거래처명` = '{matched_cand}'
+                  AND `년월` = '{cand_ym}'
+            """)
+        else:
+            rows = _safe_query(f"""
+                SELECT ROUND(COALESCE(SUM(`매출액`), 0) / 1000000, 2) AS sales
+                FROM {T_MAIN}
+                WHERE `사업부명` = '외식식재사업부'
+                  AND `ZC본부명` = '{matched_cand}'
+                  AND `년월` = '{cand_ym}'
+            """)
+        sales = float(rows[0]["sales"]) if rows else 0.0
+        cur_ym = time.strftime("%Y%m")
+        if cand_ym == cur_ym:
+            try:
+                import datetime as _dt_bg
+                card = _build_brand_forecast_card(matched_cand, sales, cand_ym, _dt_bg.date.today())
+                card += f"\n📌 집계단위: {cand_level}"
+            except Exception:
+                card = (
+                    f"{matched_cand}의 {cand_mo}월 매출액은 "
+                    f"{_format_value(sales)}백만원입니다."
+                    f"\n📌 집계단위: {cand_level}"
+                )
+        else:
+            card = (
+                f"{matched_cand}의 {cand_mo}월 매출액은 "
+                f"{_format_value(sales)}백만원입니다."
+                f"\n📌 집계단위: {cand_level}"
+            )
+        _send_kakao_callback_qr(callback_url, card, _SALES_FOLLOW_QR, "브랜드매출")
+    except Exception as e:
+        logger.error(f"[bg_candidate] 오류: {e}")
+        _send_kakao_callback(callback_url, "⚠️ 매출 조회 중 오류가 발생했습니다.", "브랜드매출")
+
+
+def _bg_confirm_query(
+    p_name: str, p_level: str, p_ym: str, p_mo: int,
+    callback_url: str,
+):
+    """백그라운드: pending_confirm 예 응답 후 DB 조회 → 콜백 전송"""
+    try:
+        if p_level == "단일 거래처":
+            rows = _safe_query(f"""
+                SELECT ROUND(COALESCE(SUM(`매출액`), 0) / 1000000, 2) AS sales
+                FROM {T_MAIN}
+                WHERE `사업부명` = '외식식재사업부'
+                  AND `거래처명` = '{p_name}'
+                  AND `년월` = '{p_ym}'
+            """)
+        elif p_level == "거래처(ZA)":
+            rows = _safe_query(f"""
+                SELECT ROUND(COALESCE(SUM(`매출액`), 0) / 1000000, 2) AS sales
+                FROM {T_MAIN}
+                WHERE `사업부명` = '외식식재사업부'
+                  AND `ZA거래처명` = '{p_name}'
+                  AND `년월` = '{p_ym}'
+            """)
+        else:
+            rows = _safe_query(f"""
+                SELECT ROUND(COALESCE(SUM(`매출액`), 0) / 1000000, 2) AS sales
+                FROM {T_MAIN}
+                WHERE `사업부명` = '외식식재사업부'
+                  AND `ZC본부명` = '{p_name}'
+                  AND `년월` = '{p_ym}'
+            """)
+        sales = float(rows[0]["sales"]) if rows else 0.0
+        cur_ym = time.strftime("%Y%m")
+        if p_ym == cur_ym:
+            try:
+                import datetime as _dt_bg
+                card = _build_brand_forecast_card(p_name, sales, p_ym, _dt_bg.date.today())
+                card += f"\n📌 집계단위: {p_level}"
+            except Exception:
+                card = (
+                    f"{p_name}의 {p_mo}월 매출액은 "
+                    f"{_format_value(sales)}백만원입니다."
+                    f"\n📌 집계단위: {p_level}"
+                )
+        else:
+            card = (
+                f"{p_name}의 {p_mo}월 매출액은 "
+                f"{_format_value(sales)}백만원입니다."
+                f"\n📌 집계단위: {p_level}"
+            )
+        _send_kakao_callback_qr(callback_url, card, _SALES_FOLLOW_QR, "브랜드매출")
+    except Exception as e:
+        logger.error(f"[bg_confirm] 오류: {e}")
+        _send_kakao_callback(callback_url, "⚠️ 매출 조회 중 오류가 발생했습니다.", "브랜드매출")
+
+
 # ─── 개인형 세부내역 ────────────────────────────────────────
 _user_last_sp: dict[str, str] = {}    # user_id → 최근 조회 영업사원명(공백제거)
 _user_last_sales: dict[str, dict] = {}  # user_id → {target_key, target_name, yearmonth}
@@ -4448,61 +4558,16 @@ async def kakao_skill(request: Request, background_tasks: BackgroundTasks):
             if _matched_cand:
                 _cand_level = _cands[_matched_cand]
                 _user_pending_candidates.pop(user_id, None)
-                # 직접 쿼리
-                try:
-                    if _cand_level == "단일 거래처":
-                        _c_rows = _safe_query(f"""
-                            SELECT ROUND(COALESCE(SUM(`매출액`), 0) / 1000000, 2) AS sales
-                            FROM {T_MAIN}
-                            WHERE `사업부명` = '외식식재사업부'
-                              AND `거래처명` = '{_matched_cand}'
-                              AND `년월` = '{_cand_ym}'
-                        """)
-                    elif _cand_level == "거래처(ZA)":
-                        _c_rows = _safe_query(f"""
-                            SELECT ROUND(COALESCE(SUM(`매출액`), 0) / 1000000, 2) AS sales
-                            FROM {T_MAIN}
-                            WHERE `사업부명` = '외식식재사업부'
-                              AND `ZA거래처명` = '{_matched_cand}'
-                              AND `년월` = '{_cand_ym}'
-                        """)
-                    else:
-                        _c_rows = _safe_query(f"""
-                            SELECT ROUND(COALESCE(SUM(`매출액`), 0) / 1000000, 2) AS sales
-                            FROM {T_MAIN}
-                            WHERE `사업부명` = '외식식재사업부'
-                              AND `ZC본부명` = '{_matched_cand}'
-                              AND `년월` = '{_cand_ym}'
-                        """)
-                    _c_sales = float(_c_rows[0]["sales"]) if _c_rows else 0.0
-                    _cur_ym_now = time.strftime("%Y%m")
-                    if _cand_ym == _cur_ym_now:
-                        # 이번달 → 예측 카드
-                        try:
-                            _c_today = _dt_mod.date.today()
-                            _c_card = _build_brand_forecast_card(
-                                _matched_cand, _c_sales, _cand_ym, _c_today
-                            )
-                            _c_card += f"\n📌 집계단위: {_cand_level}"
-                        except Exception as _e_cc:
-                            logger.warning(f"[pending후보] 카드빌드 실패({_e_cc})")
-                            _c_card = (
-                                f"{_matched_cand}의 {_cand_mo}월 매출액은 "
-                                f"{_format_value(_c_sales)}백만원입니다."
-                                f"\n📌 집계단위: {_cand_level}"
-                            )
-                    else:
-                        _c_card = (
-                            f"{_matched_cand}의 {_cand_mo}월 매출액은 "
-                            f"{_format_value(_c_sales)}백만원입니다."
-                            f"\n📌 집계단위: {_cand_level}"
-                        )
-                    if callback_url:
-                        background_tasks.add_task(_send_kakao_callback_qr, callback_url, _c_card, _SALES_FOLLOW_QR, "브랜드매출")
-                        return {"version": "2.0", "useCallback": True}
-                    return _kakao_quickreply(_c_card, _SALES_FOLLOW_QR)
-                except Exception as _e_ci:
-                    logger.error(f"[퍼지인터셉터] 다수후보 직접조회 오류: {_e_ci}")
+                if callback_url:
+                    background_tasks.add_task(
+                        _bg_candidate_query,
+                        _matched_cand, _cand_level, _cand_ym, _cand_mo,
+                        callback_url,
+                    )
+                    return {"version": "2.0", "useCallback": True}
+                # callback 없음: 동기 실행
+                _bg_candidate_query(_matched_cand, _cand_level, _cand_ym, _cand_mo, "")
+                # (non-callback 환경에설 fallback - 커스텋)
 
         # B) 예/아니오 처리
         if user_id in _user_pending_confirm:
@@ -4513,58 +4578,14 @@ async def kakao_skill(request: Request, background_tasks: BackgroundTasks):
                 _p_ym    = _pending["yearmonth"]
                 _p_mo    = _pending["month_num"]
                 _p_level = _pending["level_label"]
-                try:
-                    if _p_level == "단일 거래처":
-                        _p_rows = _safe_query(f"""
-                            SELECT ROUND(COALESCE(SUM(`매출액`), 0) / 1000000, 2) AS sales
-                            FROM {T_MAIN}
-                            WHERE `사업부명` = '외식식재사업부'
-                              AND `거래처명` = '{_p_name}'
-                              AND `년월` = '{_p_ym}'
-                        """)
-                    elif _p_level == "거래처(ZA)":
-                        _p_rows = _safe_query(f"""
-                            SELECT ROUND(COALESCE(SUM(`매출액`), 0) / 1000000, 2) AS sales
-                            FROM {T_MAIN}
-                            WHERE `사업부명` = '외식식재사업부'
-                              AND `ZA거래처명` = '{_p_name}'
-                              AND `년월` = '{_p_ym}'
-                        """)
-                    else:
-                        _p_rows = _safe_query(f"""
-                            SELECT ROUND(COALESCE(SUM(`매출액`), 0) / 1000000, 2) AS sales
-                            FROM {T_MAIN}
-                            WHERE `사업부명` = '외식식재사업부'
-                              AND `ZC본부명` = '{_p_name}'
-                              AND `년월` = '{_p_ym}'
-                        """)
-                    _p_sales = float(_p_rows[0]["sales"]) if _p_rows else 0.0
-                    _p_cur_ym = time.strftime("%Y%m")
-                    if _p_ym == _p_cur_ym:
-                        try:
-                            _p_today = _dt_mod.date.today()
-                            _p_card = _build_brand_forecast_card(
-                                _p_name, _p_sales, _p_ym, _p_today
-                            )
-                            _p_card += f"\n📌 집계단위: {_p_level}"
-                        except Exception:
-                            _p_card = (
-                                f"{_p_name}의 {_p_mo}월 매출액은 "
-                                f"{_format_value(_p_sales)}백만원입니다."
-                                f"\n📌 집계단위: {_p_level}"
-                            )
-                    else:
-                        _p_card = (
-                            f"{_p_name}의 {_p_mo}월 매출액은 "
-                            f"{_format_value(_p_sales)}백만원입니다."
-                            f"\n📌 집계단위: {_p_level}"
-                        )
-                    if callback_url:
-                        background_tasks.add_task(_send_kakao_callback_qr, callback_url, _p_card, _SALES_FOLLOW_QR, "브랜드매출")
-                        return {"version": "2.0", "useCallback": True}
-                    return _kakao_quickreply(_p_card, _SALES_FOLLOW_QR)
-                except Exception as _e_pi:
-                    logger.error(f"[퍼지인터셉터] 예/아니오 직접조회 오류: {_e_pi}")
+                if callback_url:
+                    background_tasks.add_task(
+                        _bg_confirm_query,
+                        _p_name, _p_level, _p_ym, _p_mo,
+                        callback_url,
+                    )
+                    return {"version": "2.0", "useCallback": True}
+                _bg_confirm_query(_p_name, _p_level, _p_ym, _p_mo, "")
             elif re.match(r'^(아니|아니오|ㄴ|취소)[\s!~]*$', _utt_s):
                 _user_pending_confirm.pop(user_id, None)
                 if callback_url:
