@@ -4498,7 +4498,7 @@ async def kakao_skill(request: Request, background_tasks: BackgroundTasks):
                             f"\n📌 집계단위: {_cand_level}"
                         )
                     if callback_url:
-                        _send_kakao_callback_qr(callback_url, _c_card, _SALES_FOLLOW_QR, "브랜드매출")
+                        background_tasks.add_task(_send_kakao_callback_qr, callback_url, _c_card, _SALES_FOLLOW_QR, "브랜드매출")
                         return {"version": "2.0", "useCallback": True}
                     return _kakao_quickreply(_c_card, _SALES_FOLLOW_QR)
                 except Exception as _e_ci:
@@ -4560,7 +4560,7 @@ async def kakao_skill(request: Request, background_tasks: BackgroundTasks):
                             f"\n📌 집계단위: {_p_level}"
                         )
                     if callback_url:
-                        _send_kakao_callback_qr(callback_url, _p_card, _SALES_FOLLOW_QR, "브랜드매출")
+                        background_tasks.add_task(_send_kakao_callback_qr, callback_url, _p_card, _SALES_FOLLOW_QR, "브랜드매출")
                         return {"version": "2.0", "useCallback": True}
                     return _kakao_quickreply(_p_card, _SALES_FOLLOW_QR)
                 except Exception as _e_pi:
@@ -4568,7 +4568,7 @@ async def kakao_skill(request: Request, background_tasks: BackgroundTasks):
             elif re.match(r'^(아니|아니오|ㄴ|취소)[\s!~]*$', _utt_s):
                 _user_pending_confirm.pop(user_id, None)
                 if callback_url:
-                    _send_kakao_callback_qr(callback_url, "다시 정확한 이름으로 입력해주세요.", _MAIN_MENU_QR, "안내")
+                    background_tasks.add_task(_send_kakao_callback_qr, callback_url, "다시 정확한 이름으로 입력해주세요.", _MAIN_MENU_QR, "안내")
                     return {"version": "2.0", "useCallback": True}
                 return _kakao_quickreply("다시 정확한 이름으로 입력해주세요.", _MAIN_MENU_QR)
 
