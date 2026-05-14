@@ -3852,7 +3852,7 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
         return
 
     # ─── ZA본사별 매출 (Dify 바이패스) ─────────────────────
-    if re.search(r'(?:ZA|본사)\s*(?:별)?\s*(?:매출|실적|순위|TOP)', query, re.IGNORECASE):
+    if re.search(r'(?:ZA\s*본사별|본사별|ZA별|ZA\s*(?:매출|실적)\s*(?:순위|TOP))', query, re.IGNORECASE):
         month_num, yearmonth = _extract_month_year(query)
         logger.info(f"[콜백] ZA본사매출: ym={yearmonth}")
         try:
@@ -4312,11 +4312,7 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                 yearmonth = f"{cur_year}{month_num:02d}"
                 logger.info(f"[콜백] 브랜드매출 직접 처리: brand={brand_name}, ym={yearmonth}")
                 try:
-                    # 공백 포함 브랜드명은 ZC명이 아니므로 퍼지검색으로 직행 (DB쿼리 절감)
-                    if ' ' in brand_name:
-                        res = None
-                    else:
-                        res = _fetch_brand_monthly_sales(brand_name, yearmonth)
+                    res = _fetch_brand_monthly_sales(brand_name, yearmonth)
                     if isinstance(res, list):
                         # 여러 브랜드가 매칭 → QR 버튼 + pending 저장
                         _short = res[:5]
@@ -4416,103 +4412,105 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
             )
             if _bno_m:
                 _bnm = re.sub(r'[는은의이가을를로에서만]$', '', _bno_m.group(1)).strip()
-                if _bnm and _bnm not in _BRAND_BYPASS_BLACKLIST and len(_bnm) >= 2:
-                    logger.info(f"[콜백] 브랜드매출(월미명시) 직접 처리: brand={_bnm}, ym={_ym_now}")
-                    try:
-                        # 공백 포함 브랜드명은 ZC명이 아니므로 퍼지검색으로 직행 (DB쿼리 절감)
-                        if ' ' in _bnm:
-                            res = None
+            else:
+                # 공백 포함 이름(예: 주식회사 XX) 처리
+                _bno_m_sp = re.search(
+                    r'^(.+?)\s*(?:는|은|의|이|가)?\s*(?:매출|실적)(?:액)?(?:\s+(?:알려|줘|주세|얼마|가).*)?$',
+                    query_for_brand.strip(), re.IGNORECASE,
+                )
+                _bnm = re.sub(r'[는은의이가을를로에서만]$', '', _bno_m_sp.group(1)).strip() if _bno_m_sp else ''
+            if _bnm and _bnm not in _BRAND_BYPASS_BLACKLIST and len(_bnm) >= 2:
+                logger.info(f"[콜백] 브랜드매출(월미명시) 직접 처리: brand={_bnm}, ym={_ym_now}")
+                try:
+                    res = _fetch_brand_monthly_sales(_bnm, _ym_now)
+                    if isinstance(res, list):
+                        _short2 = res[:5]
+                        options = "\n".join(f"  {i+1}. {n}" for i, n in enumerate(_short2))
+                        _user_pending_candidates[user_id] = {
+                            "month_num": _mo_now,
+                            "yearmonth": _ym_now,
+                            "candidates": {n: "브랜드(ZC)" for n in _short2},
+                        }
+                        _qr_list2 = [{"label": n, "action": "message", "messageText": n} for n in _short2]
+                        card = (
+                            f"'{_bnm}'와(과) 유사한 브랜드가 여러 개 있습니다.\n"
+                            f"{options}\n\n"
+                            f"버튼으로 선택하거나 정확한 이름으로 입력해주세요."
+                        )
+                        _send_kakao_callback_qr(callback_url, card, _qr_list2, "브랜드매출")
+                        return
+                    elif isinstance(res, tuple):
+                        matched_name, sales, level_label = res
+                        _today_dt = _dt_mod.date.today()
+                        try:
+                            card = _build_brand_forecast_card(
+                                matched_name, sales, _ym_now, _today_dt, level_label=level_label
+                            )
+                            card += f"\n📌 집계단위: {level_label}"
+                        except Exception as _ce:
+                            logger.warning(f"[브랜드카드] 빌드 실패({_ce}), 기본 포맷 사용")
+                            card = (
+                                f"{matched_name}의 {_mo_now}월 매출액은 "
+                                f"{_format_value(sales)}백만원입니다."
+                                f"\n📌 집계단위: {level_label}"
+                            )
+                        _user_last_sales[user_id] = {
+                            "target_key": "사업부명",
+                            "target_name": "외식식재사업부",
+                            "yearmonth": _ym_now,
+                        }
+                        if level_label == "점포합산":
+                            _sugg, _sugg_qr = _build_store_agg_suggestion(_bnm, _ym_now)
+                            if _sugg:
+                                card += _sugg
+                                _send_kakao_callback_qr(callback_url, card, _sugg_qr, "브랜드매출")
+                            else:
+                                _send_kakao_callback_qr(callback_url, card, _SALES_FOLLOW_QR, "브랜드매출")
                         else:
-                            res = _fetch_brand_monthly_sales(_bnm, _ym_now)
-                        if isinstance(res, list):
-                            _short2 = res[:5]
-                            options = "\n".join(f"  {i+1}. {n}" for i, n in enumerate(_short2))
+                            _send_kakao_callback_qr(callback_url, card, _SALES_FOLLOW_QR, "브랜드매출")
+                        return
+                    else:
+                        # None → 퍼지 검색
+                        _candidates2 = _fuzzy_search_candidates(_bnm, _ym_now)
+                        if not _candidates2:
+                            pass  # fall through to 영업사원 총매출 bypass
+                        elif len(_candidates2) == 1:
+                            exact_name2, _, exact_level2 = _candidates2[0]
+                            _user_pending_confirm[user_id] = {
+                                "exact_name": exact_name2,
+                                "month_num": _mo_now,
+                                "yearmonth": _ym_now,
+                                "level_label": exact_level2,
+                            }
+                            _send_kakao_callback_qr(
+                                callback_url,
+                                f"'{exact_name2}'을(를) 원하시는 것 맞나요?",
+                                [{"label": "예", "action": "message", "messageText": "예"},
+                                 {"label": "아니오", "action": "message", "messageText": "아니오"}],
+                                "브랜드매출",
+                            )
+                            return
+                        else:
                             _user_pending_candidates[user_id] = {
                                 "month_num": _mo_now,
                                 "yearmonth": _ym_now,
-                                "candidates": {n: "브랜드(ZC)" for n in _short2},
+                                "candidates": {c[0]: c[2] for c in _candidates2},
                             }
-                            _qr_list2 = [{"label": n, "action": "message", "messageText": n} for n in _short2]
-                            card = (
-                                f"'{_bnm}'와(과) 유사한 브랜드가 여러 개 있습니다.\n"
-                                f"{options}\n\n"
-                                f"버튼으로 선택하거나 정확한 이름으로 입력해주세요."
+                            qr_btns2 = [{"label": c[0], "action": "message", "messageText": c[0]} for c in _candidates2]
+                            candidate_lines2 = "\n".join(
+                                f"  {i+1}. {c[0]} [{c[2]}]" for i, c in enumerate(_candidates2)
                             )
-                            _send_kakao_callback_qr(callback_url, card, _qr_list2, "브랜드매출")
+                            _send_kakao_callback_qr(
+                                callback_url,
+                                f"'{_bnm}'과(와) 유사한 항목입니다. 하나를 선택해주세요.\n\n"
+                                f"{candidate_lines2}\n\n"
+                                f"버튼으로 선택하거나 정확한 이름으로 입력해주세요.",
+                                qr_btns2,
+                                "브랜드매출",
+                            )
                             return
-                        elif isinstance(res, tuple):
-                            matched_name, sales, level_label = res
-                            _today_dt = _dt_mod.date.today()
-                            try:
-                                card = _build_brand_forecast_card(
-                                    matched_name, sales, _ym_now, _today_dt, level_label=level_label
-                                )
-                                card += f"\n📌 집계단위: {level_label}"
-                            except Exception as _ce:
-                                logger.warning(f"[브랜드카드] 빌드 실패({_ce}), 기본 포맷 사용")
-                                card = (
-                                    f"{matched_name}의 {_mo_now}월 매출액은 "
-                                    f"{_format_value(sales)}백만원입니다."
-                                    f"\n📌 집계단위: {level_label}"
-                                )
-                            _user_last_sales[user_id] = {
-                                "target_key": "사업부명",
-                                "target_name": "외식식재사업부",
-                                "yearmonth": _ym_now,
-                            }
-                            if level_label == "점포합산":
-                                _sugg, _sugg_qr = _build_store_agg_suggestion(_bnm, _ym_now)
-                                if _sugg:
-                                    card += _sugg
-                                    _send_kakao_callback_qr(callback_url, card, _sugg_qr, "브랜드매출")
-                                else:
-                                    _send_kakao_callback_qr(callback_url, card, _SALES_FOLLOW_QR, "브랜드매출")
-                            else:
-                                _send_kakao_callback_qr(callback_url, card, _SALES_FOLLOW_QR, "브랜드매출")
-                            return
-                        else:
-                            # None → 퍼지 검색
-                            _candidates2 = _fuzzy_search_candidates(_bnm, _ym_now)
-                            if not _candidates2:
-                                pass  # fall through to 영업사원 총매출 bypass
-                            elif len(_candidates2) == 1:
-                                exact_name2, _, exact_level2 = _candidates2[0]
-                                _user_pending_confirm[user_id] = {
-                                    "exact_name": exact_name2,
-                                    "month_num": _mo_now,
-                                    "yearmonth": _ym_now,
-                                    "level_label": exact_level2,
-                                }
-                                _send_kakao_callback_qr(
-                                    callback_url,
-                                    f"'{exact_name2}'을(를) 원하시는 것 맞나요?",
-                                    [{"label": "예", "action": "message", "messageText": "예"},
-                                     {"label": "아니오", "action": "message", "messageText": "아니오"}],
-                                    "브랜드매출",
-                                )
-                                return
-                            else:
-                                _user_pending_candidates[user_id] = {
-                                    "month_num": _mo_now,
-                                    "yearmonth": _ym_now,
-                                    "candidates": {c[0]: c[2] for c in _candidates2},
-                                }
-                                qr_btns2 = [{"label": c[0], "action": "message", "messageText": c[0]} for c in _candidates2]
-                                candidate_lines2 = "\n".join(
-                                    f"  {i+1}. {c[0]} [{c[2]}]" for i, c in enumerate(_candidates2)
-                                )
-                                _send_kakao_callback_qr(
-                                    callback_url,
-                                    f"'{_bnm}'과(와) 유사한 항목입니다. 하나를 선택해주세요.\n\n"
-                                    f"{candidate_lines2}\n\n"
-                                    f"버튼으로 선택하거나 정확한 이름으로 입력해주세요.",
-                                    qr_btns2,
-                                    "브랜드매출",
-                                )
-                                return
-                        # res is None → ZC 없음 → fall through to 영업사원 총매출 bypass
-                    except Exception as e:
-                        logger.error(f"[콜백] 브랜드매출(월미명시) 오류: {e}")
+                except Exception as e:
+                    logger.error(f"[콜백] 브랜드매출(월미명시) 오류: {e}")
 
     # ─── 영업사원 신규매출 (Dify 바이패스) ─────────────────────
     _SP_BLACKLIST = {'전체', '사업부', '외식식재', '브랜드', '품목별', '월별', '팀별', '본사별', '사업부별', '매출액', '영업사원'}
