@@ -959,6 +959,65 @@ def _fetch_brand_daily_sales(brand_name: str, date_str: str) -> tuple[str, float
     return [str(r["name"]) for r in like_rows]
 
 
+def _get_store_agg_alternatives(keyword: str, yearmonth: str) -> tuple:
+    """점포합산 결과에서 ZC/ZA 후보 반환.
+    Returns: (zc_list, za_list)  각각 [(name, store_cnt), ...]
+    """
+    from collections import Counter as _Ctr
+    kw_ns = keyword.replace(' ', '')
+    try:
+        rows = _safe_query(f"""
+            SELECT `ZC본부명` AS zc, `ZA거래처명` AS za
+            FROM {T_MAIN}
+            WHERE `사업부명` = '외식식재사업부'
+              AND (`거래처명` LIKE '%{keyword}%'
+                OR REPLACE(`거래처명`, ' ', '') LIKE '%{kw_ns}%')
+              AND `년월` = '{yearmonth}'
+            GROUP BY `ZC본부명`, `ZA거래처명`
+        """, raw=True)
+    except Exception:
+        return [], []
+    zc_cnt: "_Ctr" = _Ctr()
+    za_cnt: "_Ctr" = _Ctr()
+    for r in rows:
+        zc = str(r.get("zc") or "").strip()
+        za = str(r.get("za") or "").strip()
+        if zc:
+            zc_cnt[zc] += 1
+        if za and za != zc:
+            za_cnt[za] += 1
+    return zc_cnt.most_common(3), za_cnt.most_common(3)
+
+
+def _build_store_agg_suggestion(keyword: str, yearmonth: str) -> tuple:
+    """점포합산 후 ZC/ZA 제안 텍스트 + QR 버튼 반환.
+    Returns: (suggestion_text: str, qr_buttons: list)
+    """
+    zc_list, za_list = _get_store_agg_alternatives(keyword, yearmonth)
+    if not zc_list and not za_list:
+        return "", []
+    parts = []
+    qr_btns = []
+    for zc_name, _ in zc_list:
+        parts.append(f"{zc_name}(ZC)")
+        qr_btns.append({"label": f"{zc_name}(ZC)", "action": "message",
+                        "messageText": f"{zc_name} 매출"})
+    for za_name, _ in za_list:
+        parts.append(f"{za_name}(ZA)")
+        qr_btns.append({"label": f"{za_name}(ZA)", "action": "message",
+                        "messageText": f"{za_name} 매출"})
+    # 메인 메뉴 버튼 추가
+    qr_btns.append({"label": "🏠 메인 메뉴", "action": "message", "messageText": "메뉴"})
+    candidates_str = ", ".join(parts)
+    suggestion = (
+        "\n─────────────────────\n"
+        "위 결과는 고객명 키워드 유사도에 기반한 집계입니다.\n"
+        "ZC / ZA 집계를 원하시나요? 아래에서 선택해 주세요.\n"
+        f"({candidates_str})"
+    )
+    return suggestion, qr_btns
+
+
 def _build_brand_forecast_card(matched_name: str, sales_so_far: float,
                                ym_now: str, today: _dt_mod.date,
                                level_label: str = "브랜드(ZC)") -> str:
@@ -3274,7 +3333,16 @@ def _bg_candidate_query(
                 f"{_format_value(sales)}백만원입니다."
                 f"\n📌 집계단위: {cand_level}"
             )
-        _send_kakao_callback_qr(callback_url, card, _SALES_FOLLOW_QR, "브랜드매출")
+        if cand_level == "점포합산":
+            _agg_kw = matched_cand.split(' (전체')[0]
+            _sugg, _sugg_qr = _build_store_agg_suggestion(_agg_kw, cand_ym)
+            if _sugg:
+                card += _sugg
+                _send_kakao_callback_qr(callback_url, card, _sugg_qr, "브랜드매출")
+            else:
+                _send_kakao_callback_qr(callback_url, card, _SALES_FOLLOW_QR, "브랜드매출")
+        else:
+            _send_kakao_callback_qr(callback_url, card, _SALES_FOLLOW_QR, "브랜드매출")
     except Exception as e:
         logger.error(f"[bg_candidate] 오류: {e}")
         _send_kakao_callback(callback_url, "⚠️ 매출 조회 중 오류가 발생했습니다.", "브랜드매출")
@@ -3329,7 +3397,16 @@ def _bg_confirm_query(
                 f"{_format_value(sales)}백만원입니다."
                 f"\n📌 집계단위: {p_level}"
             )
-        _send_kakao_callback_qr(callback_url, card, _SALES_FOLLOW_QR, "브랜드매출")
+        if p_level == "점포합산":
+            _agg_kw = p_name.split(' (전체')[0]
+            _sugg, _sugg_qr = _build_store_agg_suggestion(_agg_kw, p_ym)
+            if _sugg:
+                card += _sugg
+                _send_kakao_callback_qr(callback_url, card, _sugg_qr, "브랜드매출")
+            else:
+                _send_kakao_callback_qr(callback_url, card, _SALES_FOLLOW_QR, "브랜드매출")
+        else:
+            _send_kakao_callback_qr(callback_url, card, _SALES_FOLLOW_QR, "브랜드매출")
     except Exception as e:
         logger.error(f"[bg_confirm] 오류: {e}")
         _send_kakao_callback(callback_url, "⚠️ 매출 조회 중 오류가 발생했습니다.", "브랜드매출")
@@ -4177,9 +4254,17 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                             "브랜드매출")
                     elif isinstance(_br_res, tuple):
                         _br_matched, _br_val, _br_level = _br_res
-                        _send_kakao_callback_qr(callback_url,
-                            f"{_br_matched}의 {_br_date_label} 매출액은 {_format_value(_br_val)}백만원입니다.\n📌 집계단위: {_br_level}",
-                            _SALES_FOLLOW_QR, "브랜드매출")
+                        _br_card = f"{_br_matched}의 {_br_date_label} 매출액은 {_format_value(_br_val)}백만원입니다.\n📌 집계단위: {_br_level}"
+                        if _br_level == "점포합산":
+                            _br_ym = _br_date_str[:6]
+                            _sugg, _sugg_qr = _build_store_agg_suggestion(_br_name, _br_ym)
+                            if _sugg:
+                                _br_card += _sugg
+                                _send_kakao_callback_qr(callback_url, _br_card, _sugg_qr, "브랜드매출")
+                            else:
+                                _send_kakao_callback_qr(callback_url, _br_card, _SALES_FOLLOW_QR, "브랜드매출")
+                        else:
+                            _send_kakao_callback_qr(callback_url, _br_card, _SALES_FOLLOW_QR, "브랜드매출")
                     else:
                         _send_kakao_callback_qr(callback_url,
                             f"'{_br_name}' {_br_date_label} 매출 데이터가 없습니다.\n(당일 데이터는 익일 반영 기준)",
@@ -4262,7 +4347,15 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                             "target_name": "외식식재사업부",
                             "yearmonth": yearmonth,
                         }
-                        _send_kakao_callback_qr(callback_url, card, _SALES_FOLLOW_QR, "브랜드매출")
+                        if level_label == "점포합산":
+                            _sugg, _sugg_qr = _build_store_agg_suggestion(brand_name, yearmonth)
+                            if _sugg:
+                                card += _sugg
+                                _send_kakao_callback_qr(callback_url, card, _sugg_qr, "브랜드매출")
+                            else:
+                                _send_kakao_callback_qr(callback_url, card, _SALES_FOLLOW_QR, "브랜드매출")
+                        else:
+                            _send_kakao_callback_qr(callback_url, card, _SALES_FOLLOW_QR, "브랜드매출")
                     else:
                         # None → 퍼지 검색
                         _candidates = _fuzzy_search_candidates(brand_name, yearmonth)
@@ -4367,7 +4460,15 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                                 "target_name": "외식식재사업부",
                                 "yearmonth": _ym_now,
                             }
-                            _send_kakao_callback_qr(callback_url, card, _SALES_FOLLOW_QR, "브랜드매출")
+                            if level_label == "점포합산":
+                                _sugg, _sugg_qr = _build_store_agg_suggestion(_bnm, _ym_now)
+                                if _sugg:
+                                    card += _sugg
+                                    _send_kakao_callback_qr(callback_url, card, _sugg_qr, "브랜드매출")
+                                else:
+                                    _send_kakao_callback_qr(callback_url, card, _SALES_FOLLOW_QR, "브랜드매출")
+                            else:
+                                _send_kakao_callback_qr(callback_url, card, _SALES_FOLLOW_QR, "브랜드매출")
                             return
                         else:
                             # None → 퍼지 검색
