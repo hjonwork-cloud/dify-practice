@@ -3319,8 +3319,8 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
     if _specific_team_m and re.search(r'매출|실적', query):
         import datetime as _dt_st
         _today_st = _dt_st.date.today()
-        _is_today_st = bool(re.search(r'오늘', query))
-        _is_yesterday_st = bool(re.search(r'어제', query))
+        _is_today_st = bool(re.search(r'오늘(?![가-힣])', query))
+        _is_yesterday_st = bool(re.search(r'어제(?![가-힣])', query))
         try:
             if _is_today_st or _is_yesterday_st:
                 _date_st = (_today_st - _dt_st.timedelta(days=1)) if _is_yesterday_st else _today_st
@@ -3366,8 +3366,8 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
         org_key = org_key_map.get(org_label, f"{org_label}명")
         import datetime as _dt_org
         _today_org = _dt_org.date.today()
-        _is_today = bool(re.search(r'오늘', query))
-        _is_yesterday = bool(re.search(r'어제', query))
+        _is_today = bool(re.search(r'오늘(?![가-힣])', query))
+        _is_yesterday = bool(re.search(r'어제(?![가-힣])', query))
         logger.info(f"[콜백] 조직별매출: org_key={org_key}, today={_is_today}, yesterday={_is_yesterday}")
         try:
             if _is_today or _is_yesterday:
@@ -3440,9 +3440,9 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
             mm = int(date_md_m.group(1))
             dd = int(date_md_m.group(2))
             date_str = f"{cur_year}-{mm:02d}-{dd:02d}"
-        elif re.search(r'어제', query):
+        elif re.search(r'어제(?![가-힣])', query):
             date_str = (_dt.date.today() - _dt.timedelta(days=1)).strftime("%Y-%m-%d")
-        elif re.search(r'오늘', query):
+        elif re.search(r'오늘(?![가-힣])', query):
             date_str = _dt.date.today().strftime("%Y-%m-%d")
         # ── 이름/팀 결정 (우선순위: 쿼리 명시 이름 > 우리팀 > 등록 이름) ──
         _reg_users_u = _load_users()
@@ -3662,10 +3662,10 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
         name_tt = _ui_tt.get("name", "")
         import datetime as _dt_tt
         _now_tt = _dt_tt.date.today()
-        if re.search(r'오늘', query):
+        if re.search(r'오늘(?![가-힣])', query):
             _period_tt = f"{_now_tt.strftime('%Y-%m-%d')} (오늘)"
             _dcond_tt = f"`대금청구일` = '{_now_tt.strftime('%Y%m%d')}'"
-        elif re.search(r'어제', query):
+        elif re.search(r'어제(?![가-힣])', query):
             _yest_tt = _now_tt - _dt_tt.timedelta(days=1)
             _period_tt = f"{_yest_tt.strftime('%Y-%m-%d')} (어제)"
             _dcond_tt = f"`대금청구일` = '{_yest_tt.strftime('%Y%m%d')}'"
@@ -3730,10 +3730,10 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
         _today_br = _dt_br.date.today()
         _br_date_str: str | None = None
         _br_date_label: str = ""
-        if re.search(r'오늘', query) and not re.search(r'\d{1,2}월', query):
+        if re.search(r'오늘(?![가-힣])', query) and not re.search(r'\d{1,2}월', query):
             _br_date_str   = _today_br.strftime('%Y%m%d')
             _br_date_label = f"{_today_br.strftime('%Y-%m-%d')} (오늘)"
-        elif re.search(r'어제', query) and not re.search(r'\d{1,2}월', query):
+        elif re.search(r'어제(?![가-힣])', query) and not re.search(r'\d{1,2}월', query):
             _yest_br       = _today_br - _dt_br.timedelta(days=1)
             _br_date_str   = _yest_br.strftime('%Y%m%d')
             _br_date_label = f"{_yest_br.strftime('%Y-%m-%d')} (어제)"
