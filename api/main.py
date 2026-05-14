@@ -3585,6 +3585,46 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
     # 월별 전체매출 직접 처리 (Dify 바이패스) ─────────────────────
     # 예: "외식식재사업부 3월 매출액", "외식1팀 3월 전체매출 알려줘"
     if '매출' in query:
+        # ── 월 미명시: "사업부 매출액" / "외식식재사업부 매출액" → 이번 달 기준 ──
+        _dept_no_month_m = re.search(
+            r'([가-힣A-Za-z0-9]*(?:사업부|지점))\s*(?:의)?\s*(?:전체)?\s*매출(?:액)?'
+            r'(?:\s+(?:알려|줘|주세|얼마|가).*)?$',
+            query.strip(),
+        )
+        if _dept_no_month_m and not re.search(r'\d{1,2}월', query):
+            import datetime as _dt_dnm
+            _today_dnm  = _dt_dnm.date.today()
+            _ym_dnm     = _today_dnm.strftime("%Y%m")
+            _mo_dnm     = _today_dnm.month
+            _day_dnm    = _today_dnm.day
+            _tname_dnm  = _dept_no_month_m.group(1).strip()
+            # "사업부" 단독이면 "외식식재사업부"로 확장
+            if _tname_dnm == "사업부":
+                _tname_dnm = "외식식재사업부"
+            _tkey_dnm   = "사업부명" if "사업부" in _tname_dnm else "지점명"
+            logger.info(f"[콜백] 사업부매출(월미명시): target={_tname_dnm}, ym={_ym_dnm}")
+            try:
+                rows_dnm = _fetch_monthly_total(_tkey_dnm, _tname_dnm, _ym_dnm)
+                if rows_dnm:
+                    text_dnm = _build_monthly_sales_markdown(rows_dnm)
+                    ctx_m = _SALES_CTX_RE.search(text_dnm)
+                    if ctx_m:
+                        _user_last_sales[user_id] = {
+                            "target_key":  ctx_m.group(1),
+                            "target_name": ctx_m.group(2),
+                            "yearmonth":   ctx_m.group(3),
+                        }
+                        text_dnm = _SALES_CTX_RE.sub("", text_dnm).strip()
+                    text_dnm += f"\n※ {_mo_dnm}월 1~{_day_dnm}일 기준 (SAP 익일 반영)"
+                    _send_kakao_callback(callback_url, _to_kakao_text(text_dnm), "사업부매출")
+                else:
+                    _send_kakao_callback(callback_url,
+                        f"{_tname_dnm}의 {_mo_dnm}월 매출 데이터가 없습니다.", "사업부매출")
+            except Exception as e:
+                logger.error(f"[콜백] 사업부매출(월미명시) 오류: {e}")
+                _send_kakao_callback(callback_url, "⚠️ 사업부 매출 조회 중 오류가 발생했습니다.", "사업부매출")
+            return
+
         mt_m = _MONTHLY_TOTAL_PATTERN.search(query)
         if mt_m:
             # 그룹 1+2: "사업부/지점 N월" 순서  /  그룹 3+4: "N월 ... 사업부/지점" 순서
