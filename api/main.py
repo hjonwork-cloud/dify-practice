@@ -1078,6 +1078,8 @@ def _fetch_brand_monthly_sales(brand_name: str, yearmonth: str) -> tuple[str, fl
     - 2건 이상 매칭   → 후보 브랜드명 리스트 반환  (list[str])
     - 0건             → None
     """
+    # 입력 정규화: 반각 → 전각 (DB는 SAP 입력으로 전각 저장)
+    brand_name = brand_name.replace('&', '＆')
     # 1) 정확 매칭 먼저 시도
     exact_candidates = [brand_name, f"{brand_name}(본사)", f"{brand_name} 본사"]
     for cand in exact_candidates:
@@ -1182,6 +1184,7 @@ def _fuzzy_search_candidates(name_query: str, yearmonth: str) -> list[tuple[str,
     토큰 분리 후 LIKE 패턴 조합으로 거래처명/ZA/ZC 3단계 검색
     Returns: list of (name, sales, level_label) sorted by sales desc, max 8
     """
+    name_query = name_query.replace('&', '＆')
     tokens = name_query.replace('(', '').replace(')', '').split()
     if not tokens:
         return []
