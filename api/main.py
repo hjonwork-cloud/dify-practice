@@ -1100,12 +1100,21 @@ def _build_dept_forecast_card(
     ym_now: str,
     today,
 ) -> str:
-    """사업부/지점 당월 예상 매출 카드 (브랜드 카드 동일 형식)"""
+    """사업부/지점 당월 예상 매출 카드 — 요일별 가중 런레이트"""
     import calendar as _cal_dept
     import datetime as _dt_dept
+    import statistics as _stat_dept
+    from collections import defaultdict as _dd_dept
+
+    # v7 공휴일 집합 재사용
+    try:
+        from forecast_engine_v7 import KOR_HOLIDAYS as _HOLI
+    except Exception:
+        _HOLI = set()
 
     year = int(ym_now[:4])
     mo   = int(ym_now[4:])
+    days_in_m = _cal_dept.monthrange(year, mo)[1]
 
     prev_date = (today.replace(day=1) - _dt_dept.timedelta(days=1))
     prev_ym   = prev_date.strftime("%Y%m")
@@ -1122,25 +1131,88 @@ def _build_dept_forecast_card(
         except Exception:
             return 0.0
 
-    # ── 실제 SAP 반영 마지막 날 (일 매출 0.1백만 이상인 최대 대금청구일) ──
-    # SAP 익일 반영 특성상 today.day - 1이 실질 마지막 반영일이나,
-    # 오탈자·소액 잔존 등을 배제하기 위해 DB에서 직접 확인
-    data_day = today.day  # fallback
+    # ── ① 당월 일별 매출 조회 (HAVING 0.01 이상) ──────────────────
     try:
-        _r = _safe_query(f"""
-            SELECT MAX(`대금청구일`) AS last_date
-            FROM (
-                SELECT `대금청구일`, ROUND(SUM(`매출액`)/1000000, 4) AS daily
-                FROM {T_MAIN}
-                WHERE `{dept_key}` = '{dept_name}' AND `년월` = '{ym_now}'
-                GROUP BY `대금청구일`
-                HAVING ROUND(SUM(`매출액`)/1000000, 4) >= 0.1
-            )
+        _daily_rows = _safe_query(f"""
+            SELECT `대금청구일` AS dt,
+                   ROUND(SUM(`매출액`)/1000000, 4) AS daily
+            FROM {T_MAIN}
+            WHERE `{dept_key}` = '{dept_name}' AND `년월` = '{ym_now}'
+            GROUP BY `대금청구일`
+            HAVING ROUND(SUM(`매출액`)/1000000, 4) >= 0.01
+            ORDER BY `대금청구일`
         """, raw=True)
-        if _r and _r[0].get("last_date"):
-            data_day = int(str(_r[0]["last_date"])[6:8])
     except Exception:
+        _daily_rows = []
+
+    # data_day = 의미 있는 데이터의 마지막 날
+    data_day = today.day  # fallback
+    _dow_sales: dict = _dd_dept(list)  # {0(Mon)..6(Sun): [sales,...]}
+    for _r in _daily_rows:
+        _ds = str(_r["dt"])
+        _dd = int(_ds[6:8])
+        _dval = float(_r["daily"])
+        if _dval >= 0.1:           # 소액 잔존 제외한 실질 반영일 추적
+            data_day = max(data_day if not _daily_rows else 0, _dd)
+        _dt_obj = _dt_dept.date(int(_ds[:4]), int(_ds[4:6]), _dd)
+        # 일요일·공휴일은 DOW 평균에서 제외 (0값으로 왜곡 방지)
+        if _dt_obj.weekday() != 6 and _dt_obj not in _HOLI:
+            _dow_sales[_dt_obj.weekday()].append(_dval)
+
+    # data_day 재계산: HAVING >=0.1인 마지막 날
+    data_day = 0
+    for _r in _daily_rows:
+        if float(_r["daily"]) >= 0.1:
+            data_day = max(data_day, int(str(_r["dt"])[6:8]))
+    if data_day == 0:
         data_day = today.day
+
+    # ── ② 전월 일별 DOW 평균 (당월 DOW 데이터 부족 시 fallback) ──
+    _prev_dow_sales: dict = _dd_dept(list)
+    try:
+        _prev_rows = _safe_query(f"""
+            SELECT `대금청구일` AS dt,
+                   ROUND(SUM(`매출액`)/1000000, 4) AS daily
+            FROM {T_MAIN}
+            WHERE `{dept_key}` = '{dept_name}' AND `년월` = '{prev_ym}'
+            GROUP BY `대금청구일`
+            HAVING ROUND(SUM(`매출액`)/1000000, 4) >= 0.1
+        """, raw=True)
+        for _r in _prev_rows:
+            _ds = str(_r["dt"])
+            _dt_obj = _dt_dept.date(int(_ds[:4]), int(_ds[4:6]), int(_ds[6:8]))
+            if _dt_obj.weekday() != 6 and _dt_obj not in _HOLI:
+                _prev_dow_sales[_dt_obj.weekday()].append(float(_r["daily"]))
+    except Exception:
+        pass
+
+    # ── ③ DOW 평균 산출 (당월 우선, 관측 <2이면 전월 평균, 없으면 단순평균) ──
+    _simple_avg = sales_so_far / data_day if data_day > 0 else 0.0
+    _dow_avg: dict = {}
+    for _d in range(7):
+        _this = _dow_sales.get(_d, [])
+        _prev = _prev_dow_sales.get(_d, [])
+        if len(_this) >= 2:
+            _dow_avg[_d] = _stat_dept.mean(_this)
+        elif len(_this) == 1 and len(_prev) >= 1:
+            # 1개 관측 + 전월 평균 블렌딩 (60:40)
+            _dow_avg[_d] = _this[0] * 0.6 + _stat_dept.mean(_prev) * 0.4
+        elif len(_prev) >= 1:
+            _dow_avg[_d] = _stat_dept.mean(_prev)
+        else:
+            _dow_avg[_d] = _simple_avg
+
+    # ── ④ 남은 날 예측 합산 ──────────────────────────────────────
+    _remaining = 0.0
+    _working_remain = 0   # 남은 영업일 수 (정보 표시용)
+    for _dn in range(data_day + 1, days_in_m + 1):
+        _dt_r = _dt_dept.date(year, mo, _dn)
+        if _dt_r.weekday() == 6 or _dt_r in _HOLI:
+            continue          # 일요일·공휴일 → 0
+        _remaining += _dow_avg.get(_dt_r.weekday(), _simple_avg)
+        _working_remain += 1
+
+    forecast = sales_so_far + _remaining
 
     prev_total = _dq(f"AND `년월` = '{prev_ym}'")
     yoy_total  = _dq(f"AND `년월` = '{yoy_ym}'")
@@ -1150,17 +1222,13 @@ def _build_dept_forecast_card(
     if mo > 1:
         ytd_this += _dq(f"AND `년월` >= '{year}01' AND `년월` < '{ym_now}'")
 
-    # YTD 전년 동기 (실적 반영일 기준으로 맞춤)
+    # YTD 전년 동기
     ytd_last = 0.0
     if mo > 1:
         ytd_last += _dq(f"AND `년월` >= '{year-1}01' AND `년월` < '{yoy_ym}'")
-    day_from = f"{year-1}{mo:02d}01"
-    day_to   = f"{year-1}{mo:02d}{data_day:02d}"
-    ytd_last += _dq(f"AND `대금청구일` >= '{day_from}' AND `대금청구일` <= '{day_to}'")
-
-    # 예측: 실반영일 기준 일평균 × 월 달력일 수
-    days_in_m = _cal_dept.monthrange(year, mo)[1]
-    forecast  = (sales_so_far / data_day * days_in_m) if data_day > 0 else sales_so_far
+    _day_from = f"{year-1}{mo:02d}01"
+    _day_to   = f"{year-1}{mo:02d}{data_day:02d}"
+    ytd_last += _dq(f"AND `대금청구일` >= '{_day_from}' AND `대금청구일` <= '{_day_to}'")
 
     def _pct(new_val, old_val):
         if old_val <= 0:
@@ -1179,7 +1247,7 @@ def _build_dept_forecast_card(
     lines = [
         f"📊 {dept_name} 매출 현황 ({mo}월 1~{data_day}일 기준)\n",
         f"이번달 누계       {so_far_s}",
-        f"이번달 예상       {forecast_s}",
+        f"이번달 예상       {forecast_s}  (잔여 영업일 {_working_remain}일 반영)",
         "",
         f"전월({prev_mo}월) 比      {prev_s} → {_pct(forecast, prev_total)}  (예상 기준)",
         f"전년 동월 比      {yoy_s} → {_pct(forecast, yoy_total)}  (예상 기준)",
@@ -1501,32 +1569,88 @@ def _fetch_sales_reason(target_key: str, target_name: str, yearmonth: str) -> st
     yoy_map  = f_yoy.result()
     new_zc   = f_new.result()
 
-    # ── 당월 조회 시 예상 배율 적용 ──────────────────────────────
-    # 이번달(미완료 월)이면 cur_map 각 브랜드 매출을 (월달력일/실반영일) 배율로 스케일
-    import calendar as _cal_reason, datetime as _dt_reason
+    # ── 당월 조회 시 예상 배율 적용 (요일별 가중 런레이트) ──────────
+    import calendar as _cal_reason, datetime as _dt_reason, statistics as _stat_reason
+    from collections import defaultdict as _dd_reason
     _today_r  = _dt_reason.date.today()
     _cur_ym_r = _today_r.strftime("%Y%m")
     _forecast_factor = 1.0
     _data_day_r = None
     if ym == _cur_ym_r:
         try:
-            _rr = _safe_query(f"""
-                SELECT MAX(`대금청구일`) AS last_date
-                FROM (
-                    SELECT `대금청구일`, ROUND(SUM(`매출액`)/1000000, 4) AS daily
-                    FROM {T_MAIN}
-                    WHERE `{target_key}` = '{target_name}' AND `년월` = '{ym}'
-                    GROUP BY `대금청구일`
-                    HAVING ROUND(SUM(`매출액`)/1000000, 4) >= 0.1
-                )
-            """, raw=True)
-            if _rr and _rr[0].get("last_date"):
-                _data_day_r = int(str(_rr[0]["last_date"])[6:8])
-                _days_in_m_r = _cal_reason.monthrange(int(ym[:4]), int(ym[4:]))[1]
-                if _data_day_r > 0:
-                    _forecast_factor = _days_in_m_r / _data_day_r
+            from forecast_engine_v7 import KOR_HOLIDAYS as _HOLI_R
         except Exception:
-            pass
+            _HOLI_R = set()
+        try:
+            _yr_r = int(ym[:4]);  _mo_r = int(ym[4:])
+            _dim_r = _cal_reason.monthrange(_yr_r, _mo_r)[1]
+            # 당월 일별 매출
+            _dr_rows = _safe_query(f"""
+                SELECT `대금청구일` AS dt, ROUND(SUM(`매출액`)/1000000,4) AS daily
+                FROM {T_MAIN}
+                WHERE `{target_key}` = '{target_name}' AND `년월` = '{ym}'
+                GROUP BY `대금청구일`
+                HAVING ROUND(SUM(`매출액`)/1000000,4) >= 0.01
+                ORDER BY `대금청구일`
+            """, raw=True)
+            # data_day 산출
+            _data_day_r = 0
+            _sales_total_r = 0.0
+            _dow_s_r: dict = _dd_reason(list)
+            for _rr in _dr_rows:
+                _ds = str(_rr["dt"]);  _dd2 = int(_ds[6:8]);  _dv = float(_rr["daily"])
+                if _dv >= 0.1:
+                    _data_day_r = max(_data_day_r, _dd2)
+                    _sales_total_r += _dv
+                _dt2 = _dt_reason.date(_yr_r, _mo_r, _dd2)
+                if _dt2.weekday() != 6 and _dt2 not in _HOLI_R:
+                    _dow_s_r[_dt2.weekday()].append(_dv)
+            if _data_day_r == 0:
+                _data_day_r = _today_r.day
+                _sales_total_r = sum(float(_rr["daily"]) for _rr in _dr_rows)
+            # 전월 DOW 평균 (fallback)
+            _prev_ym_r = (_dt_reason.date(_yr_r, _mo_r, 1) - _dt_reason.timedelta(days=1)).strftime("%Y%m")
+            _prev_dow_r: dict = _dd_reason(list)
+            try:
+                _pr_rows = _safe_query(f"""
+                    SELECT `대금청구일` AS dt, ROUND(SUM(`매출액`)/1000000,4) AS daily
+                    FROM {T_MAIN}
+                    WHERE `{target_key}` = '{target_name}' AND `년월` = '{_prev_ym_r}'
+                    GROUP BY `대금청구일`
+                    HAVING ROUND(SUM(`매출액`)/1000000,4) >= 0.1
+                """, raw=True)
+                for _rr in _pr_rows:
+                    _ds = str(_rr["dt"])
+                    _dt2 = _dt_reason.date(int(_ds[:4]), int(_ds[4:6]), int(_ds[6:8]))
+                    if _dt2.weekday() != 6 and _dt2 not in _HOLI_R:
+                        _prev_dow_r[_dt2.weekday()].append(float(_rr["daily"]))
+            except Exception:
+                pass
+            # DOW 평균
+            _simple_avg_r = _sales_total_r / _data_day_r if _data_day_r else 0.0
+            _dow_avg_r: dict = {}
+            for _d in range(7):
+                _th = _dow_s_r.get(_d, []);  _pv = _prev_dow_r.get(_d, [])
+                if len(_th) >= 2:
+                    _dow_avg_r[_d] = _stat_reason.mean(_th)
+                elif len(_th) == 1 and len(_pv) >= 1:
+                    _dow_avg_r[_d] = _th[0] * 0.6 + _stat_reason.mean(_pv) * 0.4
+                elif len(_pv) >= 1:
+                    _dow_avg_r[_d] = _stat_reason.mean(_pv)
+                else:
+                    _dow_avg_r[_d] = _simple_avg_r
+            # 남은 날 합산
+            _rem_r = 0.0
+            for _dn in range(_data_day_r + 1, _dim_r + 1):
+                _dt2 = _dt_reason.date(_yr_r, _mo_r, _dn)
+                if _dt2.weekday() == 6 or _dt2 in _HOLI_R:
+                    continue
+                _rem_r += _dow_avg_r.get(_dt2.weekday(), _simple_avg_r)
+            _forecast_r = _sales_total_r + _rem_r
+            if _sales_total_r > 0:
+                _forecast_factor = _forecast_r / _sales_total_r
+        except Exception:
+            _forecast_factor = 1.0
     if _forecast_factor != 1.0:
         cur_map = {
             zc: {"name": d["name"], "sales": round(d["sales"] * _forecast_factor, 2)}
