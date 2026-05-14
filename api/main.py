@@ -851,6 +851,7 @@ def _fetch_brand_daily_sales(brand_name: str, date_str: str) -> tuple[str, float
     - 2건 이상 매칭   → 후보 브랜드명 리스트 반환
     - 0건             → None
     """
+    brand_name = brand_name.replace('&', '＆')
     exact_candidates = [brand_name, f"{brand_name}(본사)", f"{brand_name} 본사"]
     for cand in exact_candidates:
         rows = _safe_query(f"""
@@ -3024,11 +3025,11 @@ _MONTHLY_TOTAL_PATTERN = re.compile(
 # 브랜드명 단독 월 매출 조회 패턴 (Dify 바이패스) — 사업부/지점 미포함 브랜드명
 # 예: "샐러디는 2월에 매출", "위드저니 3월 실적"
 _BRAND_SALES_PATTERN = re.compile(
-    # 브랜드/거래처명: 앞 괄호(직·폐업 등) 허용, 뒤 괄호(점명·본사 등) 허용
-    r'((?:\([가-힣A-Za-z0-9\s]+\))?[가-힣A-Za-z0-9]+(?:\([가-힣A-Za-z0-9\s]+\))?)'
+    # 브랜드/거래처명: 앞 괄호(직·폐업 등) 허용, 뒤 괄호(점명·본사 등) 허용, & ＆ 포함
+    r'((?:\([가-힣A-Za-z0-9&＆\s]+\))?[가-힣A-Za-z0-9&＆]+(?:\([가-힣A-Za-z0-9&＆\s]+\))?)'
     r'(?:는|은|의)?\s*(\d{1,2})월\s*(?:에\s*)?(?:매출|실적)'
-    r'|(\d{1,2})월\s*(?:[가-힣A-Za-z0-9\s]*?)'
-    r'((?:\([가-힣A-Za-z0-9\s]+\))?[가-힣A-Za-z0-9]+(?:\([가-힣A-Za-z0-9\s]+\))?)\s*(?:매출|실적)',
+    r'|(\d{1,2})월\s*(?:[가-힣A-Za-z0-9&＆\s]*?)'
+    r'((?:\([가-힣A-Za-z0-9&＆\s]+\))?[가-힣A-Za-z0-9&＆]+(?:\([가-힣A-Za-z0-9&＆\s]+\))?)\s*(?:매출|실적)',
     re.IGNORECASE,
 )
 
@@ -3851,7 +3852,7 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
             _ym_now = time.strftime("%Y%m")
             _mo_now = int(time.strftime("%m"))
             _bno_m = re.search(
-                r'^((?:\([가-힣A-Za-z0-9\s]+\))?[가-힣A-Za-z0-9]{2,}(?:\([가-힣A-Za-z0-9\s]+\))?)'
+                r'^((?:\([가-힣A-Za-z0-9&＆\s]+\))?[가-힣A-Za-z0-9&＆]{2,}(?:\([가-힣A-Za-z0-9&＆\s]+\))?)'
                 r'\s*(?:는|은|의|이|가)?\s*(?:매출|실적)(?:액)?'
                 r'(?:\s+(?:알려|줘|주세|얼마|가).*)?$',
                 query_for_brand.strip(),
