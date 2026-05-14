@@ -3380,7 +3380,13 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
             else:
                 _, yearmonth_org = _extract_month_year(query)
                 rows = _fetch_org_ranking(org_key, yearmonth_org)
-                text = _build_org_ranking_markdown(rows, org_key, yearmonth_org)
+                _cur_ym = _today_org.strftime("%Y%m")
+                if yearmonth_org == _cur_ym:
+                    _mo_org = int(yearmonth_org[4:6])
+                    _label_org = f"{_mo_org}월 1~{_today_org.day}일 기준"
+                else:
+                    _label_org = f"{int(yearmonth_org[4:6])}월"
+                text = _build_org_ranking_markdown(rows, org_key, yearmonth_org, date_label=_label_org)
             _user_last_sales[user_id] = {"target_key": "사업부명", "target_name": "외식식재사업부", "yearmonth": yearmonth_org}
             _send_kakao_callback(callback_url, _to_kakao_text(text), "조직매출")
         except Exception as e:
