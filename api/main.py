@@ -1106,7 +1106,6 @@ def _build_dept_forecast_card(
 
     year = int(ym_now[:4])
     mo   = int(ym_now[4:])
-    day  = today.day
 
     prev_date = (today.replace(day=1) - _dt_dept.timedelta(days=1))
     prev_ym   = prev_date.strftime("%Y%m")
@@ -1123,6 +1122,26 @@ def _build_dept_forecast_card(
         except Exception:
             return 0.0
 
+    # ── 실제 SAP 반영 마지막 날 (일 매출 0.1백만 이상인 최대 대금청구일) ──
+    # SAP 익일 반영 특성상 today.day - 1이 실질 마지막 반영일이나,
+    # 오탈자·소액 잔존 등을 배제하기 위해 DB에서 직접 확인
+    data_day = today.day  # fallback
+    try:
+        _r = _safe_query(f"""
+            SELECT MAX(`대금청구일`) AS last_date
+            FROM (
+                SELECT `대금청구일`, ROUND(SUM(`매출액`)/1000000, 4) AS daily
+                FROM {T_MAIN}
+                WHERE `{dept_key}` = '{dept_name}' AND `년월` = '{ym_now}'
+                GROUP BY `대금청구일`
+                HAVING ROUND(SUM(`매출액`)/1000000, 4) >= 0.1
+            )
+        """, raw=True)
+        if _r and _r[0].get("last_date"):
+            data_day = int(str(_r[0]["last_date"])[6:8])
+    except Exception:
+        data_day = today.day
+
     prev_total = _dq(f"AND `년월` = '{prev_ym}'")
     yoy_total  = _dq(f"AND `년월` = '{yoy_ym}'")
 
@@ -1131,17 +1150,17 @@ def _build_dept_forecast_card(
     if mo > 1:
         ytd_this += _dq(f"AND `년월` >= '{year}01' AND `년월` < '{ym_now}'")
 
-    # YTD 전년 동기
+    # YTD 전년 동기 (실적 반영일 기준으로 맞춤)
     ytd_last = 0.0
     if mo > 1:
         ytd_last += _dq(f"AND `년월` >= '{year-1}01' AND `년월` < '{yoy_ym}'")
     day_from = f"{year-1}{mo:02d}01"
-    day_to   = f"{year-1}{mo:02d}{day:02d}"
+    day_to   = f"{year-1}{mo:02d}{data_day:02d}"
     ytd_last += _dq(f"AND `대금청구일` >= '{day_from}' AND `대금청구일` <= '{day_to}'")
 
-    # 예측: 일 평균 × 월 영업일 수 (단순 달력 기준)
+    # 예측: 실반영일 기준 일평균 × 월 달력일 수
     days_in_m = _cal_dept.monthrange(year, mo)[1]
-    forecast  = (sales_so_far / day * days_in_m) if day > 0 else sales_so_far
+    forecast  = (sales_so_far / data_day * days_in_m) if data_day > 0 else sales_so_far
 
     def _pct(new_val, old_val):
         if old_val <= 0:
@@ -1158,7 +1177,7 @@ def _build_dept_forecast_card(
     ytd_last_s = f"{_format_value(ytd_last)}백만"
 
     lines = [
-        f"📊 {dept_name} 매출 현황 ({mo}월 1~{day}일 기준)\n",
+        f"📊 {dept_name} 매출 현황 ({mo}월 1~{data_day}일 기준)\n",
         f"이번달 누계       {so_far_s}",
         f"이번달 예상       {forecast_s}",
         "",
@@ -1166,7 +1185,7 @@ def _build_dept_forecast_card(
         f"전년 동월 比      {yoy_s} → {_pct(forecast, yoy_total)}  (예상 기준)",
         "",
         "─────────────────────",
-        f"올해 누계         {ytd_this_s} (1월~{mo}월 {day}일)",
+        f"올해 누계         {ytd_this_s} (1월~{mo}월 {data_day}일)",
         f"전년 동기 比      {ytd_last_s} → {_pct(ytd_this, ytd_last)}",
     ]
     return "\n".join(lines)
