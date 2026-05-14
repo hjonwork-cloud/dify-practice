@@ -3316,11 +3316,45 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
     _specific_team_m = next(
         (t for t in _SPECIFIC_TEAMS if t in query), None
     )
-    # ─── 특정 팀/지점 단독 매출 (조직별 랭킹보다 먼저 체크) ──
-    _SPECIFIC_TEAMS = ["외식1팀", "외식2팀", "외식3팀", "영남지점"]
-    _specific_team_m = next(
-        (t for t in _SPECIFIC_TEAMS if t in query), None
-    )
+    # ─── 팀 미지정 영업사원별 매출 전체 랭킹 ──
+    _is_sp_all = bool(re.search(
+        r'영업사원별|영업담당별|사원별|담당자별|담당별', query
+    )) and not _specific_team_m
+    if _is_sp_all and re.search(r'매출|실적', query):
+        import datetime as _dt_spa
+        _today_spa = _dt_spa.date.today()
+        try:
+            _, ym_spa = _extract_month_year(query)
+            _mo_spa = int(ym_spa[4:6])
+            _cur_ym_spa = _today_spa.strftime("%Y%m")
+            _period_spa = (f"{_mo_spa}월 1~{_today_spa.day}일 기준"
+                           if ym_spa == _cur_ym_spa else f"{_mo_spa}월")
+            sp_all_rows = _safe_query(f"""
+                SELECT `영업사원명`, `부서명`,
+                       ROUND(COALESCE(SUM(`매출액`),0)/1000000, 2) AS sales
+                FROM {T_MAIN}
+                WHERE `사업부명` = '외식식재사업부'
+                  AND `년월` = '{ym_spa}'
+                GROUP BY `영업사원명`, `부서명`
+                ORDER BY sales DESC
+            """)
+            sp_all_rows = [r for r in sp_all_rows if float(r.get("sales", 0)) > 0]
+            if not sp_all_rows:
+                _send_kakao_callback(callback_url,
+                    f"외식식재사업부 {_period_spa} 영업사원별 매출 데이터가 없습니다.", "전체SP매출")
+            else:
+                total_spa = sum(float(r.get("sales", 0)) for r in sp_all_rows)
+                lines_spa = [f"📊 외식식재사업부 {_period_spa} 영업사원별 매출\n"]
+                for i, r in enumerate(sp_all_rows, 1):
+                    s = float(r.get("sales", 0))
+                    team_label = f" ({r['부서명']})" if r.get("부서명") else ""
+                    lines_spa.append(f"{i}. {r['영업사원명']}{team_label} — {_format_value(s)}백만원")
+                lines_spa.append(f"\n합계: {_format_value(total_spa)}백만원 | {len(sp_all_rows)}명")
+                _send_kakao_callback(callback_url, "\n".join(lines_spa), "전체SP매출")
+        except Exception as e:
+            logger.error(f"[콜백] 전체SP매출 오류: {e}")
+            _send_kakao_callback(callback_url, "⚠️ 영업사원별 매출 조회 중 오류가 발생했습니다.", "전체SP매출")
+        return
     if _specific_team_m and re.search(r'매출|실적', query):
         import datetime as _dt_st
         _today_st = _dt_st.date.today()
