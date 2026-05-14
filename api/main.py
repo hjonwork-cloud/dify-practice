@@ -942,23 +942,48 @@ def _fetch_brand_daily_sales(brand_name: str, date_str: str) -> tuple[str, float
 
 
 def _build_brand_forecast_card(matched_name: str, sales_so_far: float,
-                               ym_now: str, today: _dt_mod.date) -> str:
+                               ym_now: str, today: _dt_mod.date,
+                               level_label: str = "브랜드(ZC)") -> str:
     """당월 누계+v7 예측+비교 카드 문자열 반환.
-    sales_so_far : 억원 단위 (월별 집계 실적)
+    sales_so_far : 백만원 단위 (월별 집계 실적)
     ym_now       : 'YYYYMM'
     today        : 예측 기준일
+    level_label  : '브랜드(ZC)' | '거래처(ZA)' | '단일 거래처' | '점포합산'
     """
     mo   = today.month
     year = today.year
     day  = today.day
 
-    # v7 예측 호출
+    # 집계 조건 헬퍼: level_label에 따라 WHERE 절 반환
+    import re as _re_bfc
+    def _where(col_ym: str = "", ym_val: str = "",
+               col_date: str = "", date_from: str = "", date_to: str = "") -> str:
+        """level_label 기반 집계 조건 생성"""
+        base = "`사업부명`='외식식재사업부'"
+        # 점포합산: matched_name 에서 "(전체 N개 점포 합계)" 제거 후 거래처명 LIKE
+        if level_label == "점포합산":
+            _base_name = _re_bfc.sub(r'\s*\(전체\s*\d+개\s*점포\s*합계\)', '', matched_name).strip()
+            cond = f"`거래처명` LIKE '%{_base_name}%'"
+        elif level_label == "단일 거래처":
+            cond = f"`거래처명`='{matched_name}'"
+        elif level_label == "거래처(ZA)":
+            cond = f"`ZA거래처명`='{matched_name}'"
+        else:  # 브랜드(ZC) 기본
+            cond = f"`ZC본부명`='{matched_name}'"
+        sql = f"{base} AND {cond}"
+        if col_ym and ym_val:
+            sql += f" AND `{col_ym}`='{ym_val}'"
+        if col_date and date_from and date_to:
+            sql += f" AND `대금청구일` BETWEEN '{date_from}' AND '{date_to}'"
+        return sql
+
+    # v7 예측 호출 (ZC 레이블일 때만 의미 있음)
     fc_result = None
     try:
         import forecast_engine_v7 as _fe_v7
         fc_result = _fe_v7.predict_single_brand(matched_name, today, _safe_query)
     except Exception as _e:
-        logger.warning(f"[\uc608\uce21\uce74\ub4dc] predict_single_brand \uc2e4\ud328: {_e}")
+        logger.warning(f"[예측카드] predict_single_brand 실패: {_e}")
 
     prev_date = (today.replace(day=1) - _dt_mod.timedelta(days=1))
     prev_ym   = prev_date.strftime("%Y%m")
@@ -969,10 +994,8 @@ def _build_brand_forecast_card(matched_name: str, sales_so_far: float,
     prev_total = 0.0
     try:
         r = _safe_query(f"""
-            SELECT ROUND(COALESCE(SUM(`\ub9e4\ucd9c\uc561`),0)/1000000,2) AS sales
-            FROM {T_MAIN}
-            WHERE `\uc0ac\uc5c5\ubd80\uba85`='\uc678\uc2dd\uc2dd\uc7ac\uc0ac\uc5c5\ubd80' AND `ZC\ubcf8\ubd80\uba85`='{matched_name}'
-              AND `\ub144\uc6d4`='{prev_ym}'""");
+            SELECT ROUND(COALESCE(SUM(`매출액`),0)/1000000,2) AS sales
+            FROM {T_MAIN} WHERE {_where(col_ym='년월', ym_val=prev_ym)}""")
         prev_total = float(r[0]["sales"]) if r else 0.0
     except Exception: pass
 
@@ -980,10 +1003,8 @@ def _build_brand_forecast_card(matched_name: str, sales_so_far: float,
     yoy_total = 0.0
     try:
         r = _safe_query(f"""
-            SELECT ROUND(COALESCE(SUM(`\ub9e4\ucd9c\uc561`),0)/1000000,2) AS sales
-            FROM {T_MAIN}
-            WHERE `\uc0ac\uc5c5\ubd80\uba85`='\uc678\uc2dd\uc2dd\uc7ac\uc0ac\uc5c5\ubd80' AND `ZC\ubcf8\ubd80\uba85`='{matched_name}'
-              AND `\ub144\uc6d4`='{yoy_ym}'""");
+            SELECT ROUND(COALESCE(SUM(`매출액`),0)/1000000,2) AS sales
+            FROM {T_MAIN} WHERE {_where(col_ym='년월', ym_val=yoy_ym)}""")
         yoy_total = float(r[0]["sales"]) if r else 0.0
     except Exception: pass
 
@@ -992,10 +1013,9 @@ def _build_brand_forecast_card(matched_name: str, sales_so_far: float,
     if mo > 1:
         try:
             r = _safe_query(f"""
-                SELECT ROUND(COALESCE(SUM(`\ub9e4\ucd9c\uc561`),0)/1000000,2) AS sales
+                SELECT ROUND(COALESCE(SUM(`매출액`),0)/1000000,2) AS sales
                 FROM {T_MAIN}
-                WHERE `\uc0ac\uc5c5\ubd80\uba85`='\uc678\uc2dd\uc2dd\uc7ac\uc0ac\uc5c5\ubd80' AND `ZC\ubcf8\ubd80\uba85`='{matched_name}'
-                  AND `\ub144\uc6d4` >= '{year}01' AND `\ub144\uc6d4` < '{ym_now}'""");
+                WHERE {_where()} AND `년월` >= '{year}01' AND `년월` < '{ym_now}'""")
             ytd_this += float(r[0]["sales"]) if r else 0.0
         except Exception: pass
 
@@ -1004,18 +1024,16 @@ def _build_brand_forecast_card(matched_name: str, sales_so_far: float,
     try:
         if mo > 1:
             r = _safe_query(f"""
-                SELECT ROUND(COALESCE(SUM(`\ub9e4\ucd9c\uc561`),0)/1000000,2) AS sales
+                SELECT ROUND(COALESCE(SUM(`매출액`),0)/1000000,2) AS sales
                 FROM {T_MAIN}
-                WHERE `\uc0ac\uc5c5\ubd80\uba85`='\uc678\uc2dd\uc2dd\uc7ac\uc0ac\uc5c5\ubd80' AND `ZC\ubcf8\ubd80\uba85`='{matched_name}'
-                  AND `\ub144\uc6d4` >= '{year-1}01' AND `\ub144\uc6d4` < '{yoy_ym}'""");
+                WHERE {_where()} AND `년월` >= '{year-1}01' AND `년월` < '{yoy_ym}'""")
             ytd_last += float(r[0]["sales"]) if r else 0.0
         day_from = f"{year-1}{mo:02d}01"
         day_to   = f"{year-1}{mo:02d}{day:02d}"
         r = _safe_query(f"""
-            SELECT ROUND(COALESCE(SUM(`\ub9e4\ucd9c\uc561`),0)/1000000,2) AS sales
+            SELECT ROUND(COALESCE(SUM(`매출액`),0)/1000000,2) AS sales
             FROM {T_MAIN}
-            WHERE `\uc0ac\uc5c5\ubd80\uba85`='\uc678\uc2dd\uc2dd\uc7ac\uc0ac\uc5c5\ubd80' AND `ZC\ubcf8\ubd80\uba85`='{matched_name}'
-              AND `\ub300\uae08\uccad\uad6c\uc77c` BETWEEN '{day_from}' AND '{day_to}'""");
+            WHERE {_where(col_date='대금청구일', date_from=day_from, date_to=day_to)}""")
         ytd_last += float(r[0]["sales"]) if r else 0.0
     except Exception: pass
 
@@ -2901,7 +2919,7 @@ def _bg_candidate_query(
         if cand_ym == cur_ym:
             try:
                 import datetime as _dt_bg
-                card = _build_brand_forecast_card(matched_cand, sales, cand_ym, _dt_bg.date.today())
+                card = _build_brand_forecast_card(matched_cand, sales, cand_ym, _dt_bg.date.today(), level_label=cand_level)
                 card += f"\n📌 집계단위: {cand_level}"
             except Exception:
                 card = (
@@ -2956,7 +2974,7 @@ def _bg_confirm_query(
         if p_ym == cur_ym:
             try:
                 import datetime as _dt_bg
-                card = _build_brand_forecast_card(p_name, sales, p_ym, _dt_bg.date.today())
+                card = _build_brand_forecast_card(p_name, sales, p_ym, _dt_bg.date.today(), level_label=p_level)
                 card += f"\n📌 집계단위: {p_level}"
             except Exception:
                 card = (
@@ -3867,7 +3885,7 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                             _today_dt = _dt_mod.date.today()
                             try:
                                 card = _build_brand_forecast_card(
-                                    matched_name, sales, _ym_now, _today_dt
+                                    matched_name, sales, _ym_now, _today_dt, level_label=level_label
                                 )
                                 card += f"\n📌 집계단위: {level_label}"
                             except Exception as _ce:
