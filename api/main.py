@@ -1106,11 +1106,27 @@ def _build_dept_forecast_card(
     import statistics as _stat_dept
     from collections import defaultdict as _dd_dept
 
-    # v7 공휴일 집합 재사용
+    # v7 공휴일 집합 (배송 있지만 boost 적용 대상)
     try:
         from forecast_engine_v7 import KOR_HOLIDAYS as _HOLI
     except Exception:
         _HOLI = set()
+    # 실배송 없는 날 (설날·추석 전날+당일) → DB 조회
+    _HOLIDAY_BOOST = 1.5
+    try:
+        _nd_rows = _safe_query(
+            "SELECT no_delivery_date AS dt FROM h_hmfo_fsi_dm.gd_rst_ing.dim_holidays"
+            f" WHERE holiday_year IN ({int(ym_now[:4])-1}, {int(ym_now[:4])})",
+            raw=True,
+        )
+        import datetime as _dt_nd
+        def _to_date_nd(v):
+            if isinstance(v, _dt_nd.date): return v
+            s = str(v).replace("-", "")
+            return _dt_nd.date(int(s[:4]), int(s[4:6]), int(s[6:8]))
+        _NO_DELIVERY = {_to_date_nd(r["dt"]) for r in _nd_rows}
+    except Exception:
+        _NO_DELIVERY = set()
 
     year = int(ym_now[:4])
     mo   = int(ym_now[4:])
@@ -1155,8 +1171,9 @@ def _build_dept_forecast_card(
         if _dval >= 0.1:           # 소액 잔존 제외한 실질 반영일 추적
             data_day = max(data_day if not _daily_rows else 0, _dd)
         _dt_obj = _dt_dept.date(int(_ds[:4]), int(_ds[4:6]), _dd)
-        # 일요일·공휴일은 DOW 평균에서 제외 (0값으로 왜곡 방지)
-        if _dt_obj.weekday() != 6 and _dt_obj not in _HOLI:
+        # 일요일·NO_DELIVERY는 DOW 평균에서 제외 (0값으로 왜곡 방지)
+        # KOR_HOLIDAYS(공휴일)는 배송 있으므로 DOW 평균에 포함
+        if _dt_obj.weekday() != 6 and _dt_obj not in _NO_DELIVERY:
             _dow_sales[_dt_obj.weekday()].append(_dval)
 
     # data_day 재계산: HAVING >=0.1인 마지막 날
@@ -1181,7 +1198,7 @@ def _build_dept_forecast_card(
         for _r in _prev_rows:
             _ds = str(_r["dt"])
             _dt_obj = _dt_dept.date(int(_ds[:4]), int(_ds[4:6]), int(_ds[6:8]))
-            if _dt_obj.weekday() != 6 and _dt_obj not in _HOLI:
+            if _dt_obj.weekday() != 6 and _dt_obj not in _NO_DELIVERY:
                 _prev_dow_sales[_dt_obj.weekday()].append(float(_r["daily"]))
     except Exception:
         pass
@@ -1207,9 +1224,13 @@ def _build_dept_forecast_card(
     _working_remain = 0   # 남은 영업일 수 (정보 표시용)
     for _dn in range(data_day + 1, days_in_m + 1):
         _dt_r = _dt_dept.date(year, mo, _dn)
-        if _dt_r.weekday() == 6 or _dt_r in _HOLI:
-            continue          # 일요일·공휴일 → 0
-        _remaining += _dow_avg.get(_dt_r.weekday(), _simple_avg)
+        if _dt_r.weekday() == 6 or _dt_r in _NO_DELIVERY:
+            continue          # 일요일·실배송없는날 → 0
+        _base = _dow_avg.get(_dt_r.weekday(), _simple_avg)
+        if _dt_r in _HOLI:
+            _remaining += _base * _HOLIDAY_BOOST   # 공휴일 boost ×1.5
+        else:
+            _remaining += _base
         _working_remain += 1
 
     forecast = sales_so_far + _remaining
@@ -1581,6 +1602,21 @@ def _fetch_sales_reason(target_key: str, target_name: str, yearmonth: str) -> st
             from forecast_engine_v7 import KOR_HOLIDAYS as _HOLI_R
         except Exception:
             _HOLI_R = set()
+        _HOLIDAY_BOOST_R = 1.5
+        try:
+            _nd_rows_r = _safe_query(
+                "SELECT no_delivery_date AS dt FROM h_hmfo_fsi_dm.gd_rst_ing.dim_holidays"
+                f" WHERE holiday_year IN ({int(ym[:4])-1}, {int(ym[:4])})",
+                raw=True,
+            )
+            import datetime as _dt_nd_r
+            def _to_date_ndr(v):
+                if isinstance(v, _dt_nd_r.date): return v
+                s = str(v).replace("-", "")
+                return _dt_nd_r.date(int(s[:4]), int(s[4:6]), int(s[6:8]))
+            _NO_DEL_R = {_to_date_ndr(r["dt"]) for r in _nd_rows_r}
+        except Exception:
+            _NO_DEL_R = set()
         try:
             _yr_r = int(ym[:4]);  _mo_r = int(ym[4:])
             _dim_r = _cal_reason.monthrange(_yr_r, _mo_r)[1]
@@ -1603,7 +1639,7 @@ def _fetch_sales_reason(target_key: str, target_name: str, yearmonth: str) -> st
                     _data_day_r = max(_data_day_r, _dd2)
                     _sales_total_r += _dv
                 _dt2 = _dt_reason.date(_yr_r, _mo_r, _dd2)
-                if _dt2.weekday() != 6 and _dt2 not in _HOLI_R:
+                if _dt2.weekday() != 6 and _dt2 not in _NO_DEL_R:
                     _dow_s_r[_dt2.weekday()].append(_dv)
             if _data_day_r == 0:
                 _data_day_r = _today_r.day
@@ -1622,7 +1658,7 @@ def _fetch_sales_reason(target_key: str, target_name: str, yearmonth: str) -> st
                 for _rr in _pr_rows:
                     _ds = str(_rr["dt"])
                     _dt2 = _dt_reason.date(int(_ds[:4]), int(_ds[4:6]), int(_ds[6:8]))
-                    if _dt2.weekday() != 6 and _dt2 not in _HOLI_R:
+                    if _dt2.weekday() != 6 and _dt2 not in _NO_DEL_R:
                         _prev_dow_r[_dt2.weekday()].append(float(_rr["daily"]))
             except Exception:
                 pass
@@ -1643,9 +1679,13 @@ def _fetch_sales_reason(target_key: str, target_name: str, yearmonth: str) -> st
             _rem_r = 0.0
             for _dn in range(_data_day_r + 1, _dim_r + 1):
                 _dt2 = _dt_reason.date(_yr_r, _mo_r, _dn)
-                if _dt2.weekday() == 6 or _dt2 in _HOLI_R:
+                if _dt2.weekday() == 6 or _dt2 in _NO_DEL_R:
                     continue
-                _rem_r += _dow_avg_r.get(_dt2.weekday(), _simple_avg_r)
+                _base_r = _dow_avg_r.get(_dt2.weekday(), _simple_avg_r)
+                if _dt2 in _HOLI_R:
+                    _rem_r += _base_r * _HOLIDAY_BOOST_R
+                else:
+                    _rem_r += _base_r
             _forecast_r = _sales_total_r + _rem_r
             if _sales_total_r > 0:
                 _forecast_factor = _forecast_r / _sales_total_r
