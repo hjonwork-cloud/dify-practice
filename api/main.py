@@ -1501,6 +1501,38 @@ def _fetch_sales_reason(target_key: str, target_name: str, yearmonth: str) -> st
     yoy_map  = f_yoy.result()
     new_zc   = f_new.result()
 
+    # ── 당월 조회 시 예상 배율 적용 ──────────────────────────────
+    # 이번달(미완료 월)이면 cur_map 각 브랜드 매출을 (월달력일/실반영일) 배율로 스케일
+    import calendar as _cal_reason, datetime as _dt_reason
+    _today_r  = _dt_reason.date.today()
+    _cur_ym_r = _today_r.strftime("%Y%m")
+    _forecast_factor = 1.0
+    _data_day_r = None
+    if ym == _cur_ym_r:
+        try:
+            _rr = _safe_query(f"""
+                SELECT MAX(`대금청구일`) AS last_date
+                FROM (
+                    SELECT `대금청구일`, ROUND(SUM(`매출액`)/1000000, 4) AS daily
+                    FROM {T_MAIN}
+                    WHERE `{target_key}` = '{target_name}' AND `년월` = '{ym}'
+                    GROUP BY `대금청구일`
+                    HAVING ROUND(SUM(`매출액`)/1000000, 4) >= 0.1
+                )
+            """, raw=True)
+            if _rr and _rr[0].get("last_date"):
+                _data_day_r = int(str(_rr[0]["last_date"])[6:8])
+                _days_in_m_r = _cal_reason.monthrange(int(ym[:4]), int(ym[4:]))[1]
+                if _data_day_r > 0:
+                    _forecast_factor = _days_in_m_r / _data_day_r
+        except Exception:
+            pass
+    if _forecast_factor != 1.0:
+        cur_map = {
+            zc: {"name": d["name"], "sales": round(d["sales"] * _forecast_factor, 2)}
+            for zc, d in cur_map.items()
+        }
+
     def is_brand(zc: str) -> bool:
         """ZC본부 코드 앞자리가 8 → 브랜드, 아니면 개인형"""
         return zc.lstrip("0").startswith("8")
@@ -1555,6 +1587,8 @@ def _fetch_sales_reason(target_key: str, target_name: str, yearmonth: str) -> st
     )
 
     lines = [f"📊 {target_name} {month_label} 매출 변동 상세", ""]
+    if _forecast_factor != 1.0 and _data_day_r:
+        lines.append(f"※ 이번달 누계({_data_day_r}일치) 기준 월말 예상액으로 비교\n")
 
     # ─── 섹션 1: 전월 대비 ────────────────────────────────
     lines.append(f"【전월({prev_month_label}) 대비】")
