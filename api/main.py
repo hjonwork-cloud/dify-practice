@@ -1093,6 +1093,85 @@ def _build_brand_forecast_card(matched_name: str, sales_so_far: float,
     return "\n".join(lines)
 
 
+def _build_dept_forecast_card(
+    dept_key: str,
+    dept_name: str,
+    sales_so_far: float,
+    ym_now: str,
+    today,
+) -> str:
+    """사업부/지점 당월 예상 매출 카드 (브랜드 카드 동일 형식)"""
+    import calendar as _cal_dept
+    import datetime as _dt_dept
+
+    year = int(ym_now[:4])
+    mo   = int(ym_now[4:])
+    day  = today.day
+
+    prev_date = (today.replace(day=1) - _dt_dept.timedelta(days=1))
+    prev_ym   = prev_date.strftime("%Y%m")
+    prev_mo   = prev_date.month
+    yoy_ym    = f"{year - 1}{mo:02d}"
+
+    def _dq(where_extra: str) -> float:
+        try:
+            r = _safe_query(f"""
+                SELECT ROUND(COALESCE(SUM(`매출액`),0)/1000000,2) AS sales
+                FROM {T_MAIN} WHERE `{dept_key}` = '{dept_name}' {where_extra}"""
+            )
+            return float(r[0]["sales"]) if r else 0.0
+        except Exception:
+            return 0.0
+
+    prev_total = _dq(f"AND `년월` = '{prev_ym}'")
+    yoy_total  = _dq(f"AND `년월` = '{yoy_ym}'")
+
+    # YTD 이번 해
+    ytd_this = sales_so_far
+    if mo > 1:
+        ytd_this += _dq(f"AND `년월` >= '{year}01' AND `년월` < '{ym_now}'")
+
+    # YTD 전년 동기
+    ytd_last = 0.0
+    if mo > 1:
+        ytd_last += _dq(f"AND `년월` >= '{year-1}01' AND `년월` < '{yoy_ym}'")
+    day_from = f"{year-1}{mo:02d}01"
+    day_to   = f"{year-1}{mo:02d}{day:02d}"
+    ytd_last += _dq(f"AND `대금청구일` >= '{day_from}' AND `대금청구일` <= '{day_to}'")
+
+    # 예측: 일 평균 × 월 영업일 수 (단순 달력 기준)
+    days_in_m = _cal_dept.monthrange(year, mo)[1]
+    forecast  = (sales_so_far / day * days_in_m) if day > 0 else sales_so_far
+
+    def _pct(new_val, old_val):
+        if old_val <= 0:
+            return "N/A"
+        rate  = (new_val - old_val) / old_val * 100
+        arrow = "↑" if rate >= 0 else "↓"
+        return f"{rate:+.1f}% {arrow}"
+
+    so_far_s   = f"{_format_value(sales_so_far)}백만"
+    forecast_s = f"{_format_value(forecast)}백만"
+    prev_s     = f"{_format_value(prev_total)}백만"
+    yoy_s      = f"{_format_value(yoy_total)}백만"
+    ytd_this_s = f"{_format_value(ytd_this)}백만"
+    ytd_last_s = f"{_format_value(ytd_last)}백만"
+
+    lines = [
+        f"📊 {dept_name} 매출 현황 ({mo}월 1~{day}일 기준)\n",
+        f"이번달 누계       {so_far_s}",
+        f"이번달 예상       {forecast_s}",
+        "",
+        f"전월({prev_mo}월) 比      {prev_s} → {_pct(forecast, prev_total)}  (예상 기준)",
+        f"전년 동월 比      {yoy_s} → {_pct(forecast, yoy_total)}  (예상 기준)",
+        "",
+        "─────────────────────",
+        f"올해 누계         {ytd_this_s} (1월~{mo}월 {day}일)",
+        f"전년 동기 比      {ytd_last_s} → {_pct(ytd_this, ytd_last)}",
+    ]
+    return "\n".join(lines)
+
+
 def _fetch_brand_monthly_sales(brand_name: str, yearmonth: str) -> tuple[str, float, str] | None | list[str]:
     """ZC본부명 LIKE 유사검색 (외식식재사업부 한정)
     - 정확히 1건 매칭 → (브랜드명, 매출, 집계단위) 반환
@@ -3605,17 +3684,17 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
             logger.info(f"[콜백] 사업부매출(월미명시): target={_tname_dnm}, ym={_ym_dnm}")
             try:
                 rows_dnm = _fetch_monthly_total(_tkey_dnm, _tname_dnm, _ym_dnm)
-                if rows_dnm:
-                    text_dnm = _build_monthly_sales_markdown(rows_dnm)
-                    ctx_m = _SALES_CTX_RE.search(text_dnm)
-                    if ctx_m:
-                        _user_last_sales[user_id] = {
-                            "target_key":  ctx_m.group(1),
-                            "target_name": ctx_m.group(2),
-                            "yearmonth":   ctx_m.group(3),
-                        }
-                        text_dnm = _SALES_CTX_RE.sub("", text_dnm).strip()
-                    text_dnm += f"\n※ {_mo_dnm}월 1~{_day_dnm}일 기준 (SAP 익일 반영)"
+                _sales_so_far_dnm = float(rows_dnm[0]["매출액_억원"]) if rows_dnm else 0.0
+                if _sales_so_far_dnm > 0:
+                    text_dnm = _build_dept_forecast_card(
+                        _tkey_dnm, _tname_dnm, _sales_so_far_dnm, _ym_dnm, _today_dnm
+                    )
+                    text_dnm += "\n※ SAP 익일 반영. 예상 매출은 일평균 기준 단순 추정입니다."
+                    _user_last_sales[user_id] = {
+                        "target_key":  _tkey_dnm,
+                        "target_name": _tname_dnm,
+                        "yearmonth":   _ym_dnm,
+                    }
                     _send_kakao_callback(callback_url, _to_kakao_text(text_dnm), "사업부매출")
                 else:
                     _send_kakao_callback(callback_url,
