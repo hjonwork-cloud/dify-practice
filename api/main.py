@@ -2922,6 +2922,10 @@ _SALES_FOLLOW_QR = [
     {"label": "📊 매출 메뉴",    "action": "message", "messageText": "매출 실적 메뉴"},
     {"label": "🏠 메인 메뉴",    "action": "message", "messageText": "메뉴"},
 ]
+_REASON_QR = [
+    {"label": "📈 증가사유 확인", "action": "message", "messageText": "증가사유 알려줘"},
+    {"label": "🏠 메인 메뉴",    "action": "message", "messageText": "메뉴"},
+]
 
 
 def _send_kakao_callback(callback_url: str, text: str, label: str = "콜백"):
@@ -3695,7 +3699,7 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                         "target_name": _tname_dnm,
                         "yearmonth":   _ym_dnm,
                     }
-                    _send_kakao_callback(callback_url, _to_kakao_text(text_dnm), "사업부매출")
+                    _send_kakao_callback_qr(callback_url, _to_kakao_text(text_dnm), _REASON_QR, "사업부매출")
                 else:
                     _send_kakao_callback(callback_url,
                         f"{_tname_dnm}의 {_mo_dnm}월 매출 데이터가 없습니다.", "사업부매출")
@@ -3735,7 +3739,7 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                         }
                         text = _SALES_CTX_RE.sub("", text).strip()
                     card = _to_kakao_text(text)
-                    _send_kakao_callback(callback_url, card, "월별매출")
+                    _send_kakao_callback_qr(callback_url, card, _REASON_QR, "월별매출")
                 except Exception as e:
                     logger.error(f"[콜백] 월별매출 직접 조회 오류: {e}")
                     _send_kakao_callback(callback_url, "⚠️ 매출 조회 중 오류가 발생했습니다.", "월별매출")
