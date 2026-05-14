@@ -877,6 +877,23 @@ def _fetch_brand_daily_sales(brand_name: str, date_str: str) -> tuple[str, float
     """)
     like_rows = [r for r in like_rows if float(r.get("sales", 0)) > 0]
     if not like_rows:
+        # 2.5) ZA거래처명 검색 (개인형 ZC)
+        za_rows = _safe_query(f"""
+            SELECT `ZA거래처명` AS name,
+                   ROUND(COALESCE(SUM(`매출액`), 0) / 1000000, 4) AS sales
+            FROM {T_MAIN}
+            WHERE `사업부명` = '외식식재사업부'
+              AND `ZA거래처명` LIKE '%{brand_name}%'
+              AND `대금청구일` = '{date_str}'
+            GROUP BY `ZA거래처명`
+            ORDER BY SUM(`매출액`) DESC
+        """, raw=True)
+        za_rows = [r for r in za_rows if float(r.get("sales", 0)) > 0]
+        if za_rows:
+            if len(za_rows) == 1:
+                return str(za_rows[0]["name"]), float(za_rows[0]["sales"]), "거래처(ZA)"
+            return [str(r["name"]) for r in za_rows]
+    if not like_rows:
         # 3) 거래처명 fallback (단일 점포명 등, 공백 제거 비교 포함)
         _bn_ns = brand_name.replace(' ', '')
         cust_rows = _safe_query(f"""
@@ -978,6 +995,9 @@ def _build_brand_forecast_card(matched_name: str, sales_so_far: float,
             sql += f" AND `대금청구일` BETWEEN '{date_from}' AND '{date_to}'"
         return sql
 
+    # ZA 레이블이면 내부 쿼리도 ZA→ZC 변환 없이 실행
+    _raw_q = (level_label == "거래처(ZA)")
+
     # v7 예측 호출 (ZC 레이블일 때만 의미 있음)
     fc_result = None
     try:
@@ -996,7 +1016,7 @@ def _build_brand_forecast_card(matched_name: str, sales_so_far: float,
     try:
         r = _safe_query(f"""
             SELECT ROUND(COALESCE(SUM(`매출액`),0)/1000000,2) AS sales
-            FROM {T_MAIN} WHERE {_where(col_ym='년월', ym_val=prev_ym)}""")
+            FROM {T_MAIN} WHERE {_where(col_ym='년월', ym_val=prev_ym)}""", raw=_raw_q)
         prev_total = float(r[0]["sales"]) if r else 0.0
     except Exception: pass
 
@@ -1005,7 +1025,7 @@ def _build_brand_forecast_card(matched_name: str, sales_so_far: float,
     try:
         r = _safe_query(f"""
             SELECT ROUND(COALESCE(SUM(`매출액`),0)/1000000,2) AS sales
-            FROM {T_MAIN} WHERE {_where(col_ym='년월', ym_val=yoy_ym)}""")
+            FROM {T_MAIN} WHERE {_where(col_ym='년월', ym_val=yoy_ym)}""", raw=_raw_q)
         yoy_total = float(r[0]["sales"]) if r else 0.0
     except Exception: pass
 
@@ -1016,7 +1036,7 @@ def _build_brand_forecast_card(matched_name: str, sales_so_far: float,
             r = _safe_query(f"""
                 SELECT ROUND(COALESCE(SUM(`매출액`),0)/1000000,2) AS sales
                 FROM {T_MAIN}
-                WHERE {_where()} AND `년월` >= '{year}01' AND `년월` < '{ym_now}'""")
+                WHERE {_where()} AND `년월` >= '{year}01' AND `년월` < '{ym_now}'""", raw=_raw_q)
             ytd_this += float(r[0]["sales"]) if r else 0.0
         except Exception: pass
 
@@ -1027,14 +1047,14 @@ def _build_brand_forecast_card(matched_name: str, sales_so_far: float,
             r = _safe_query(f"""
                 SELECT ROUND(COALESCE(SUM(`매출액`),0)/1000000,2) AS sales
                 FROM {T_MAIN}
-                WHERE {_where()} AND `년월` >= '{year-1}01' AND `년월` < '{yoy_ym}'""")
+                WHERE {_where()} AND `년월` >= '{year-1}01' AND `년월` < '{yoy_ym}'""", raw=_raw_q)
             ytd_last += float(r[0]["sales"]) if r else 0.0
         day_from = f"{year-1}{mo:02d}01"
         day_to   = f"{year-1}{mo:02d}{day:02d}"
         r = _safe_query(f"""
             SELECT ROUND(COALESCE(SUM(`매출액`),0)/1000000,2) AS sales
             FROM {T_MAIN}
-            WHERE {_where(col_date='대금청구일', date_from=day_from, date_to=day_to)}""")
+            WHERE {_where(col_date='대금청구일', date_from=day_from, date_to=day_to)}""", raw=_raw_q)
         ytd_last += float(r[0]["sales"]) if r else 0.0
     except Exception: pass
 
@@ -1109,6 +1129,23 @@ def _fetch_brand_monthly_sales(brand_name: str, yearmonth: str) -> tuple[str, fl
     """)
     # 매출 > 0 인 것만
     like_rows = [r for r in like_rows if float(r.get("sales", 0)) > 0]
+    if not like_rows:
+        # 2.5) ZA거래처명 검색 (개인형 ZC → DB에서 ZC본부명='개인형'으로 치환된 경우)
+        za_rows = _safe_query(f"""
+            SELECT `ZA거래처명` AS name,
+                   ROUND(COALESCE(SUM(`매출액`), 0) / 1000000, 2) AS sales
+            FROM {T_MAIN}
+            WHERE `사업부명` = '외식식재사업부'
+              AND `ZA거래처명` LIKE '%{brand_name}%'
+              AND `년월` = '{yearmonth}'
+            GROUP BY `ZA거래처명`
+            ORDER BY SUM(`매출액`) DESC
+        """, raw=True)  # raw=True: ZA→ZC 변환 스킵
+        za_rows = [r for r in za_rows if float(r.get("sales", 0)) > 0]
+        if za_rows:
+            if len(za_rows) == 1:
+                return str(za_rows[0]["name"]), float(za_rows[0]["sales"]), "거래처(ZA)"
+            return [str(r["name"]) for r in za_rows]
     if not like_rows:
         # 3) 거래처명 fallback (단일 점포명 등, 공백 제거 비교 포함)
         _bn_ns = brand_name.replace(' ', '')
