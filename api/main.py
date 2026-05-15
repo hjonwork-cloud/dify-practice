@@ -3862,7 +3862,12 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                         text_st = f"{_specific_team_m}의 {month_st}월 매출액은 {_format_value(sales_st)}백만원입니다."
                 else:
                     text_st = f"{_specific_team_m}의 {month_st}월 매출액은 {_format_value(sales_st)}백만원입니다."
-            _send_kakao_callback_qr(callback_url, text_st, _SALES_FOLLOW_QR, "팀단독매출")
+            _user_last_sales[user_id] = {
+                "target_key":  "부서명",
+                "target_name": _specific_team_m,
+                "yearmonth":   ym_st,
+            }
+            _send_kakao_callback_qr(callback_url, text_st, _REASON_QR, "팀단독매출")
         except Exception as e:
             logger.error(f"[콜백] 팀단독매출 오류: {e}")
             _send_kakao_callback(callback_url, "⚠️ 팀 매출 조회 중 오류가 발생했습니다.", "팀단독매출")
