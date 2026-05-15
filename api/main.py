@@ -1064,13 +1064,14 @@ def _build_brand_forecast_card(matched_name: str, sales_so_far: float,
     # ZA 레이블이면 내부 쿼리도 ZA→ZC 변환 없이 실행
     _raw_q = (level_label == "거래처(ZA)")
 
-    # v7 예측 호출 (ZC 레이블일 때만 의미 있음)
+    # v7 예측 호출 (ZC 레이블일 때만 의미 있음 — ZA/점포합산/단일 거래처는 스킵)
     fc_result = None
-    try:
-        import forecast_engine_v7 as _fe_v7
-        fc_result = _fe_v7.predict_single_brand(matched_name, today, _safe_query)
-    except Exception as _e:
-        logger.warning(f"[예측카드] predict_single_brand 실패: {_e}")
+    if level_label == "브랜드(ZC)":
+        try:
+            import forecast_engine_v7 as _fe_v7
+            fc_result = _fe_v7.predict_single_brand(matched_name, today, _safe_query)
+        except Exception as _e:
+            logger.warning(f"[예측카드] predict_single_brand 실패: {_e}")
 
     prev_date = (today.replace(day=1) - _dt_mod.timedelta(days=1))
     prev_ym   = prev_date.strftime("%Y%m")
@@ -1125,11 +1126,12 @@ def _build_brand_forecast_card(matched_name: str, sales_so_far: float,
     except Exception: pass
 
     # 예측값 결정
-    if fc_result and fc_result.get("forecast") is not None:
+    days_in_m = calendar.monthrange(year, mo)[1]
+    _simple_forecast = (sales_so_far / day * days_in_m) if day > 0 else sales_so_far
+    if fc_result and fc_result.get("forecast") is not None and fc_result["forecast"] > 0:
         forecast = fc_result["forecast"]
     else:
-        days_in_m = calendar.monthrange(year, mo)[1]
-        forecast  = (sales_so_far / day * days_in_m) if day > 0 else sales_so_far
+        forecast  = _simple_forecast
 
     def _pct(new_val, old_val):
         if old_val <= 0: return "N/A"
