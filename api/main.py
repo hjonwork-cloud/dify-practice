@@ -860,6 +860,7 @@ def _fetch_brand_daily_sales(brand_name: str, date_str: str) -> tuple[str, float
             FROM {T_MAIN}
             WHERE `사업부명` = '외식식재사업부'
               AND `ZC본부명` = '{cand}'
+              AND TRIM(LEADING '0' FROM `ZC본부`) LIKE '8%'
               AND `대금청구일` = '{date_str}'
             GROUP BY `ZC본부명`
         """)
@@ -871,6 +872,7 @@ def _fetch_brand_daily_sales(brand_name: str, date_str: str) -> tuple[str, float
         FROM {T_MAIN}
         WHERE `사업부명` = '외식식재사업부'
           AND `ZC본부명` LIKE '%{brand_name}%'
+          AND TRIM(LEADING '0' FROM `ZC본부`) LIKE '8%'
           AND `대금청구일` = '{date_str}'
         GROUP BY `ZC본부명`
         ORDER BY SUM(`매출액`) DESC
@@ -944,6 +946,7 @@ def _fetch_brand_daily_sales(brand_name: str, date_str: str) -> tuple[str, float
                     FROM {T_MAIN}
                     WHERE `사업부명` = '외식식재사업부'
                       AND `ZC본부명` = '{zc_name}'
+                      AND TRIM(LEADING '0' FROM `ZC본부`) LIKE '8%'
                       AND `대금청구일` = '{date_str}'
                     GROUP BY `ZC본부명`
                 """)
@@ -1360,6 +1363,7 @@ def _fetch_brand_monthly_sales(brand_name: str, yearmonth: str) -> tuple[str, fl
             FROM {T_MAIN}
             WHERE `사업부명` = '외식식재사업부'
               AND `ZC본부명` = '{cand}'
+              AND TRIM(LEADING '0' FROM `ZC본부`) LIKE '8%'
               AND `년월` = '{yearmonth}'
             GROUP BY `ZC본부명`
         """)
@@ -1373,6 +1377,7 @@ def _fetch_brand_monthly_sales(brand_name: str, yearmonth: str) -> tuple[str, fl
         FROM {T_MAIN}
         WHERE `사업부명` = '외식식재사업부'
           AND `ZC본부명` LIKE '%{brand_name}%'
+          AND TRIM(LEADING '0' FROM `ZC본부`) LIKE '8%'
           AND `년월` = '{yearmonth}'
         GROUP BY `ZC본부명`
         ORDER BY SUM(`매출액`) DESC
@@ -1443,13 +1448,14 @@ def _fetch_brand_monthly_sales(brand_name: str, yearmonth: str) -> tuple[str, fl
                 for r in all_custs
             )
             if all_match:
-                # ZC 전체 집계 승격
+                # ZC 전체 집계 승격 (개인형 ZC 제외: 코드 8 시작만)
                 zc_row = _safe_query(f"""
                     SELECT `ZC본부명` AS name,
                            ROUND(COALESCE(SUM(`매출액`), 0) / 1000000, 2) AS sales
                     FROM {T_MAIN}
                     WHERE `사업부명` = '외식식재사업부'
                       AND `ZC본부명` = '{zc_name}'
+                      AND TRIM(LEADING '0' FROM `ZC본부`) LIKE '8%'
                       AND `년월` = '{yearmonth}'
                     GROUP BY `ZC본부명`
                 """)
