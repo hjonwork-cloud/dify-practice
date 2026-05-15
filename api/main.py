@@ -1813,68 +1813,85 @@ def _fetch_sales_reason(target_key: str, target_name: str, yearmonth: str) -> st
         2,
     )
 
-    lines = [f"📊 {target_name} {month_label} 매출 변동 상세", ""]
+    lines = [f"📊 {target_name} {month_label} 매출 변동 분석", ""]
     if _forecast_factor != 1.0 and _data_day_r:
-        lines.append(f"※ 이번달 누계({_data_day_r}일치) 기준 월말 예상액으로 비교\n")
+        lines.append(f"※ 월말 예상매출액 기준\n")
 
     # ─── 섹션 1: 전월 대비 ────────────────────────────────
     lines.append(f"【전월({prev_month_label}) 대비】")
     mom_net = round(sum(x["diff"] for x in mom_list), 2)
     mom_sign = "+" if mom_net >= 0 else ""
-    lines.append(f"  💰 전월 대비 순증감: {mom_sign}{_format_value(mom_net)}백만")
+    _prev_total = round(sum(v["sales"] for v in prev_map.values()), 2)
+    _mom_pct_str = ""
+    if _prev_total > 0:
+        _mom_pct = mom_net / _prev_total * 100
+        _arr = "↑" if _mom_pct >= 0 else "↓"
+        _mom_pct_str = f"({_mom_pct:+.1f}% {_arr})"
+    lines.append(f"  💰 전월 대비 순증감: {mom_sign}{_format_value(mom_net)}백만 {_mom_pct_str}")
+
+    def _pct_str(diff: float, base: float) -> str:
+        if base <= 0:
+            return ""
+        p = diff / base * 100
+        arr = "↑" if p >= 0 else "↓"
+        return f"({p:+.1f}% {arr})"
 
     # 증가 TOP3
     ib = _brand(mom_inc);  ip = _pers(mom_inc)
     if ib or ip:
         lines.append(f"  📈 증가 TOP 3")
         for x in ib[:3]:
-            lines.append(f"    · {x['name']}  +{_format_value(x['diff'])}백만 (당월 {_format_value(x['cur'])}백만)")
+            prev_v = x['cur'] - x['diff']
+            lines.append(f"    · {x['name']}  +{_format_value(x['diff'])}백만 (당월 {_format_value(x['cur'])}백만) {_pct_str(x['diff'], prev_v)}")
         if len(ib) > 3:
             lines.append(f"    · 브랜드 외 {len(ib)-3}개")
         if ip:
-            lines.append(f"    · 개인형 {len(ip)}개  +{_format_value(_sum_sales(ip))}백만")
+            _ip_diff = _sum_sales(ip)
+            _ip_prev = sum((x['cur'] - x['diff']) for x in ip)
+            lines.append(f"    · 개인형 {len(ip)}개  +{_format_value(_ip_diff)}백만 {_pct_str(_ip_diff, _ip_prev)}")
 
     # 감소 TOP3
     db = _brand(mom_dec);  dp = _pers(mom_dec)
     if db or dp:
         lines.append(f"  📉 감소 TOP 3")
         for x in db[:3]:
-            lines.append(f"    · {x['name']}  {_format_value(x['diff'])}백만 (당월 {_format_value(x['cur'])}백만)")
+            prev_v = x['cur'] - x['diff']
+            lines.append(f"    · {x['name']}  {_format_value(x['diff'])}백만 (당월 {_format_value(x['cur'])}백만) {_pct_str(x['diff'], prev_v)}")
         if len(db) > 3:
             lines.append(f"    · 브랜드 외 {len(db)-3}개")
         if dp:
-            lines.append(f"    · 개인형 {len(dp)}개  {_format_value(_sum_sales(dp))}백만")
+            _dp_diff = _sum_sales(dp)
+            _dp_prev = sum((x['cur'] - x['diff']) for x in dp)
+            lines.append(f"    · 개인형 {len(dp)}개  {_format_value(_dp_diff)}백만 {_pct_str(_dp_diff, _dp_prev)}")
 
     lines.append("")
 
     # ─── 섹션 2: 전년 대비 ────────────────────────────────
     lines.append(f"【전년({yoy_label}) 대비】")
+    _yoy_total = round(sum(v["sales"] for v in yoy_map.values()), 2)
     sign = "+" if yoy_net >= 0 else ""
-    lines.append(f"  💰 전년 동월 순증감: {sign}{_format_value(yoy_net)}백만")
+    _yoy_pct_str = _pct_str(yoy_net, _yoy_total)
+    lines.append(f"  💰 전년 동월 순증감: {sign}{_format_value(yoy_net)}백만 {_yoy_pct_str}")
 
-    # 신규 브랜드
+    # 신규 브랜드 — ZC 개수만, 금액은 전체 합산
     if new_rows:
         nb = _brand(new_rows);  np_ = _pers(new_rows)
         total_new = _sum_sales(new_rows)
-        lines.append(f"  🆕 신규 브랜드 ({len(new_rows)}개  +{_format_value(total_new)}백만)")
+        lines.append(f"  🆕 신규 ZC {len(nb)}개  +{_format_value(total_new)}백만 (개인형 {len(np_)}개 포함)")
         for x in nb[:3]:
             lines.append(f"    · {x['name']}  +{_format_value(x['sales'])}백만")
         if len(nb) > 3:
             lines.append(f"    · 브랜드 외 {len(nb)-3}개")
-        if np_:
-            lines.append(f"    · 개인형 {len(np_)}개  +{_format_value(_sum_sales(np_))}백만")
 
-    # 중단 브랜드
+    # 중단 브랜드 — ZC 개수만, 금액은 전체 합산
     if stopped_rows:
         sb = _brand(stopped_rows);  sp_ = _pers(stopped_rows)
         total_stop = _sum_sales(stopped_rows)
-        lines.append(f"  🔻 중단 브랜드 ({len(stopped_rows)}개  -{_format_value(total_stop)}백만)")
+        lines.append(f"  🔻 중단 ZC {len(sb)}개  -{_format_value(total_stop)}백만 (개인형 {len(sp_)}개 포함)")
         for x in sb[:3]:
             lines.append(f"    · {x['name']}  -{_format_value(x['sales'])}백만")
         if len(sb) > 3:
             lines.append(f"    · 브랜드 외 {len(sb)-3}개")
-        if sp_:
-            lines.append(f"    · 개인형 {len(sp_)}개  -{_format_value(_sum_sales(sp_))}백만")
 
     # 기존 브랜드 증감
     if exist_rows:
@@ -1886,15 +1903,19 @@ def _fetch_sales_reason(target_key: str, target_name: str, yearmonth: str) -> st
         if eib or eip:
             lines.append(f"    증가 TOP3")
             for x in eib[:3]:
-                lines.append(f"      · {x['name']}  +{_format_value(x['diff'])}백만")
+                lines.append(f"      · {x['name']}  +{_format_value(x['diff'])}백만 {_pct_str(x['diff'], x.get('yoy', 0))}")
             if eip:
-                lines.append(f"      · 개인형 {len(eip)}개  +{_format_value(sum(x['diff'] for x in eip))}백만")
+                _eip_diff = sum(x['diff'] for x in eip)
+                _eip_yoy  = sum(x.get('yoy', 0) for x in eip)
+                lines.append(f"      · 개인형 {len(eip)}개  +{_format_value(_eip_diff)}백만 {_pct_str(_eip_diff, _eip_yoy)}")
         if edb or edp:
             lines.append(f"    감소 TOP3")
             for x in edb[:3]:
-                lines.append(f"      · {x['name']}  {_format_value(x['diff'])}백만")
+                lines.append(f"      · {x['name']}  {_format_value(x['diff'])}백만 {_pct_str(x['diff'], x.get('yoy', 0))}")
             if edp:
-                lines.append(f"      · 개인형 {len(edp)}개  {_format_value(sum(x['diff'] for x in edp))}백만")
+                _edp_diff = sum(x['diff'] for x in edp)
+                _edp_yoy  = sum(x.get('yoy', 0) for x in edp)
+                lines.append(f"      · 개인형 {len(edp)}개  {_format_value(_edp_diff)}백만 {_pct_str(_edp_diff, _edp_yoy)}")
 
     return "\n".join(lines)
 
@@ -3537,8 +3558,18 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
             logger.info(f"[콜백] 증가사유 요청: ctx={ctx}")
             try:
                 detail = _fetch_sales_reason(ctx["target_key"], ctx["target_name"], ctx["yearmonth"])
-                card = _to_kakao_text(detail)
-                _send_kakao_callback(callback_url, card, "매출증가사유")
+                # 전월 대비 / 전년 대비 두 버블로 분할 (글자수 초과 방지)
+                _split_marker = "\n【전년("
+                if _split_marker in detail:
+                    _idx = detail.index(_split_marker)
+                    part1 = detail[:_idx].rstrip()
+                    part2 = detail[_idx:].lstrip()
+                    _send_kakao_callback(callback_url, _to_kakao_text(part1), "매출증가사유1")
+                    import time as _t_reason; _t_reason.sleep(0.3)
+                    _send_kakao_callback_qr(callback_url, _to_kakao_text(part2), _REASON_QR, "매출증가사유2")
+                else:
+                    card = _to_kakao_text(detail)
+                    _send_kakao_callback_qr(callback_url, card, _REASON_QR, "매출증가사유")
             except Exception as e:
                 logger.error(f"[콜백] 증가사유 조회 오류: {e}")
                 _send_kakao_callback(callback_url, "⚠️ 증가사유 조회 중 오류가 발생했습니다.", "매출증가사유")
