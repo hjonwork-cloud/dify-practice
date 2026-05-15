@@ -1812,12 +1812,21 @@ def _fetch_sales_reason(target_key: str, target_name: str, yearmonth: str,
     def _sum_sales(lst: list[dict]) -> float:
         return round(sum(x.get("sales", x.get("diff", 0)) for x in lst), 2)
 
-    # 전년 순증감 합계 — 분류 로직과 무관하게 전체 합산으로 계산 (첫 번째 매출 답변과 일치)
-    yoy_net = round(
-        sum(v["sales"] for v in cur_map.values())
-        - sum(v["sales"] for v in yoy_map.values()),
-        2,
-    )
+    # 전년 순증감 합계 — forecast_total 주입 시 카드와 동일한 직접 SUM 사용
+    if forecast_total is not None and forecast_total > 0:
+        _yoy_direct = _safe_query(f"""
+            SELECT ROUND(COALESCE(SUM(`매출액`),0)/1000000,2) AS s
+            FROM {T_MAIN}
+            WHERE `{target_key}` = '{target_name}' AND `년월` = '{yoy_ym}'
+        """)
+        _yoy_total_direct = float(_yoy_direct[0]["s"]) if _yoy_direct else sum(v["sales"] for v in yoy_map.values())
+        yoy_net = round(forecast_total - _yoy_total_direct, 2)
+    else:
+        yoy_net = round(
+            sum(v["sales"] for v in cur_map.values())
+            - sum(v["sales"] for v in yoy_map.values()),
+            2,
+        )
 
     lines = [f"📊 {target_name} {month_label} 매출 변동 분석", ""]
     if _forecast_factor != 1.0 and _data_day_r:
@@ -1826,8 +1835,18 @@ def _fetch_sales_reason(target_key: str, target_name: str, yearmonth: str,
     # ─── 섹션 1: 전월 대비 ────────────────────────────────
     lines.append(f"【전월({prev_month_label}) 대비】")
     mom_net = round(sum(x["diff"] for x in mom_list), 2)
+    # forecast_total 주입 시 전월도 직접 SUM으로 계산 (카드와 일치)
+    if forecast_total is not None and forecast_total > 0:
+        _prev_direct = _safe_query(f"""
+            SELECT ROUND(COALESCE(SUM(`매출액`),0)/1000000,2) AS s
+            FROM {T_MAIN}
+            WHERE `{target_key}` = '{target_name}' AND `년월` = '{prev_ym}'
+        """)
+        _prev_total = float(_prev_direct[0]["s"]) if _prev_direct else round(sum(v["sales"] for v in prev_map.values()), 2)
+        mom_net = round(forecast_total - _prev_total, 2)
+    else:
+        _prev_total = round(sum(v["sales"] for v in prev_map.values()), 2)
     mom_sign = "+" if mom_net >= 0 else ""
-    _prev_total = round(sum(v["sales"] for v in prev_map.values()), 2)
     _mom_pct_str = ""
     if _prev_total > 0:
         _mom_pct = mom_net / _prev_total * 100
