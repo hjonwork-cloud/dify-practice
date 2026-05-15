@@ -3807,8 +3807,18 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                 """)
                 sales_st = float((rows_st[0].get("sales") or 0) if rows_st else 0)
                 month_st = int(ym_st[4:6])
-                text_st = f"{_specific_team_m}의 {month_st}월 매출액은 {_format_value(sales_st)}백만원입니다."
-            _send_kakao_callback(callback_url, text_st, "팀단독매출")
+                _cur_ym_st = _today_st.strftime("%Y%m")
+                if ym_st == _cur_ym_st:
+                    try:
+                        text_st = _build_dept_forecast_card(
+                            "부서명", _specific_team_m, sales_st, ym_st, _today_st
+                        )
+                    except Exception as _fe:
+                        logger.warning(f"[팀카드] 빌드 실패({_fe}), 기본 포맷 사용")
+                        text_st = f"{_specific_team_m}의 {month_st}월 매출액은 {_format_value(sales_st)}백만원입니다."
+                else:
+                    text_st = f"{_specific_team_m}의 {month_st}월 매출액은 {_format_value(sales_st)}백만원입니다."
+            _send_kakao_callback_qr(callback_url, text_st, _SALES_FOLLOW_QR, "팀단독매출")
         except Exception as e:
             logger.error(f"[콜백] 팀단독매출 오류: {e}")
             _send_kakao_callback(callback_url, "⚠️ 팀 매출 조회 중 오류가 발생했습니다.", "팀단독매출")
