@@ -1782,16 +1782,22 @@ def _fetch_sales_reason(target_key: str, target_name: str, yearmonth: str,
     mom_dec  = sorted([x for x in mom_list if x["diff"] < 0], key=lambda x: x["diff"])
 
     # ─── 전년 대비: 신규/중단/기존 분류 ──────────────────
-    # 신규: cur에 있고 yoy에 없음 (new_zc 여부 무관)
+    # 신규: new_zc 집합(MIN 청구일 기준 진짜 신규)에 속하고 yoy에 없음
+    # 복귀: cur에 있고 yoy에 없지만 new_zc 아님 → exist_rows에 diff=cur로 추가
+    # 기존: cur/yoy 둘 다 있음
     # 중단: yoy에 있고 cur에 없음
-    # 기존: 둘 다 있음
     new_rows: list[dict] = []
     stopped_rows: list[dict] = []
     exist_rows: list[dict] = []
 
     for zc, d in cur_map.items():
         if zc not in yoy_map:
-            new_rows.append({"zc": zc, "name": d["name"], "sales": d["sales"]})
+            if zc in new_zc:
+                new_rows.append({"zc": zc, "name": d["name"], "sales": d["sales"]})
+            else:
+                # 복귀 거래처: 기존 증감에 포함 (전년 0 대비 전액 증가)
+                exist_rows.append({"zc": zc, "name": d["name"], "diff": d["sales"],
+                                    "cur": d["sales"], "yoy": 0.0})
         else:
             diff = round(d["sales"] - yoy_map[zc]["sales"], 2)
             exist_rows.append({"zc": zc, "name": d["name"], "diff": diff,
@@ -1815,22 +1821,21 @@ def _fetch_sales_reason(target_key: str, target_name: str, yearmonth: str,
     def _sum_sales(lst: list[dict]) -> float:
         return round(sum(x.get("sales", x.get("diff", 0)) for x in lst), 2)
 
-    # 전년 순증감 = 세부 항목 합산으로 계산 (신규+기존-중단 = 순증감 항상 일치)
-    # forecast_factor가 cur_map에 이미 반영되어 있으므로 세부합이 곧 예상 기준 순증감
-    _new_total     = round(sum(x["sales"] for x in new_rows), 2)
-    _stopped_total = round(sum(x["sales"] for x in stopped_rows), 2)
-    _exist_net     = round(sum(x["diff"]  for x in exist_rows), 2)
-    yoy_net        = round(_new_total - _stopped_total + _exist_net, 2)
-    # % 계산에 쓸 전년 기준값: forecast_total 주입 시 카드와 동일한 직접 SUM
+    # 전년 순증감: forecast_total 주입 시 카드와 동일한 직접 SUM 기준 (% 포함)
     if forecast_total is not None and forecast_total > 0:
         _yoy_direct = _safe_query(f"""
             SELECT ROUND(COALESCE(SUM(`매출액`),0)/1000000,2) AS s
             FROM {T_MAIN}
             WHERE `{target_key}` = '{target_name}' AND `년월` = '{yoy_ym}'
         """)
-        _yoy_base = float(_yoy_direct[0]["s"]) if _yoy_direct else (_stopped_total + sum(x["yoy"] for x in exist_rows))
+        _yoy_base = float(_yoy_direct[0]["s"]) if _yoy_direct else sum(v["sales"] for v in yoy_map.values())
+        yoy_net   = round(forecast_total - _yoy_base, 2)
     else:
-        _yoy_base = _stopped_total + sum(x["yoy"] for x in exist_rows)
+        _yoy_base = round(sum(v["sales"] for v in yoy_map.values()), 2)
+        yoy_net   = round(forecast_total - _yoy_base, 2)
+    else:
+        _yoy_base = round(sum(v["sales"] for v in yoy_map.values()), 2)
+        yoy_net   = round(sum(v["sales"] for v in cur_map.values()) - _yoy_base, 2)
 
     lines = [f"📊 {target_name} {month_label} 매출 변동 분석", ""]
     if _forecast_factor != 1.0 and _data_day_r:
