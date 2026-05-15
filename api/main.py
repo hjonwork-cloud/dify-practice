@@ -1832,9 +1832,6 @@ def _fetch_sales_reason(target_key: str, target_name: str, yearmonth: str,
         yoy_net   = round(forecast_total - _yoy_base, 2)
     else:
         _yoy_base = round(sum(v["sales"] for v in yoy_map.values()), 2)
-        yoy_net   = round(forecast_total - _yoy_base, 2)
-    else:
-        _yoy_base = round(sum(v["sales"] for v in yoy_map.values()), 2)
         yoy_net   = round(sum(v["sales"] for v in cur_map.values()) - _yoy_base, 2)
 
     lines = [f"📊 {target_name} {month_label} 매출 변동 분석", ""]
