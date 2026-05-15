@@ -3400,8 +3400,23 @@ _PLANT_LEVEL_MAP: dict[str, tuple[str, str]] = {
     "단일 거래처": ("거래처명",   "ZT"),
 }
 
+# 사용자가 입력할 수 있는 플랜트 키워드 → DB LIKE 검색어 매핑
+# 예) "대구센터" → "대구"  (뒤에 센터/공장/물류 붙어도 LIKE '%대구%' 로 검색)
+_PLANT_KEYWORDS: list[str] = [
+    "서이천",  # 앞 순서 중요: '이천'보다 먼저 매칭
+    "대구", "양산", "호남", "이천", "아산", "충주", "삼조", "위탁", "시화",
+    "화성",  # 화성(식재), 화성(외식_3배치), 화성(키즈) 포함
+]
 
-def _build_plant_breakdown_card(brand_name: str, level_label: str, ym: str) -> str:
+def _extract_plant_keyword(word: str) -> str | None:
+    """단어에서 플랜트 키워드 추출. 예) '대구센터' → '대구', '양산' → '양산'"""
+    cleaned = re.sub(r'(센터|공장|물류|창고)$', '', word).strip()
+    for kw in _PLANT_KEYWORDS:
+        if cleaned == kw or cleaned.startswith(kw):
+            return kw
+    return None
+
+
     """브랜드/거래처의 플랜트별 매출 분해 카드 반환."""
     col_info = _PLANT_LEVEL_MAP.get(level_label)
     if not col_info:
@@ -3432,6 +3447,75 @@ def _build_plant_breakdown_card(brand_name: str, level_label: str, ym: str) -> s
     lines.append("─" * 16)
     lines.append(f"합계  {_format_value(total)}백만원")
     lines.append(f"📌 집계단위: {level_label}")
+    return "\n".join(lines)
+
+
+def _build_brand_plant_sales_card(brand_keyword: str, plant_keyword: str, ym: str) -> str:
+    """'브랜드명 대구센터 매출액' 형태 쿼리 처리.
+    brand_keyword: ZC본부명 LIKE 검색어 (예: '닭동가리')
+    plant_keyword: 플랜트명 LIKE 검색어 (예: '대구')
+    ym: 'YYYYMM'
+    """
+    mo = int(ym[4:6])
+    # ZC 브랜드 + 플랜트 조합 조회
+    rows = _safe_query(f"""
+        SELECT `ZC본부명`, `플랜트명`,
+               ROUND(COALESCE(SUM(`매출액`), 0) / 1000000, 4) AS sales
+        FROM {T_MAIN}
+        WHERE `사업부명` = '외식식재사업부'
+          AND `ZC본부명` LIKE '%{brand_keyword}%'
+          AND TRIM(LEADING '0' FROM `ZC본부`) LIKE '8%'
+          AND `플랜트명` LIKE '%{plant_keyword}%'
+          AND `년월` = '{ym}'
+        GROUP BY `ZC본부명`, `플랜트명`
+        ORDER BY sales DESC
+    """)
+    rows = [r for r in rows if float(r.get("sales", 0)) > 0]
+
+    # ZC 없으면 ZA / 거래처명 으로 fallback
+    if not rows:
+        rows = _safe_query(f"""
+            SELECT `ZA거래처명` AS ZC본부명, `플랜트명`,
+                   ROUND(COALESCE(SUM(`매출액`), 0) / 1000000, 4) AS sales
+            FROM {T_MAIN}
+            WHERE `사업부명` = '외식식재사업부'
+              AND `ZA거래처명` LIKE '%{brand_keyword}%'
+              AND `플랜트명` LIKE '%{plant_keyword}%'
+              AND `년월` = '{ym}'
+            GROUP BY `ZA거래처명`, `플랜트명`
+            ORDER BY sales DESC
+        """)
+        rows = [r for r in rows if float(r.get("sales", 0)) > 0]
+
+    if not rows:
+        return (
+            f"'{brand_keyword}' 브랜드의 {plant_keyword} 플랜트\n"
+            f"{mo}월 매출 데이터가 없습니다.\n"
+            f"• 브랜드명 또는 센터명을 확인해주세요."
+        )
+
+    # 브랜드가 1개인 경우
+    brands = list({r["ZC본부명"] for r in rows})
+    if len(brands) > 1:
+        brand_list = "\n".join(f"  {i+1}. {b}" for i, b in enumerate(brands[:5]))
+        return (
+            f"'{brand_keyword}' 브랜드가 여러 개 있습니다:\n{brand_list}\n\n"
+            f"정확한 브랜드명으로 다시 입력해주세요."
+        )
+
+    brand_name = brands[0]
+    total = sum(float(r["sales"]) for r in rows)
+    plant_names = ", ".join(r.get("플랜트명", "?") for r in rows)
+    lines = [
+        f"📦 {brand_name}",
+        f"{plant_names} {mo}월 매출액\n",
+    ]
+    for r in rows:
+        val = float(r["sales"])
+        lines.append(f"{_format_value(val)}백만원")
+    if len(rows) > 1:
+        lines.append("─" * 16)
+        lines.append(f"합계  {_format_value(total)}백만원")
     return "\n".join(lines)
 
 
@@ -3703,6 +3787,45 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
         card = _build_plant_breakdown_card(_pl_brand, _pl_level, _pl_ym)
         _send_kakao_callback_qr(callback_url, card, _SALES_FOLLOW_QR, "브랜드매출")
         return
+
+    # ── 브랜드+플랜트 복합 조회: "닭동가리 대구센터 매출액" ──
+    if '매출' in query:
+        # 쿼리에서 플랜트 키워드 단어를 탐지
+        _q_words = query.strip().split()
+        _found_plant_kw: str | None = None
+        _found_plant_word_idx: int = -1
+        for _wi, _word in enumerate(_q_words):
+            _clean_word = re.sub(r'(센터|공장|물류|창고|점|단지)$', '', _word)
+            for _pkw in _PLANT_KEYWORDS:
+                if _clean_word == _pkw or _clean_word.startswith(_pkw):
+                    _found_plant_kw = _pkw
+                    _found_plant_word_idx = _wi
+                    break
+            if _found_plant_kw:
+                break
+        if _found_plant_kw and _found_plant_word_idx > 0:
+            # 플랜트 키워드 앞 단어들 = 브랜드 키워드
+            _brand_kw_words = _q_words[:_found_plant_word_idx]
+            # 뒤 단어에서 '매출', '실적' 등 제거
+            _brand_kw_words = [w for w in _brand_kw_words
+                               if not re.match(r'^(매출|실적|액|알려|줘|주세).*$', w)]
+            _brand_kw = ' '.join(_brand_kw_words).strip()
+            _brand_kw = re.sub(r'[는은의이가을를로에서만]$', '', _brand_kw).strip()
+            # 년월 추출
+            _ym_bp = time.strftime("%Y%m")
+            _mo_bp_m = re.search(r'(\d{1,2})월', query)
+            _yr_bp_m = re.search(r'(\d{2,4})년', query)
+            if _mo_bp_m:
+                _mo_bp = int(_mo_bp_m.group(1))
+                _yr_bp = int(_yr_bp_m.group(1)) if _yr_bp_m else int(time.strftime("%Y"))
+                if _yr_bp < 100:
+                    _yr_bp += 2000
+                _ym_bp = f"{_yr_bp}{_mo_bp:02d}"
+            if _brand_kw and len(_brand_kw) >= 2:
+                logger.info(f"[콜백] 브랜드+플랜트 조회: brand={_brand_kw}, plant={_found_plant_kw}, ym={_ym_bp}")
+                card = _build_brand_plant_sales_card(_brand_kw, _found_plant_kw, _ym_bp)
+                _send_kakao_callback_qr(callback_url, card, _SALES_FOLLOW_QR, "브랜드매출")
+                return
 
     # 매출 증가사유 추가질문 처리
     if _SALES_REASON_PATTERN.search(query):
