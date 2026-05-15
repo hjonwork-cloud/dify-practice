@@ -993,19 +993,23 @@ def _build_store_agg_suggestion(keyword: str, yearmonth: str) -> tuple:
     """점포합산 후 ZC/ZA 제안 텍스트 + QR 버튼 반환.
     Returns: (suggestion_text: str, qr_buttons: list)
     """
+    import time as _time_sas
     zc_list, za_list = _get_store_agg_alternatives(keyword, yearmonth)
     if not zc_list and not za_list:
         return "", []
+    # 이번달이면 월 생략, 과거월이면 "N월" 붙임
+    _cur_ym = _time_sas.strftime("%Y%m")
+    _mo_suffix = f" {int(yearmonth[4:6])}월" if yearmonth != _cur_ym else ""
     parts = []
     qr_btns = []
     for zc_name, _ in zc_list:
         parts.append(f"{zc_name}(ZC)")
         qr_btns.append({"label": f"{zc_name}(ZC)", "action": "message",
-                        "messageText": f"{zc_name} 매출"})
+                        "messageText": f"{zc_name}{_mo_suffix} 매출"})
     for za_name, _ in za_list:
         parts.append(f"{za_name}(ZA)")
         qr_btns.append({"label": f"{za_name}(ZA)", "action": "message",
-                        "messageText": f"{za_name} 매출"})
+                        "messageText": f"{za_name}{_mo_suffix} 매출"})
     # 메인 메뉴 버튼 추가
     qr_btns.append({"label": "🏠 메인 메뉴", "action": "message", "messageText": "메뉴"})
     candidates_str = ", ".join(parts)
