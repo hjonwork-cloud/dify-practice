@@ -3392,6 +3392,65 @@ def _register_and_callback(
         )
 
 
+# ─── 플랜트별 매출 분해 ─────────────────────────────────────
+# level_label → (DB 컬럼명, messageText 코드)
+_PLANT_LEVEL_MAP: dict[str, tuple[str, str]] = {
+    "브랜드(ZC)":  ("ZC본부명", "ZC"),
+    "거래처(ZA)":  ("ZA거래처명", "ZA"),
+    "단일 거래처": ("거래처명",   "ZT"),
+}
+
+
+def _build_plant_breakdown_card(brand_name: str, level_label: str, ym: str) -> str:
+    """브랜드/거래처의 플랜트별 매출 분해 카드 반환."""
+    col_info = _PLANT_LEVEL_MAP.get(level_label)
+    if not col_info:
+        return "플랜트별 집계가 지원되지 않는 집계단위입니다."
+    col_name, _ = col_info
+    mo = int(ym[4:6])
+    rows = _safe_query(f"""
+        SELECT `플랜트`, `플랜트명`,
+               ROUND(COALESCE(SUM(`매출액`), 0) / 1000000, 4) AS sales
+        FROM {T_MAIN}
+        WHERE `사업부명` = '외식식재사업부'
+          AND `{col_name}` = '{brand_name}'
+          AND `년월` = '{ym}'
+        GROUP BY `플랜트`, `플랜트명`
+        ORDER BY sales DESC
+    """)
+    rows = [r for r in rows if float(r.get("sales", 0)) > 0]
+    if not rows:
+        return f"📦 {brand_name}\n{mo}월 플랜트별 데이터가 없습니다."
+    total = sum(float(r["sales"]) for r in rows)
+    lines = [f"📦 {brand_name}", f"{mo}월 플랜트별 매출액\n"]
+    for r in rows:
+        val = float(r["sales"])
+        pct = round(val / total * 100) if total > 0 else 0
+        plant_label = r.get("플랜트명") or r.get("플랜트", "?")
+        lines.append(f"• {plant_label}")
+        lines.append(f"  {_format_value(val)}백만원 ({pct}%)")
+    lines.append("─" * 16)
+    lines.append(f"합계  {_format_value(total)}백만원")
+    lines.append(f"📌 집계단위: {level_label}")
+    return "\n".join(lines)
+
+
+def _brand_send(callback_url: str, card: str, level_label: str,
+                brand_name: str, ym: str, label: str = "브랜드매출"):
+    """브랜드 카드 전송. ZC/ZA/단일 거래처 레벨이면 📦 플랜트별 버튼 추가."""
+    if level_label in _PLANT_LEVEL_MAP:
+        level_code = _PLANT_LEVEL_MAP[level_label][1]
+        plant_btn = {
+            "label": "📦 플랜트별 매출액",
+            "action": "message",
+            "messageText": f"플랜트별 {level_code} {brand_name} {ym}",
+        }
+        qr = _SALES_FOLLOW_QR + [plant_btn]
+    else:
+        qr = _SALES_FOLLOW_QR
+    _send_kakao_callback_qr(callback_url, card, qr, label)
+
+
 def _bg_candidate_query(
     matched_cand: str, cand_level: str, cand_ym: str, cand_mo: int,
     callback_url: str,
@@ -3450,7 +3509,7 @@ def _bg_candidate_query(
             else:
                 _send_kakao_callback_qr(callback_url, card, _SALES_FOLLOW_QR, "브랜드매출")
         else:
-            _send_kakao_callback_qr(callback_url, card, _SALES_FOLLOW_QR, "브랜드매출")
+            _brand_send(callback_url, card, cand_level, matched_cand, cand_ym)
     except Exception as e:
         logger.error(f"[bg_candidate] 오류: {e}")
         _send_kakao_callback(callback_url, "⚠️ 매출 조회 중 오류가 발생했습니다.", "브랜드매출")
@@ -3514,7 +3573,7 @@ def _bg_confirm_query(
             else:
                 _send_kakao_callback_qr(callback_url, card, _SALES_FOLLOW_QR, "브랜드매출")
         else:
-            _send_kakao_callback_qr(callback_url, card, _SALES_FOLLOW_QR, "브랜드매출")
+            _brand_send(callback_url, card, p_level, p_name, p_ym)
     except Exception as e:
         logger.error(f"[bg_confirm] 오류: {e}")
         _send_kakao_callback(callback_url, "⚠️ 매출 조회 중 오류가 발생했습니다.", "브랜드매출")
@@ -3634,6 +3693,16 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
     """
     t0 = time.time()
     logger.info(f"[콜백] 시작: user={user_id}, query={query[:80]}")
+
+    # ── 플랜트별 매출 조회 (QR 버튼 messageText: "플랜트별 ZC 브랜드명 YYYYMM") ──
+    _plant_m = re.match(r'^플랜트별\s+(ZC|ZA|ZT)\s+(.+)\s+(\d{6})$', query.strip())
+    if _plant_m:
+        _pl_code, _pl_brand, _pl_ym = _plant_m.group(1), _plant_m.group(2).strip(), _plant_m.group(3)
+        _level_reverse = {"ZC": "브랜드(ZC)", "ZA": "거래처(ZA)", "ZT": "단일 거래처"}
+        _pl_level = _level_reverse.get(_pl_code, "브랜드(ZC)")
+        card = _build_plant_breakdown_card(_pl_brand, _pl_level, _pl_ym)
+        _send_kakao_callback_qr(callback_url, card, _SALES_FOLLOW_QR, "브랜드매출")
+        return
 
     # 매출 증가사유 추가질문 처리
     if _SALES_REASON_PATTERN.search(query):
@@ -4415,7 +4484,7 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                             else:
                                 _send_kakao_callback_qr(callback_url, _br_card, _SALES_FOLLOW_QR, "브랜드매출")
                         else:
-                            _send_kakao_callback_qr(callback_url, _br_card, _SALES_FOLLOW_QR, "브랜드매출")
+                            _brand_send(callback_url, _br_card, _br_level, _br_matched, _br_date_str[:6])
                     else:
                         _send_kakao_callback_qr(callback_url,
                             f"'{_br_name}' {_br_date_label} 매출 데이터가 없습니다.\n(당일 데이터는 익일 반영 기준)",
@@ -4502,7 +4571,7 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                             else:
                                 _send_kakao_callback_qr(callback_url, card, _SALES_FOLLOW_QR, "브랜드매출")
                         else:
-                            _send_kakao_callback_qr(callback_url, card, _SALES_FOLLOW_QR, "브랜드매출")
+                            _brand_send(callback_url, card, level_label, matched_name, yearmonth)
                     else:
                         # None → 퍼지 검색
                         _candidates = _fuzzy_search_candidates(brand_name, yearmonth)
@@ -4618,7 +4687,7 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                             else:
                                 _send_kakao_callback_qr(callback_url, card, _SALES_FOLLOW_QR, "브랜드매출")
                         else:
-                            _send_kakao_callback_qr(callback_url, card, _SALES_FOLLOW_QR, "브랜드매출")
+                            _brand_send(callback_url, card, level_label, matched_name, _ym_now)
                         return
                     else:
                         # None → 퍼지 검색
