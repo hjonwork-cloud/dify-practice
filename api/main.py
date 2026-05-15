@@ -2824,6 +2824,8 @@ def custom_query(req: QueryRequest):
 # ─── 사용자 인증/등록 ────────────────────────────────────────
 AUTH_DEPT = "외식식재사업부"  # 허용 사업부
 _USERS_FILE = os.path.join(os.path.dirname(__file__), "_registered_users.json")
+_WHITELIST_FILE = os.path.join(os.path.dirname(__file__), "_admin_whitelist.json")
+_BLACKLIST_FILE = os.path.join(os.path.dirname(__file__), "_admin_blacklist.json")
 _users_lock = threading.Lock()
 
 # 관리자급 수기 등록 화이트리스트 (DB에 영업사원 매출 없어도 등록 허용)
@@ -2854,6 +2856,32 @@ def _load_users() -> dict:
 def _save_users(users: dict):
     with open(_USERS_FILE, "w", encoding="utf-8") as f:
         json_mod.dump(users, f, ensure_ascii=False, indent=2)
+
+
+def _load_whitelist() -> dict:
+    """관리자 등록 화이트리스트. {emp_code: {name, team, added_at}}"""
+    if os.path.exists(_WHITELIST_FILE):
+        with open(_WHITELIST_FILE, "r", encoding="utf-8") as f:
+            return json_mod.load(f)
+    return {}
+
+
+def _save_whitelist(wl: dict):
+    with open(_WHITELIST_FILE, "w", encoding="utf-8") as f:
+        json_mod.dump(wl, f, ensure_ascii=False, indent=2)
+
+
+def _load_blacklist() -> list:
+    """관리자 블랙리스트. [emp_code, ...] — 영구 등록 차단"""
+    if os.path.exists(_BLACKLIST_FILE):
+        with open(_BLACKLIST_FILE, "r", encoding="utf-8") as f:
+            return json_mod.load(f)
+    return []
+
+
+def _save_blacklist(bl: list):
+    with open(_BLACKLIST_FILE, "w", encoding="utf-8") as f:
+        json_mod.dump(bl, f, ensure_ascii=False, indent=2)
 
 
 def _is_registered(user_id: str) -> bool:
@@ -2902,10 +2930,23 @@ def _verify_employee(name: str, emp_code: str) -> dict | None:
     """사원명+사번 인증. 화이트리스트 → DB 순서로 확인.
     Returns: {영업사원명, 영업사원, 지점명} or None
     """
-    # 퇴사자 차단
+    # 퇴사자 차단 (하드코딩 + 관리자 블랙리스트)
     if emp_code in _BLOCKED_EMPLOYEES:
-        logger.warning(f"[인증] 블랙리스트 차단: emp_code={emp_code}")
+        logger.warning(f"[인증] 블랙리스트 차단(하드코딩): emp_code={emp_code}")
         return None
+    if emp_code in _load_blacklist():
+        logger.warning(f"[인증] 블랙리스트 차단(관리자): emp_code={emp_code}")
+        return None
+
+    # 관리자 동적 화이트리스트 확인
+    _dyn_wl = _load_whitelist()
+    if emp_code in _dyn_wl:
+        wl_entry = _dyn_wl[emp_code]
+        compact_input = re.sub(r"\s+", "", name)
+        compact_wl = re.sub(r"\s+", "", wl_entry.get("name", ""))
+        if compact_input in compact_wl or compact_wl in compact_input:
+            logger.info(f"[인증] 동적 화이트리스트 매칭: {wl_entry.get('name')}")
+            return {"영업사원명": wl_entry.get("name", name), "영업사원": emp_code, "지점명": wl_entry.get("team", "")}
 
     # 관리자 화이트리스트 우선 확인 (DB 조회 불필요)
     if emp_code in _MANAGER_WHITELIST:
@@ -5018,6 +5059,85 @@ async def kakao_skill(request: Request, background_tasks: BackgroundTasks):
         if _is_admin(user_id):
             utt_strip = utterance.strip()
 
+            # 관리자 메뉴 화면
+            if re.match(r'^관리자\s*메뉴$', utt_strip):
+                return _kakao_quickreply(
+                    "🔑 관리자 메뉴\n\n원하시는 기능을 선택해주세요.",
+                    [
+                        {"label": "📋 사용자 목록", "action": "message", "messageText": "사용자 목록"},
+                        {"label": "➕ 사용자 등록", "action": "message", "messageText": "사용자등록 안내"},
+                        {"label": "🚫 사용자 등록취소", "action": "message", "messageText": "등록취소 안내"},
+                    ]
+                )
+
+            # 사용자 등록 안내
+            if re.match(r'^사용자\s*등록\s*안내$', utt_strip):
+                return _kakao_quickreply(
+                    "➕ [관리자] 사용자 등록 (화이트리스트)\n\n"
+                    "형식: 사용자등록 이름 사번\n"
+                    "예시: 사용자등록 홍길동 20230001\n\n"
+                    "등록된 사람은 챗봇에서 '등록 이름 사번' 입력 시\n"
+                    "화이트리스트로 즉시 인증 통과됩니다.",
+                    [{"label": "🔑 관리자 메뉴", "action": "message", "messageText": "관리자 메뉴"}]
+                )
+
+            # 사용자 등록 실행: 사용자등록 이름 사번
+            _add_m = re.match(r'^사용자\s*등록\s+([가-힣a-zA-Z\s]{2,10})\s+(\d{6,10})$', utt_strip)
+            if _add_m:
+                _add_name = _add_m.group(1).strip()
+                _add_emp = _add_m.group(2).strip()
+                # 블랙리스트 확인
+                if _add_emp in _load_blacklist():
+                    return _kakao_quickreply(
+                        f"⛔ {_add_emp}는 블랙리스트에 등록된 사번입니다. 등록 불가.",
+                        [{"label": "🔑 관리자 메뉴", "action": "message", "messageText": "관리자 메뉴"}]
+                    )
+                # 이미 등록된 사용자 확인
+                _existing = _find_user_by_emp_code(_add_emp)
+                if _existing:
+                    return _kakao_quickreply(
+                        f"ℹ️ {_add_emp}는 이미 '{_existing}'으로 등록된 사용자입니다.",
+                        [{"label": "🔑 관리자 메뉴", "action": "message", "messageText": "관리자 메뉴"}]
+                    )
+                # DB 조회로 소속 파악
+                _add_team = ""
+                _add_rows = _safe_query(f"""
+                    SELECT DISTINCT `지점명` FROM {T_MAIN}
+                    WHERE `사업부명` = '{AUTH_DEPT}' AND `영업사원` = '{_add_emp}' LIMIT 1
+                """)
+                if _add_rows:
+                    _add_team = _add_rows[0].get("지점명", "")
+                # 이미 화이트리스트에 있는지 확인
+                _wl_check = _load_whitelist()
+                if _add_emp in _wl_check:
+                    return _kakao_quickreply(
+                        f"ℹ️ {_add_name}({_add_emp})는 이미 화이트리스트에 있습니다.",
+                        [{"label": "🔑 관리자 메뉴", "action": "message", "messageText": "관리자 메뉴"}]
+                    )
+                # 화이트리스트에 추가
+                with _users_lock:
+                    _wl = _load_whitelist()
+                    _wl[_add_emp] = {"name": _add_name, "team": _add_team, "added_at": time.strftime("%Y-%m-%d %H:%M:%S")}
+                    _save_whitelist(_wl)
+                return _kakao_quickreply(
+                    f"✅ 화이트리스트 등록 완료!\n\n"
+                    f"이름: {_add_name}\n"
+                    f"사번: {_add_emp}\n"
+                    f"소속: {_add_team or '(DB 없음)'}\n\n"
+                    f"해당 사용자가 챗봇에서\n'등록 {_add_name} {_add_emp}' 입력 시 바로 사용 가능합니다.",
+                    [{"label": "🔑 관리자 메뉴", "action": "message", "messageText": "관리자 메뉴"}]
+                )
+
+            # 등록취소 안내
+            if re.match(r'^등록취소\s*안내$', utt_strip):
+                return _kakao_quickreply(
+                    "🚫 [관리자] 사용자 등록취소 (블랙리스트)\n\n"
+                    "형식: 등록취소 이름 사번\n"
+                    "예시: 등록취소 홍길동 20230001\n\n"
+                    "⚠️ 취소된 사용자는 이후 재등록이 영구 차단됩니다.",
+                    [{"label": "🔑 관리자 메뉴", "action": "message", "messageText": "관리자 메뉴"}]
+                )
+
             # 사용자 목록 조회
             if re.match(r'^(사용자\s*목록|등록자\s*목록|관리자\s*명단|유저\s*목록)$', utt_strip):
                 users_all = _load_users()
@@ -5029,28 +5149,46 @@ async def kakao_skill(request: Request, background_tasks: BackgroundTasks):
                         f"   소속: {info.get('team', '-')}\n"
                         f"   등록: {info.get('registered_at','?')[:10]}"
                     )
-                return _kakao_quickreply("\n".join(lines), [{"label": "🏠 메인 메뉴", "action": "message", "messageText": "메뉴"}])
+                return _kakao_quickreply("\n".join(lines), [{"label": "🔑 관리자 메뉴", "action": "message", "messageText": "관리자 메뉴"}, {"label": "🏠 메인 메뉴", "action": "message", "messageText": "메뉴"}])
 
-            # 사용자 등록 취소
-            _del_m = re.match(r'^등록취소\s+([가-힣]{2,5})\s+(\d{6,10})$', utt_strip)
+            # 사용자 등록 취소 (블랙리스트)
+            _del_m = re.match(r'^등록취소\s+([가-힣a-zA-Z\s]{2,10})\s+(\d{6,10})$', utt_strip)
             if _del_m:
-                _del_name, _del_emp = _del_m.group(1), _del_m.group(2)
+                _del_name, _del_emp = _del_m.group(1).strip(), _del_m.group(2).strip()
                 users_all = _load_users()
                 _del_uid = next((uid for uid, info in users_all.items()
                                  if info.get("emp_code") == _del_emp), None)
+                # 등록된 사용자면 삭제
+                _del_display = _del_name
                 if _del_uid:
                     _del_info = users_all.pop(_del_uid)
+                    _del_display = _del_info.get("name", _del_name)
                     with _users_lock:
                         _save_users(users_all)
+                # 화이트리스트에서도 제거
+                with _users_lock:
+                    _wl = _load_whitelist()
+                    if _del_emp in _wl:
+                        _wl.pop(_del_emp)
+                        _save_whitelist(_wl)
+                # 블랙리스트에 추가 (영구 차단)
+                with _users_lock:
+                    _bl = _load_blacklist()
+                    if _del_emp not in _bl:
+                        _bl.append(_del_emp)
+                        _save_blacklist(_bl)
+                if _del_uid:
                     return _kakao_quickreply(
-                        f"🗑️ {_del_info.get('name')}({_del_emp}) 등록이 취소되었습니다.",
+                        f"🚫 {_del_display}({_del_emp}) 등록 취소 완료\n"
+                        f"블랙리스트에 추가 — 재등록 영구 차단됩니다.",
                         [{"label": "📋 사용자 목록", "action": "message", "messageText": "사용자 목록"},
-                         {"label": "🏠 메인 메뉴", "action": "message", "messageText": "메뉴"}]
+                         {"label": "🔑 관리자 메뉴", "action": "message", "messageText": "관리자 메뉴"}]
                     )
                 else:
                     return _kakao_quickreply(
-                        f"❌ 사번 {_del_emp}로 등록된 사용자를 찾을 수 없습니다.",
-                        [{"label": "🏠 메인 메뉴", "action": "message", "messageText": "메뉴"}]
+                        f"⚠️ 사번 {_del_emp}로 등록된 사용자가 없습니다.\n"
+                        f"블랙리스트에는 추가했습니다 (신규 등록 차단).",
+                        [{"label": "🔑 관리자 메뉴", "action": "message", "messageText": "관리자 메뉴"}]
                     )
 
             # 서버 상태 확인
@@ -5062,7 +5200,8 @@ async def kakao_skill(request: Request, background_tasks: BackgroundTasks):
                     f"🟢 서버 정상 운영 중\n"
                     f"시각: {now_str}\n"
                     f"등록 사용자: {len(users_all)}명",
-                    [{"label": "🏠 메인 메뉴", "action": "message", "messageText": "메뉴"}]
+                    [{"label": "🔑 관리자 메뉴", "action": "message", "messageText": "관리자 메뉴"},
+                     {"label": "🏠 메인 메뉴", "action": "message", "messageText": "메뉴"}]
                 )
 
         # ── 3-0) 메뉴 키워드 → 메인 메뉴 즉시 표시 ──
@@ -5079,7 +5218,7 @@ async def kakao_skill(request: Request, background_tasks: BackgroundTasks):
             )
             _menu_qr = list(_MAIN_MENU_QR)
             if _role_tmp == "admin":
-                _menu_qr = _menu_qr + [{"label": "🔑 관리자 메뉴", "action": "message", "messageText": "사용자 목록"}]
+                _menu_qr = _menu_qr + [{"label": "🔑 관리자 메뉴", "action": "message", "messageText": "관리자 메뉴"}]
             return _kakao_quickreply(menu_text, _menu_qr)
 
         # ── 3-0b) 매출 실적 메뉴 버튼 클릭 ──
@@ -5306,7 +5445,7 @@ async def kakao_skill(request: Request, background_tasks: BackgroundTasks):
             reply += "\n\n확인하고 싶은 것들을 아래에서 선택하거나\n편하게 질문을 입력해 주세요."
             _greet_qr = list(_MAIN_MENU_QR)
             if _is_admin(user_id):
-                _greet_qr = _greet_qr + [{"label": "🔑 관리자 메뉴", "action": "message", "messageText": "사용자 목록"}]
+                _greet_qr = _greet_qr + [{"label": "🔑 관리자 메뉴", "action": "message", "messageText": "관리자 메뉴"}]
             return _kakao_quickreply(reply, _greet_qr)
 
         # ── 3-2) 본인 확인 질문 즉시 응답 ──
@@ -5324,7 +5463,7 @@ async def kakao_skill(request: Request, background_tasks: BackgroundTasks):
             )
             _who_qr = list(_MAIN_MENU_QR)
             if _is_admin(user_id):
-                _who_qr = _who_qr + [{"label": "🔑 관리자 메뉴", "action": "message", "messageText": "사용자 목록"}]
+                _who_qr = _who_qr + [{"label": "🔑 관리자 메뉴", "action": "message", "messageText": "관리자 메뉴"}]
             return _kakao_quickreply(reply, _who_qr)
 
         # ── 3-3) '내/나의' 대명사 → 실제 이름으로 치환 ──
@@ -5351,7 +5490,7 @@ async def kakao_skill(request: Request, background_tasks: BackgroundTasks):
         # 콜백 없음 → 즉시 응답
         _fb_qr = list(_MAIN_MENU_QR)
         if _is_admin(user_id):
-            _fb_qr = _fb_qr + [{"label": "🔑 관리자 메뉴", "action": "message", "messageText": "사용자 목록"}]
+            _fb_qr = _fb_qr + [{"label": "🔑 관리자 메뉴", "action": "message", "messageText": "관리자 메뉴"}]
         return _kakao_quickreply(
             "💬 매출봇입니다.\n확인하고 싶은 것들을 아래에서 선택하거나\n편하게 질문을 입력해 주세요.",
             _fb_qr
