@@ -1762,7 +1762,7 @@ def _fetch_sales_reason(target_key: str, target_name: str, yearmonth: str,
             _forecast_factor = forecast_total / _actual_sum
     if _forecast_factor != 1.0:
         cur_map = {
-            zc: {"name": d["name"], "sales": round(d["sales"] * _forecast_factor, 2)}
+            zc: {"name": d["name"], "sales": d["sales"] * _forecast_factor}  # round 미적용: 누적 오차 방지
             for zc, d in cur_map.items()
         }
 
