@@ -3417,6 +3417,7 @@ def _extract_plant_keyword(word: str) -> str | None:
     return None
 
 
+def _build_plant_breakdown_card(brand_name: str, level_label: str, ym: str) -> str:
     """브랜드/거래처의 플랜트별 매출 분해 카드 반환."""
     col_info = _PLANT_LEVEL_MAP.get(level_label)
     if not col_info:
