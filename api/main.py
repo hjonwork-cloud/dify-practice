@@ -1624,7 +1624,7 @@ def _fetch_sales_reason(target_key: str, target_name: str, yearmonth: str,
         """ZC본부별 매출 맵: {zc코드: {name, sales}}"""
         rows = _safe_query(f"""
             SELECT `ZC본부` AS zc, `ZC본부명` AS nm,
-                   ROUND(COALESCE(SUM(`매출액`), 0) / 1000000, 2) AS sales
+                   ROUND(COALESCE(SUM(`매출액`), 0) / 1000000, 6) AS sales
             FROM {T_MAIN}
             WHERE `{target_key}` = '{target_name}' AND `년월` = '{target_ym}'
             GROUP BY `ZC본부`, `ZC본부명`
