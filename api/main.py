@@ -3408,8 +3408,35 @@ _PLANT_KEYWORDS: list[str] = [
     "화성",  # 화성(식재), 화성(외식_3배치), 화성(키즈) 포함
 ]
 
+# 사용자 별칭 → DB LIKE 검색어 (정확 매핑 우선 적용)
+# 예) "HL센터" / "H/L" → "위탁",  "아라센터" / "아라로지스" → "서이천"
+_PLANT_ALIASES: dict[str, str] = {
+    # 위탁2센터(H/L) 별칭
+    "hl":       "위탁",
+    "h/l":      "위탁",
+    "hl센터":   "위탁",
+    "h/l센터":  "위탁",
+    "위탁센터": "위탁",
+    # 서이천센터 별칭
+    "아라":       "서이천",
+    "아라센터":   "서이천",
+    "아라로지스": "서이천",
+    "아라물류":   "서이천",
+}
+
 def _extract_plant_keyword(word: str) -> str | None:
-    """단어에서 플랜트 키워드 추출. 예) '대구센터' → '대구', '양산' → '양산'"""
+    """단어에서 플랜트 키워드 추출.
+    1) 별칭 사전 우선 확인 (예: 'HL센터' → '위탁', '아라센터' → '서이천')
+    2) _PLANT_KEYWORDS 접두어 매칭 (예: '대구센터' → '대구')
+    """
+    # 별칭 사전 (소문자 정규화)
+    lower = word.lower().strip()
+    lower_clean = re.sub(r'(센터|공장|물류|창고)$', '', lower).strip()
+    if lower in _PLANT_ALIASES:
+        return _PLANT_ALIASES[lower]
+    if lower_clean in _PLANT_ALIASES:
+        return _PLANT_ALIASES[lower_clean]
+    # 일반 키워드 접두어 매칭 (센터/공장 등 suffix 제거 후)
     cleaned = re.sub(r'(센터|공장|물류|창고)$', '', word).strip()
     for kw in _PLANT_KEYWORDS:
         if cleaned == kw or cleaned.startswith(kw):
@@ -3796,13 +3823,10 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
         _found_plant_kw: str | None = None
         _found_plant_word_idx: int = -1
         for _wi, _word in enumerate(_q_words):
-            _clean_word = re.sub(r'(센터|공장|물류|창고|점|단지)$', '', _word)
-            for _pkw in _PLANT_KEYWORDS:
-                if _clean_word == _pkw or _clean_word.startswith(_pkw):
-                    _found_plant_kw = _pkw
-                    _found_plant_word_idx = _wi
-                    break
-            if _found_plant_kw:
+            _pkw_found = _extract_plant_keyword(_word)
+            if _pkw_found:
+                _found_plant_kw = _pkw_found
+                _found_plant_word_idx = _wi
                 break
         if _found_plant_kw and _found_plant_word_idx > 0:
             # 플랜트 키워드 앞 단어들 = 브랜드 키워드
