@@ -3440,6 +3440,7 @@ def _bg_confirm_query(
 # ─── 개인형 세부내역 ────────────────────────────────────────
 _user_last_sp: dict[str, str] = {}    # user_id → 최근 조회 영업사원명(공백제거)
 _user_last_sales: dict[str, dict] = {}  # user_id → {target_key, target_name, yearmonth}
+_user_last_reason: dict[str, str] = {}  # user_id → 전년대비 섹션 텍스트 (2번째 버블용)
 _user_pending_confirm: dict[str, dict] = {}    # user_id → {exact_name, month_num, yearmonth, level_label}
 _user_pending_candidates: dict[str, dict] = {} # user_id → {이름 → level_label}
 
@@ -3558,18 +3559,21 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
             logger.info(f"[콜백] 증가사유 요청: ctx={ctx}")
             try:
                 detail = _fetch_sales_reason(ctx["target_key"], ctx["target_name"], ctx["yearmonth"])
-                # 전월 대비 / 전년 대비 두 버블로 분할 (글자수 초과 방지)
+                # 전월 대비 / 전년 대비 분리
                 _split_marker = "\n【전년("
                 if _split_marker in detail:
                     _idx = detail.index(_split_marker)
                     part1 = detail[:_idx].rstrip()
                     part2 = detail[_idx:].lstrip()
-                    _send_kakao_callback(callback_url, _to_kakao_text(part1), "매출증가사유1")
-                    import time as _t_reason; _t_reason.sleep(0.3)
-                    _send_kakao_callback_qr(callback_url, _to_kakao_text(part2), _REASON_QR, "매출증가사유2")
+                    _user_last_reason[user_id] = part2
+                    _yoy_qr = [
+                        {"label": "📊 전년대비 보기", "action": "message", "messageText": "전년대비 보기"},
+                        {"label": "🏠 메인 메뉴", "action": "message", "messageText": "메뉴"},
+                    ]
+                    _send_kakao_callback_qr(callback_url, part1, _yoy_qr, "매출증가사유")
                 else:
-                    card = _to_kakao_text(detail)
-                    _send_kakao_callback_qr(callback_url, card, _REASON_QR, "매출증가사유")
+                    _user_last_reason[user_id] = ""
+                    _send_kakao_callback_qr(callback_url, detail[:1900], _REASON_QR, "매출증가사유")
             except Exception as e:
                 logger.error(f"[콜백] 증가사유 조회 오류: {e}")
                 _send_kakao_callback(callback_url, "⚠️ 증가사유 조회 중 오류가 발생했습니다.", "매출증가사유")
@@ -3581,6 +3585,15 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                 "매출증가사유",
             )
             return
+
+    # 전년대비 보기 (증가사유 2번째 버블)
+    if re.search(r'전년\s*대비\s*보기', query):
+        part2 = _user_last_reason.get(user_id)
+        if part2:
+            _send_kakao_callback_qr(callback_url, part2, _REASON_QR, "매출증가사유전년")
+        else:
+            _send_kakao_callback(callback_url, "먼저 증가사유를 조회해주세요.", "매출증가사유전년")
+        return
 
     # 개인형 세부내역 요청 처리
     if _PERSONAL_DETAIL_PATTERN.search(query):
