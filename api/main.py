@@ -1340,7 +1340,7 @@ def _build_dept_forecast_card(
         f"올해 누계         {ytd_this_s} (1월~{mo}월 {data_day}일)",
         f"전년 동기 比      {ytd_last_s} → {_pct(ytd_this, ytd_last)}",
     ]
-    return "\n".join(lines)
+    return "\n".join(lines), forecast
 
 
 def _fetch_brand_monthly_sales(brand_name: str, yearmonth: str) -> tuple[str, float, str] | None | list[str]:
@@ -1608,7 +1608,8 @@ def _build_monthly_sales_markdown(rows: list[dict]) -> str:
     return text
 
 
-def _fetch_sales_reason(target_key: str, target_name: str, yearmonth: str) -> str:
+def _fetch_sales_reason(target_key: str, target_name: str, yearmonth: str,
+                        forecast_total: float | None = None) -> str:
     """증가사유 상세 — 전월비(증가TOP3·감소TOP3) + 전년비(신규·중단·기존증감)"""
     ym    = str(yearmonth)
     year  = int(ym[:4])
@@ -1754,6 +1755,11 @@ def _fetch_sales_reason(target_key: str, target_name: str, yearmonth: str) -> st
                 _forecast_factor = _forecast_r / _sales_total_r
         except Exception:
             _forecast_factor = 1.0
+    # forecast_total이 외부에서 주입된 경우 그 값을 우선 사용 (카드와 일치)
+    if forecast_total is not None and forecast_total > 0:
+        _actual_sum = sum(d["sales"] for d in cur_map.values())
+        if _actual_sum > 0:
+            _forecast_factor = forecast_total / _actual_sum
     if _forecast_factor != 1.0:
         cur_map = {
             zc: {"name": d["name"], "sales": round(d["sales"] * _forecast_factor, 2)}
@@ -3558,7 +3564,8 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
         if ctx:
             logger.info(f"[콜백] 증가사유 요청: ctx={ctx}")
             try:
-                detail = _fetch_sales_reason(ctx["target_key"], ctx["target_name"], ctx["yearmonth"])
+                detail = _fetch_sales_reason(ctx["target_key"], ctx["target_name"], ctx["yearmonth"],
+                                            forecast_total=ctx.get("forecast_total"))
                 # 전월 대비 / 전년 대비 분리
                 _split_marker = "\n【전년("
                 if _split_marker in detail:
@@ -3854,18 +3861,21 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                 _cur_ym_st = _today_st.strftime("%Y%m")
                 if ym_st == _cur_ym_st:
                     try:
-                        text_st = _build_dept_forecast_card(
+                        text_st, _fc_st = _build_dept_forecast_card(
                             "부서명", _specific_team_m, sales_st, ym_st, _today_st
                         )
                     except Exception as _fe:
                         logger.warning(f"[팀카드] 빌드 실패({_fe}), 기본 포맷 사용")
                         text_st = f"{_specific_team_m}의 {month_st}월 매출액은 {_format_value(sales_st)}백만원입니다."
+                        _fc_st = None
                 else:
                     text_st = f"{_specific_team_m}의 {month_st}월 매출액은 {_format_value(sales_st)}백만원입니다."
+                    _fc_st = None
             _user_last_sales[user_id] = {
                 "target_key":  "부서명",
                 "target_name": _specific_team_m,
                 "yearmonth":   ym_st,
+                "forecast_total": _fc_st,
             }
             _send_kakao_callback_qr(callback_url, text_st, _REASON_QR, "팀단독매출")
         except Exception as e:
@@ -4047,7 +4057,7 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                 rows_dnm = _fetch_monthly_total(_tkey_dnm, _tname_dnm, _ym_dnm)
                 _sales_so_far_dnm = float(rows_dnm[0]["매출액_억원"]) if rows_dnm else 0.0
                 if _sales_so_far_dnm > 0:
-                    text_dnm = _build_dept_forecast_card(
+                    text_dnm, _fc_dnm = _build_dept_forecast_card(
                         _tkey_dnm, _tname_dnm, _sales_so_far_dnm, _ym_dnm, _today_dnm
                     )
                     text_dnm += "\n※ SAP 익일 반영. 예상 매출은 일평균 기준 단순 추정입니다."
@@ -4055,6 +4065,7 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                         "target_key":  _tkey_dnm,
                         "target_name": _tname_dnm,
                         "yearmonth":   _ym_dnm,
+                        "forecast_total": _fc_dnm,
                     }
                     _send_kakao_callback_qr(callback_url, _to_kakao_text(text_dnm), _REASON_QR, "사업부매출")
                 else:
