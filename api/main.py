@@ -1965,9 +1965,21 @@ def _fetch_sales_reason(target_key: str, target_name: str, yearmonth: str,
 # ─── 공통 유틸 (쿼리 파싱) ──────────────────────────────────
 
 def _extract_month_year(query: str) -> tuple[int, str]:
-    """쿼리에서 월/년월 추출. 없으면 현재 월."""
-    m = re.search(r'(\d{1,2})월', query)
+    """쿼리에서 월/년월 추출. 없으면 현재 월.
+    - '24년 12월', '2024년 3월' → (12, '202412')
+    - '3월' → (3, '<올해>03')
+    """
     cur_year = int(time.strftime("%Y"))
+    # 년 + 월 세트 우선 (예: 24년 12월, 2024년 3월)
+    ym = re.search(r'(\d{2,4})년\s*(\d{1,2})월', query)
+    if ym:
+        yr = int(ym.group(1))
+        mo = int(ym.group(2))
+        if yr < 100:          # 2자리 연도 예) 24 → 2024
+            yr = 2000 + yr
+        if 1 <= mo <= 12:
+            return mo, f"{yr}{mo:02d}"
+    m = re.search(r'(\d{1,2})월', query)
     if m:
         month = int(m.group(1))
         if 1 <= month <= 12:
@@ -2150,6 +2162,9 @@ def _profit_period_cond(period: str) -> str:
         return f"`날짜` = '{prev.strftime('%Y-%m-%d')}'"
     elif period == "올해":
         return f"YEAR(`날짜`) = {today.year}"
+    elif re.match(r'^\d{6}$', period):  # 202603 형식
+        date_str = f"{period[:4]}-{period[4:6]}-01"
+        return f"`날짜` = '{date_str}'"
     else:
         return "`날짜` IS NOT NULL"
 
@@ -2166,7 +2181,23 @@ def _period_label(period: str) -> str:
             return f"{today.year}년 {today.month-1}월"
     elif period == "올해":
         return f"{today.year}년 누계"
+    elif re.match(r'^\d{6}$', period):  # 202603 형식
+        return f"{period[:4]}년 {int(period[4:6])}월"
     return period
+
+
+def _fmt_mil(v) -> str:
+    """원 단위 → 백만원 포맷 (콤마 3자리)"""
+    if v is None:
+        return "-"
+    return f"{int(v) // 1_000_000:,}백만"
+
+
+def _pct(part, total) -> str:
+    """비율(%) 문자열, total=0이면 -"""
+    if total and int(total) > 0:
+        return f"{int(part)/int(total)*100:.1f}%"
+    return "-"
 
 
 def _fmt_won(v) -> str:
@@ -2189,7 +2220,7 @@ def _fmt_pct(cm, fi) -> str:
 
 
 def _fetch_profit_branch(branch: str, period: str) -> str:
-    """지점 전체 수익성 요약 (1행 합계)"""
+    """지점 전체 수익성 요약 (1행 합계) — 백만원 단위, CO기준"""
     cond = _profit_period_cond(period)
     rows = _safe_query(f"""
         SELECT
@@ -2206,25 +2237,23 @@ def _fetch_profit_branch(branch: str, period: str) -> str:
     if not rows or rows[0].get("fi") is None:
         return f"📊 {branch} {_period_label(period)} 수익성 데이터가 없습니다.\n※ 최신 데이터: 2026년 3월"
     r = rows[0]
-    fi   = int(r["fi"]     or 0)
-    gp   = int(r["gp"]     or 0)
+    fi     = int(r["fi"]     or 0)
+    gp     = int(r["gp"]     or 0)
     trans  = int(r["trans"]  or 0)
     unload = int(r["unload"] or 0)
-    var  = int(r["varfee"] or 0)
-    cm   = int(r["cm"]     or 0)
-    logi = trans + unload
-    gp_r = f"{gp/fi*100:.1f}%" if fi else "-"
-    cm_r = f"{cm/fi*100:.1f}%" if fi else "-"
+    var    = int(r["varfee"] or 0)
+    cm     = int(r["cm"]     or 0)
     lines = [
-        f"💰 {branch} {_period_label(period)} 수익성",
+        f"💰 {branch} {_period_label(period)} 수익성 분석",
         "",
-        f"📌 FI매출액:    {_fmt_won(fi)}",
-        f"📌 매출총이익:  {_fmt_won(gp)} ({gp_r})",
-        f"🚚 물류비:      {_fmt_won(logi)}  (운송{_fmt_won(trans)} + 하역{_fmt_won(unload)})",
-        f"🔧 변동비:      {_fmt_won(var)}",
-        f"✅ 공헌이익:    {_fmt_won(cm)} ({cm_r})",
+        f"📌 매출액(CO): {_fmt_mil(fi)}",
+        f"📌 매출총이익: {_fmt_mil(gp)} ({_pct(gp, fi)})",
+        f"🔧 변동비:     {_fmt_mil(var)} ({_pct(var, fi)})",
+        f"🚚 운송비:     {_fmt_mil(trans)} ({_pct(trans, fi)})",
+        f"🏗️ 하역비:     {_fmt_mil(unload)} ({_pct(unload, fi)})",
+        f"✅ 공헌이익:   {_fmt_mil(cm)} ({_pct(cm, fi)})",
         "",
-        "※ SAP 기준 확정 데이터 (최신: 26년 3월)",
+        "※확정실적/CM 데이터 기준",
     ]
     return "\n".join(lines)
 
@@ -2302,6 +2331,53 @@ def _fetch_profit_by_customer(branch: str, period: str, top_n: int = 10) -> str:
         lines.append("")
     lines.append("※ SAP 기준 확정 데이터")
     return "\n".join(lines)
+
+
+def _fetch_profit_by_name(keyword: str, period: str, branch: str = "") -> str:
+    """브랜드명/거래처명 키워드로 수익성 조회"""
+    cond = _profit_period_cond(period)
+    _VALID_BRANCHES = {"외식1팀", "외식2팀", "외식3팀", "영남지점"}
+    if branch in _VALID_BRANCHES:
+        branch_cond = f"AND `지점명` = '{branch}'"
+    else:
+        branch_cond = "AND (`지점명` LIKE '%외식%' OR `지점명` LIKE '%영남%')"
+    rows = _safe_query(f"""
+        SELECT SUM(`FI매출액`) AS fi, SUM(`매출총이익`) AS gp,
+               SUM(`총운송비`) AS trans, SUM(`총하역비`) AS unload,
+               SUM(`변동비`) AS varfee, SUM(`공헌이익`) AS cm
+        FROM {T_PROFIT}
+        WHERE {cond} {branch_cond}
+          AND (`Zc본부명` LIKE '%{keyword}%' OR `거래처명` LIKE '%{keyword}%')
+    """, raw=True)
+    if not rows or rows[0].get("fi") is None:
+        return (f"📊 [{keyword}] {_period_label(period)} 수익성 데이터가 없습니다.\n"
+                f"※ 현재 수익성 데이터는 26년 3월까지 제공되고 있습니다.")
+    r = rows[0]
+    fi    = int(r.get("fi") or 0)
+    gp    = int(r.get("gp") or 0)
+    trans = int(r.get("trans") or 0)
+    unload = int(r.get("unload") or 0)
+    var   = int(r.get("varfee") or 0)
+    cm    = int(r.get("cm") or 0)
+    return "\n".join([
+        f"💰 [{keyword}] {_period_label(period)} 수익성 분석",
+        "",
+        f"📌 매출액(CO): {_fmt_mil(fi)}",
+        f"📌 매출총이익: {_fmt_mil(gp)} ({_pct(gp, fi)})",
+        f"🔧 변동비:     {_fmt_mil(var)} ({_pct(var, fi)})",
+        f"🚚 운송비:     {_fmt_mil(trans)} ({_pct(trans, fi)})",
+        f"🏗️ 하역비:     {_fmt_mil(unload)} ({_pct(unload, fi)})",
+        f"✅ 공헌이익:   {_fmt_mil(cm)} ({_pct(cm, fi)})",
+        "",
+        "※확정실적/CM 데이터 기준",
+    ])
+
+
+_PROFIT_NAME_GUIDE = (
+    "\n\n💡 특정 브랜드/거래처 수익성 조회:\n"
+    "  예) '3월 신화푸드 수익성 알려줘'\n"
+    "  예) '24년 12월 샐러디 수익성 알려줘'"
+)
 
 
 # ─── 판매구역 분석 ──────────────────────────────────────────
@@ -2568,31 +2644,38 @@ def _fetch_unshipped_by_team(
     only_gyucheck: bool = False,
 ) -> list[dict]:
     """미출고 현황 조회 (부서명 기준 - 우리팀 조회용)"""
-    date_cond = (
-        f"`출고일자` = '{date_str}'"
-        if date_str
-        else f"`출고일자` = (SELECT MAX(`출고일자`) FROM {T_MISULGO})"
-    )
     gyucheck_cond = (
         "AND (`미출사유명` LIKE '%영업귀책%' OR `귀책사유` = '자책')"
         if only_gyucheck
         else ""
     )
     team_name_nospace = team_name.replace(' ', '')
-    return _safe_query(
-        f"""
-        SELECT `출고일자`, `부서명`, `영업담당자명`, `통합배송처명`, `상품명`, `미출수량`,
-               `미출사유명`, `귀책사유`, `주문미출내용`
-        FROM {T_MISULGO}
-        WHERE {date_cond}
-          AND REPLACE(`부서명`, ' ', '') LIKE '%{team_name_nospace}%'
-          {gyucheck_cond}
-          AND `미출수량` > 0
-        ORDER BY `귀책사유` DESC, `영업담당자명`, `통합배송처명`
-        LIMIT 100
-        """,
-        raw=True,
-    )
+
+    def _run_team_query(dc: str) -> list[dict]:
+        return _safe_query(
+            f"""
+            SELECT `출고일자`, `부서명`, `영업담당자명`, `통합배송처명`, `상품명`, `미출수량`,
+                   `미출사유명`, `귀책사유`, `주문미출내용`
+            FROM {T_MISULGO}
+            WHERE {dc}
+              AND REPLACE(`부서명`, ' ', '') LIKE '%{team_name_nospace}%'
+              {gyucheck_cond}
+              AND `미출수량` > 0
+            ORDER BY `귀책사유` DESC, `영업담당자명`, `통합배송처명`
+            LIMIT 100
+            """,
+            raw=True,
+        )
+
+    if date_str:
+        return _run_team_query(f"`출고일자` = '{date_str}'")
+    # fallback: 오늘 먼저, 없으면 MAX 날짜
+    import datetime as _dt
+    today_str = _dt.date.today().strftime("%Y-%m-%d")
+    rows = _run_team_query(f"`출고일자` = '{today_str}'")
+    if rows:
+        return rows
+    return _run_team_query(f"`출고일자` = (SELECT MAX(`출고일자`) FROM {T_MISULGO})")
 
 
 def _build_unshipped_markdown(
@@ -2622,17 +2705,32 @@ def _build_unshipped_markdown(
         lines.append(f"• ⚠️ 영업귀책 {len(gyucheck_rows)}건 → 직접 조치 필요")
     lines.append("")
     if is_team:
-        lines.append("| 담당자 | 거래처 | 상품 | 미출수량 | 귀책 |")
-        lines.append("| --- | --- | --- | ---: | --- |")
-        for r in rows[:20]:
-            sp   = str(r.get("영업담당자명", ""))[:8]
-            loc  = str(r.get("통합배송처명", ""))[:14]
-            prod = str(r.get("상품명", ""))[:12]
-            qty  = int(float(r.get("미출수량", 0)))
-            gyuk = "⚠️자책" if str(r.get("귀책사유", "")).strip() == "자책" else "타책"
-            lines.append(f"| {sp} | {loc} | {prod} | {qty} | {gyuk} |")
-        if len(rows) > 20:
-            lines.append(f"| … 외 {len(rows) - 20}건 | | | | |")
+        from collections import Counter as _Counter
+        _member_cnt: dict[str, int] = {}
+        _member_qty: dict[str, int] = {}
+        for r in rows:
+            mn = str(r.get("영업담당자명", "") or "").strip()
+            if not mn:
+                continue
+            _member_cnt[mn] = _member_cnt.get(mn, 0) + 1
+            _member_qty[mn] = _member_qty.get(mn, 0) + int(float(r.get("미출수량", 0)))
+        _sorted_members = sorted(_member_cnt.items(), key=lambda x: -x[1])
+        lines.append("[ 담당자별 미출고 현황 ]")
+        for mn, cnt in _sorted_members:
+            qty = _member_qty[mn]
+            lines.append(f"  • {mn}: {cnt}건 / {qty}개")
+        lines.append("")
+        # 미출사유 TOP5
+        _reason_cnt: dict[str, int] = {}
+        for r in rows:
+            rs = str(r.get("미출사유명", "") or "").strip()
+            if rs:
+                _reason_cnt[rs] = _reason_cnt.get(rs, 0) + 1
+        if _reason_cnt:
+            _top_reasons = sorted(_reason_cnt.items(), key=lambda x: -x[1])[:5]
+            lines.append("[ 주요 미출사유 ]")
+            for rs, cnt in _top_reasons:
+                lines.append(f"  • {rs[:20]}: {cnt}건")
     else:
         # 플랜트가 전부 동일하면 헤더에 1회만, 다르면 각 항목에 표시
         _plant_names = list({str(r.get("플랜트명", "") or "").strip() for r in rows if r.get("플랜트명")})
@@ -3298,7 +3396,6 @@ _MAIN_MENU_QR = [
     {"label": "💬 도움말",       "action": "message", "messageText": "도움말"},
 ]
 _UNSHIPPED_FOLLOW_QR = [
-    {"label": "⚠️ 귀책만 보기",  "action": "message", "messageText": "귀책 미출고 알려줘"},
     {"label": "📅 어제 현황",    "action": "message", "messageText": "어제 미출고 알려줘"},
     {"label": "🏠 메인 메뉴",    "action": "message", "messageText": "메뉴"},
 ]
@@ -3956,6 +4053,54 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                 _send_kakao_callback(callback_url, "⚠️ 자재 검색 중 오류가 발생했습니다.", "자재검색")
             return
 
+    # ─── 특정 팀+N월 수익성 직접 조회 ────────────────────────
+    _PROFIT_TEAMS = ["외식1팀", "외식2팀", "외식3팀", "영남지점"]
+    _pt_team = next((t for t in _PROFIT_TEAMS if t in query), None)
+    if _pt_team and re.search(r'수익성', query):
+        _, _pt_ym = _extract_month_year(query)
+        if re.search(r'이번달|이번\s*달', query):
+            _pt_period = "이번달"
+        elif re.search(r'지난달|지난\s*달|전달|전월', query):
+            _pt_period = "지난달"
+        else:
+            _pt_period = _pt_ym
+        logger.info(f"[콜백] 팀수익성: team={_pt_team}, period={_pt_period}")
+        try:
+            _pt_text = _fetch_profit_branch(_pt_team, _pt_period)
+            _pt_follow_qr = [{"label": "🏠 메인 메뉴", "action": "message", "messageText": "메뉴"}]
+            _send_kakao_callback_qr(callback_url, _to_kakao_text(_pt_text + _PROFIT_NAME_GUIDE), _pt_follow_qr, "팀수익성")
+        except Exception as e:
+            logger.error(f"[콜백] 팀수익성 오류: {e}")
+            _send_kakao_callback(callback_url, "⚠️ 수익성 조회 중 오류가 발생했습니다.", "팀수익성")
+        return
+
+    # ─── 특정 브랜드/거래처명 수익성 ─────────────────────────
+    _PROFIT_TEAMS_SET = {"외식1팀", "외식2팀", "외식3팀", "영남지점"}
+    _biz_profit_m = re.search(
+        r'(?:(\d{1,2})월|(\d{2,4})년\s*(\d{1,2})월)\s*(.{2,10}?)\s*수익성|'
+        r'(.{2,10}?)\s*(?:(\d{1,2})월|(\d{2,4})년\s*(\d{1,2})월)\s*수익성',
+        query
+    )
+    if _biz_profit_m and not any(t in query for t in _PROFIT_TEAMS_SET):
+        _, _biz_ym = _extract_month_year(query)
+        _biz_kw = None
+        for g in _biz_profit_m.groups():
+            if g and not g.isdigit() and len(g) >= 2 and not re.fullmatch(r'\d+', g):
+                _biz_kw = g.strip()
+                break
+        if _biz_kw and re.search(r'[가-힣A-Za-z]', _biz_kw):
+            _bp_user = _load_users().get(user_id, {})
+            _bp_branch = _bp_user.get("team", "")
+            logger.info(f"[콜백] 이름수익성: kw={_biz_kw}, ym={_biz_ym}, branch={_bp_branch}")
+            try:
+                _bp_text = _fetch_profit_by_name(_biz_kw, _biz_ym, _bp_branch)
+                _bp_qr = [{"label": "🏠 메인 메뉴", "action": "message", "messageText": "메뉴"}]
+                _send_kakao_callback_qr(callback_url, _to_kakao_text(_bp_text), _bp_qr, "이름수익성")
+            except Exception as e:
+                logger.error(f"[콜백] 이름수익성 오류: {e}")
+                _send_kakao_callback(callback_url, "⚠️ 수익성 조회 중 오류가 발생했습니다.", "이름수익성")
+            return
+
     # ─── 고객 수익성 분석 (Dify 바이패스) ─────────────────────
     _profit_m = re.match(
         r'^(지점|브랜드별|거래처별)\s*수익성\s*(이번달|지난달|올해)$',
@@ -3978,12 +4123,9 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
             else:
                 text = _fetch_profit_by_customer(_pbranch, _pperiod)
             _profit_follow_qr = [
-                {"label": "🏢 지점 전체",   "action": "message", "messageText": f"지점 수익성 {_pperiod}"},
-                {"label": "🏷️ 브랜드별",   "action": "message", "messageText": f"브랜드별 수익성 {_pperiod}"},
-                {"label": "🏪 거래처별",    "action": "message", "messageText": f"거래처별 수익성 {_pperiod}"},
-                {"label": "💰 수익성 메뉴", "action": "message", "messageText": "수익성 분석 메뉴"},
+                {"label": "� 메인 메뉴", "action": "message", "messageText": "메뉴"},
             ]
-            _send_kakao_callback_qr(callback_url, _to_kakao_text(text), _profit_follow_qr, "수익성")
+            _send_kakao_callback_qr(callback_url, _to_kakao_text(text + _PROFIT_NAME_GUIDE), _profit_follow_qr, "수익성")
         except Exception as e:
             logger.error(f"[콜백] 수익성 오류: {e}")
             _send_kakao_callback(callback_url, "⚠️ 수익성 조회 중 오류가 발생했습니다.", "수익성")
@@ -4171,7 +4313,15 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                 "yearmonth":   ym_st,
                 "forecast_total": _fc_st,
             }
-            _send_kakao_callback_qr(callback_url, text_st, _REASON_QR, "팀단독매출")
+            if _is_today_st or _is_yesterday_st:
+                _send_kakao_callback_qr(callback_url, text_st, _REASON_QR, "팀단독매출")
+            else:
+                _month_for_profit = int(ym_st[4:6])
+                _team_profit_qr = [
+                    {"label": "💰 GP+공헌이익", "action": "message", "messageText": f"{_specific_team_m} {_month_for_profit}월 수익성"},
+                    {"label": "🏷️ 브랜드별 수익성", "action": "message", "messageText": f"{_specific_team_m} {_month_for_profit}월 브랜드별 수익성"},
+                ] + _REASON_QR
+                _send_kakao_callback_qr(callback_url, text_st, _team_profit_qr, "팀단독매출")
         except Exception as e:
             logger.error(f"[콜백] 팀단독매출 오류: {e}")
             _send_kakao_callback(callback_url, "⚠️ 팀 매출 조회 중 오류가 발생했습니다.", "팀단독매출")
@@ -4257,12 +4407,17 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
         date_str: str | None = None
         date_literal_m = re.search(r'(\d{4}-\d{2}-\d{2})', query)
         date_md_m = re.search(r'(\d{1,2})월\s*(\d{1,2})일', query)
+        date_slash_m = re.search(r'\b(\d{1,2})/(\d{1,2})\b', query)
         if date_literal_m:
             date_str = date_literal_m.group(1)
         elif date_md_m:
             cur_year = int(time.strftime("%Y"))
             mm = int(date_md_m.group(1))
             dd = int(date_md_m.group(2))
+            date_str = f"{cur_year}-{mm:02d}-{dd:02d}"
+        elif date_slash_m:
+            cur_year = int(time.strftime("%Y"))
+            mm = int(date_slash_m.group(1)); dd = int(date_slash_m.group(2))
             date_str = f"{cur_year}-{mm:02d}-{dd:02d}"
         elif re.search(r'어제(?![가-힣])', query):
             date_str = (_dt.date.today() - _dt.timedelta(days=1)).strftime("%Y-%m-%d")
@@ -4275,19 +4430,37 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
         _my_team = _uinfo.get("team", "").strip()
         # "우리팀/우리지점/우리부서" 감지 — 이름 추출보다 먼저 확인
         is_team_query = bool(re.search(r'우리\s*(?:팀|지점|영업소|부서|사업부)', query))
-        # 쿼리에서 이름 명시 여부: 미출고 앞에 오는 한글 2~4자 명사
-        # 단, 우리팀/날짜어/기능어 제외
-        _NAME_BLACKLIST = {'오늘', '어제', '전체', '모든', '우리팀', '우리지점', '우리부서',
-                           '우리영업소', '우리사업부', '미출고', '알려줘', '현황', '조회'}
-        _qname_m = re.search(
-            r'([가-힣]{2,4})(?:\s*씨|\s*님)?\s*(?:오늘\s*|어제\s*|\d+월\s*\d+일\s*)?미출',
+        # 팀명 직접 입력 감지 (예: "외식1팀 미출고", "1팀 미출")
+        _direct_team_m = re.search(
+            r'([가-힣A-Za-z0-9]{1,10}(?:팀|지점|영업소|사업부))\s*(?:전체\s*)?(?:미출|미출고)',
             query,
         )
+        _TEAM_NORMALIZE = {
+            "1팀": "외식1팀", "2팀": "외식2팀", "3팀": "외식3팀",
+        }
+        # 쿼리에서 이름 명시 여부: 미출고 앞에 오는 한글 이름
+        _NAME_BLACKLIST = {'오늘', '어제', '전체', '모든', '우리팀', '우리지점', '우리부서',
+                           '우리영업소', '우리사업부', '미출고', '알려줘', '현황', '조회'}
+        # 공백 포함 이름 우선 (예: "홍 길동 미출고")
+        _qname_m = re.search(
+            r'([가-힣]{1,2}\s+[가-힣]{1,3})(?:\s*씨|\s*님)?\s*(?:오늘\s*|어제\s*|\d+월\s*\d+일\s*|\d+/\d+\s*)?미출',
+            query,
+        )
+        if not _qname_m:
+            _qname_m = re.search(
+                r'([가-힣]{2,4})(?:\s*씨|\s*님)?\s*(?:오늘\s*|어제\s*|\d+월\s*\d+일\s*|\d+/\d+\s*)?미출',
+                query,
+            )
         query_name = _qname_m.group(1).strip() if _qname_m else ""
         if query_name in _NAME_BLACKLIST or re.search(r'^우리', query_name):
             query_name = ""
-        # 우선순위: 우리팀 > 쿼리 명시 이름 > 등록 이름(본인)
-        if is_team_query and _my_team:
+        # 우선순위: 팀명 직접입력 > 우리팀 > 쿼리 이름 > 등록 이름(본인)
+        if _direct_team_m and not is_team_query:
+            _raw_team = _direct_team_m.group(1).strip()
+            _normalized_team = _TEAM_NORMALIZE.get(_raw_team, _raw_team)
+            sp_name_u = _normalized_team
+            is_team = True
+        elif is_team_query and _my_team:
             # 우리팀 전체 조회
             sp_name_u = _my_team
             is_team = True
@@ -4310,8 +4483,7 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
         # 타인 이름 조회일 경우 follow-up QR에 이름 포함 (문맥 유지)
         _name_prefix = f"{sp_name_u} " if (query_name and query_name != _my_name) else ""
         _unshipped_ctx_qr = [
-            {"label": "🔴 귀책만 보기",  "action": "message", "messageText": f"{_name_prefix}귀책 미출고 알려줘"},
-            {"label": "📅 어제 현황",    "action": "message", "messageText": f"{_name_prefix}어제 미출고 알려줘"},
+            {"label": " 어제 현황",    "action": "message", "messageText": f"{_name_prefix}어제 미출고 알려줘"},
             {"label": "🏠 메인 메뉴",    "action": "message", "messageText": "메뉴"},
         ]
         try:
@@ -4320,7 +4492,22 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
             else:
                 rows_u = _fetch_unshipped(sp_name_u, date_str, only_gyucheck)
             text_u = _build_unshipped_markdown(rows_u, sp_name_u, only_gyucheck, is_team=is_team)
-            _send_kakao_callback_qr(callback_url, _to_kakao_text(text_u), _unshipped_ctx_qr, "미출고")
+            if is_team and rows_u:
+                # 담당자 건수 내림차순으로 개별 QR 동적 생성 (최대 9명)
+                from collections import Counter as _Counter_qr
+                _mn_cnt = _Counter_qr(
+                    str(r.get("영업담당자명", "")).strip() for r in rows_u
+                    if r.get("영업담당자명")
+                )
+                _date_suffix = f" {date_str} 미출고 알려줘" if date_str else " 미출고 알려줘"
+                _team_member_qr = [
+                    {"label": f"👤 {mn}", "action": "message", "messageText": f"{mn}{_date_suffix}"}
+                    for mn, _ in _mn_cnt.most_common(9)
+                ]
+                _team_member_qr.append({"label": "🏠 메인 메뉴", "action": "message", "messageText": "메뉴"})
+                _send_kakao_callback_qr(callback_url, _to_kakao_text(text_u), _team_member_qr, "미출고")
+            else:
+                _send_kakao_callback_qr(callback_url, _to_kakao_text(text_u), _unshipped_ctx_qr, "미출고")
         except Exception as e:
             logger.error(f"[콜백] 미출고 조회 오류: {e}")
             _send_kakao_callback(callback_url, "⚠️ 미출고 조회 중 오류가 발생했습니다.", "미출고")
