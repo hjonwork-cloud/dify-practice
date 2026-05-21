@@ -3391,7 +3391,7 @@ def _http_post_json(url: str, data: dict,
 # ─── 메인 메뉴 QuickReplies ────────────────────────────────────
 _MAIN_MENU_QR = [
     {"label": "📊 매출 실적",    "action": "message", "messageText": "매출 실적 메뉴"},
-    {"label": " 수익성 분석",  "action": "message", "messageText": "수익성 분석 메뉴"},
+    {"label": "💰 수익성 분석",  "action": "message", "messageText": "수익성 분석 메뉴"},
     {"label": "📦 미출고 현황",  "action": "message", "messageText": "미출고 현황"},
     {"label": "💬 도움말",       "action": "message", "messageText": "도움말"},
 ]
