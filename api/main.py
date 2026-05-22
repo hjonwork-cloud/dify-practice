@@ -2165,6 +2165,8 @@ def _profit_period_cond(period: str) -> str:
     elif re.match(r'^\d{6}$', period):  # 202603 형식
         date_str = f"{period[:4]}-{period[4:6]}-01"
         return f"`날짜` = '{date_str}'"
+    elif re.match(r'^\d{4}$', period):  # 2026 형식 (연도 누계)
+        return f"YEAR(`날짜`) = {period}"
     else:
         return "`날짜` IS NOT NULL"
 
@@ -2183,6 +2185,8 @@ def _period_label(period: str) -> str:
         return f"{today.year}년 누계"
     elif re.match(r'^\d{6}$', period):  # 202603 형식
         return f"{period[:4]}년 {int(period[4:6])}월"
+    elif re.match(r'^\d{4}$', period):  # 2026 형식 (연도 누계)
+        return f"{period}년 누계"
     return period
 
 
@@ -4062,6 +4066,15 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
             _pt_period = "이번달"
         elif re.search(r'지난달|지난\s*달|전달|전월', query):
             _pt_period = "지난달"
+        elif re.search(r'올해', query):
+            _pt_period = "올해"
+        elif re.search(r'(\d{2,4})년', query) and not re.search(r'\d{1,2}월', query):
+            # 연도만 있고 월은 없음 → 연도 누계
+            _yr_m = re.search(r'(\d{2,4})년', query)
+            _yr = int(_yr_m.group(1))
+            if _yr < 100:
+                _yr = 2000 + _yr
+            _pt_period = str(_yr)
         else:
             _pt_period = _pt_ym
         logger.info(f"[콜백] 팀수익성: team={_pt_team}, period={_pt_period}")
