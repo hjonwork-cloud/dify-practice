@@ -4454,11 +4454,15 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
         # 쿼리에서 이름 명시 여부: 미출고 앞에 오는 한글 이름
         _NAME_BLACKLIST = {'오늘', '어제', '전체', '모든', '우리팀', '우리지점', '우리부서',
                            '우리영업소', '우리사업부', '미출고', '알려줘', '현황', '조회'}
-        # 공백 포함 이름 우선 (예: "홍 길동 미출고")
+        # 공백 포함 이름 우선 (예: "홍 길동 미출고") — 단, 구성 파트가 블랙리스트에 없어야 함
         _qname_m = re.search(
             r'([가-힣]{1,2}\s+[가-힣]{1,3})(?:\s*씨|\s*님)?\s*(?:오늘\s*|어제\s*|\d+월\s*\d+일\s*|\d+/\d+\s*)?미출',
             query,
         )
+        if _qname_m:
+            _parts = _qname_m.group(1).strip().split()
+            if any(p in _NAME_BLACKLIST for p in _parts):
+                _qname_m = None  # "한 오늘" 같은 오매칭 제거
         if not _qname_m:
             _qname_m = re.search(
                 r'([가-힣]{2,4})(?:\s*씨|\s*님)?\s*(?:오늘\s*|어제\s*|\d+월\s*\d+일\s*|\d+/\d+\s*)?미출',
