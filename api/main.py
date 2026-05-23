@@ -2696,7 +2696,6 @@ def _build_unshipped_markdown(
         return f"✅ {label}{honorific} 담당 미출고{filter_txt} 건이 없습니다."
 
     date_val = rows[0].get("출고일자", "")
-    total_qty = sum(float(r.get("미출수량", 0)) for r in rows)
     gyucheck_rows = [
         r for r in rows
         if str(r.get("귀책사유", "")).strip() == "자책"
@@ -2704,25 +2703,22 @@ def _build_unshipped_markdown(
     ]
 
     lines = [f"📦 {label}{honorific} 미출고 현황 ({date_val})", ""]
-    lines.append(f"• 전체 {len(rows)}건 / 총 {int(total_qty)}개")
+    lines.append(f"• 전체 {len(rows)}건")
     if gyucheck_rows:
         lines.append(f"• ⚠️ 영업귀책 {len(gyucheck_rows)}건 → 직접 조치 필요")
     lines.append("")
     if is_team:
         from collections import Counter as _Counter
         _member_cnt: dict[str, int] = {}
-        _member_qty: dict[str, int] = {}
         for r in rows:
             mn = str(r.get("영업담당자명", "") or "").strip()
             if not mn:
                 continue
             _member_cnt[mn] = _member_cnt.get(mn, 0) + 1
-            _member_qty[mn] = _member_qty.get(mn, 0) + int(float(r.get("미출수량", 0)))
         _sorted_members = sorted(_member_cnt.items(), key=lambda x: -x[1])
         lines.append("[ 담당자별 미출고 현황 ]")
         for mn, cnt in _sorted_members:
-            qty = _member_qty[mn]
-            lines.append(f"  • {mn}: {cnt}건 / {qty}개")
+            lines.append(f"  • {mn}: {cnt}건")
         lines.append("")
         # 미출사유 TOP5
         _reason_cnt: dict[str, int] = {}
