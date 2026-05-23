@@ -2696,16 +2696,8 @@ def _build_unshipped_markdown(
         return f"✅ {label}{honorific} 담당 미출고{filter_txt} 건이 없습니다."
 
     date_val = rows[0].get("출고일자", "")
-    gyucheck_rows = [
-        r for r in rows
-        if str(r.get("귀책사유", "")).strip() == "자책"
-        or "영업귀책" in str(r.get("미출사유명", ""))
-    ]
-
     lines = [f"📦 {label}{honorific} 미출고 현황 ({date_val})", ""]
     lines.append(f"• 전체 {len(rows)}건")
-    if gyucheck_rows:
-        lines.append(f"• ⚠️ 영업귀책 {len(gyucheck_rows)}건 → 직접 조치 필요")
     lines.append("")
     if is_team:
         from collections import Counter as _Counter
