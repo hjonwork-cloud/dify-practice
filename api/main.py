@@ -2913,9 +2913,9 @@ def custom_query(req: QueryRequest):
 
 # ─── 사용자 인증/등록 ────────────────────────────────────────
 AUTH_DEPT = "외식식재사업부"  # 허용 사업부
-_USERS_FILE = os.path.join(os.path.dirname(__file__), "_registered_users.json")
-_WHITELIST_FILE = os.path.join(os.path.dirname(__file__), "_admin_whitelist.json")
-_BLACKLIST_FILE = os.path.join(os.path.dirname(__file__), "_admin_blacklist.json")
+_USERS_FILE     = r"E:\data\chatbot\_registered_users.json"
+_WHITELIST_FILE = r"E:\data\chatbot\_admin_whitelist.json"
+_BLACKLIST_FILE = r"E:\data\chatbot\_admin_blacklist.json"
 _users_lock = threading.Lock()
 
 # 관리자급 수기 등록 화이트리스트 (DB에 영업사원 매출 없어도 등록 허용)

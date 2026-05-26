@@ -4,3 +4,10 @@
 *.key
 *.log
 .DS_Store
+
+# chatbot user data (personal info - not tracked)
+api/_registered_users.json
+api/_admin_whitelist.json
+api/_admin_blacklist.json
+api/_migrate_users.py
+api/_fix_label.py
