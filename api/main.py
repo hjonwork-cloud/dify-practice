@@ -4144,6 +4144,13 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
             if _yr < 100:
                 _yr = 2000 + _yr
             _pt_period = str(_yr)
+        elif not re.search(r'\d{1,2}월|\d{4}년|이번달|지난달|올해', query):
+            # 월/기간 정보 없음 → 최신 확정 월 자동 적용
+            _pt_latest = _safe_query(f"SELECT MAX(`날짜`) AS mx FROM {T_PROFIT}", raw=True)
+            if _pt_latest and _pt_latest[0].get("mx"):
+                _pt_period = str(_pt_latest[0]["mx"])[:7].replace("-", "")[:6]  # "202604"
+            else:
+                _pt_period = _pt_ym
         else:
             _pt_period = _pt_ym
         logger.info(f"[콜백] 팀수익성: team={_pt_team}, period={_pt_period}")
