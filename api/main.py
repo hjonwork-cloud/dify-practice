@@ -4172,9 +4172,7 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
         _nm_kw = _no_month_profit_m.group(1).strip()
         _nm_kw = re.sub(r'[의는은이가을를]$', '', _nm_kw).strip()
         if _nm_kw and len(_nm_kw) >= 2 and re.search(r'[가-힣A-Za-z]', _nm_kw):
-            # 최신 월 동적 조회
-            _nm_ym = _get_profit_latest_label()  # 레이블용
-            _, _nm_period = _extract_month_year("")  # yearmonth 형식 필요 → DB에서 직접
+            # 최신 월 DB에서 동적 조회
             _nm_rows = _safe_query(
                 f"SELECT MAX(`날짜`) AS mx FROM {T_PROFIT}", raw=True
             )
@@ -4252,7 +4250,9 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
         return
 
     # ─── 범용상품 수익성 (Dify 바이패스) ─────────────────────
-    if re.search(r'마진|이익률|수익성|GP율?|원가율', query, re.IGNORECASE):
+    # 공헌이익/CM 키워드는 위에서 고객CM으로 이미 처리됨 → 가로채기 방지
+    if (re.search(r'마진|이익률|수익성|GP율?|원가율', query, re.IGNORECASE)
+            and not re.search(r'[Cc][Mm]\b|공헌이익', query, re.IGNORECASE)):
         month_num, yearmonth = _extract_month_year(query)
         target_key, target_name = _resolve_org_context(query)
         logger.info(f"[콜백] 범용마진: target={target_name}, ym={yearmonth}")
