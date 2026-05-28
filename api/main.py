@@ -2916,7 +2916,9 @@ AUTH_DEPT = "외식식재사업부"  # 허용 사업부
 _USERS_FILE     = r"E:\data\chatbot\_registered_users.json"
 _WHITELIST_FILE = r"E:\data\chatbot\_admin_whitelist.json"
 _BLACKLIST_FILE = r"E:\data\chatbot\_admin_blacklist.json"
+_USAGE_FILE     = r"E:\data\chatbot\_token_usage.json"
 _users_lock = threading.Lock()
+_usage_lock = threading.Lock()
 
 # 관리자급 수기 등록 화이트리스트 (DB에 영업사원 매출 없어도 등록 허용)
 _MANAGER_WHITELIST: dict[str, dict] = {
@@ -3005,6 +3007,59 @@ def _set_user_role(user_id: str, role: str) -> bool:
         users[user_id]["role"] = role
         _save_users(users)
     return True
+
+
+def _log_query_call(user_id: str, utterance: str):
+    """모든 인증된 쿼리 호출을 기록 (토큰 0으로 초기화, Dify 완료 시 업데이트)"""
+    user_name = _get_registered_name(user_id) or user_id
+    entry = {
+        "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "date": time.strftime("%Y-%m-%d"),
+        "user_id": user_id,
+        "user_name": user_name,
+        "utterance": utterance[:60],
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "dify": False,
+    }
+    with _usage_lock:
+        try:
+            if os.path.exists(_USAGE_FILE):
+                with open(_USAGE_FILE, "r", encoding="utf-8") as f:
+                    data = json_mod.load(f)
+            else:
+                data = {"logs": []}
+            data["logs"].append(entry)
+            if len(data["logs"]) > 10000:
+                data["logs"] = data["logs"][-10000:]
+            with open(_USAGE_FILE, "w", encoding="utf-8") as f:
+                json_mod.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.warning(f"[토큰로그] 기록 실패: {e}")
+
+
+def _log_token_usage(user_id: str, prompt_tokens: int, completion_tokens: int, total_tokens: int):
+    """Dify 응답 완료 시 가장 최근 해당 사용자 로그 항목에 토큰 업데이트"""
+    with _usage_lock:
+        try:
+            if not os.path.exists(_USAGE_FILE):
+                return
+            with open(_USAGE_FILE, "r", encoding="utf-8") as f:
+                data = json_mod.load(f)
+            logs = data.get("logs", [])
+            # 같은 사용자의 가장 최근 미업데이트 항목에 토큰 기록
+            for i in range(len(logs) - 1, max(len(logs) - 10, -1), -1):
+                if logs[i].get("user_id") == user_id and not logs[i].get("dify"):
+                    logs[i]["prompt_tokens"] = prompt_tokens
+                    logs[i]["completion_tokens"] = completion_tokens
+                    logs[i]["total_tokens"] = total_tokens
+                    logs[i]["dify"] = True
+                    break
+            with open(_USAGE_FILE, "w", encoding="utf-8") as f:
+                json_mod.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.warning(f"[토큰로그] 업데이트 실패: {e}")
 
 
 def _find_user_by_emp_code(emp_code: str) -> str | None:
@@ -5274,6 +5329,18 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                 if evt.get('event') == 'agent_message':
                     answer_chunks.append(evt.get('answer', ''))
                 elif evt.get('event') == 'message_end':
+                    # 토큰 사용량 기록
+                    try:
+                        _usage = evt.get('metadata', {}).get('usage', {})
+                        if _usage:
+                            _log_token_usage(
+                                user_id,
+                                _usage.get('prompt_tokens', 0),
+                                _usage.get('completion_tokens', 0),
+                                _usage.get('total_tokens', 0),
+                            )
+                    except Exception as _ue:
+                        logger.warning(f"[토큰로그] 수집 실패: {_ue}")
                     break
                 elif evt.get('event') == 'error':
                     logger.error(f"[콜백] Dify SSE error: {evt}")
@@ -5463,6 +5530,7 @@ async def kakao_skill(request: Request, background_tasks: BackgroundTasks):
             return _kakao_simple(_REGISTER_GUIDE)
 
         # ── 3) 등록된 사용자 → 정상 처리 ──
+        _log_query_call(user_id, utterance)
 
         # ── 3-0-admin) 관리자 전용 명령어 ──
         if _is_admin(user_id):
@@ -5476,8 +5544,58 @@ async def kakao_skill(request: Request, background_tasks: BackgroundTasks):
                         {"label": "📋 사용자 목록", "action": "message", "messageText": "사용자 목록"},
                         {"label": "➕ 사용자 등록", "action": "message", "messageText": "사용자등록 안내"},
                         {"label": "🚫 사용자 등록취소", "action": "message", "messageText": "등록취소 안내"},
+                        {"label": "📊 토큰 사용량", "action": "message", "messageText": "토큰 사용량"},
                     ]
                 )
+
+            # 토큰 사용량 조회
+            if re.match(r'^토큰\s*사용량$', utt_strip):
+                _admin_qr = [{"label": "🔑 관리자 메뉴", "action": "message", "messageText": "관리자 메뉴"}]
+                try:
+                    if not os.path.exists(_USAGE_FILE):
+                        return _kakao_quickreply("📊 아직 기록된 토큰 사용량이 없습니다.", _admin_qr)
+                    with open(_USAGE_FILE, "r", encoding="utf-8") as f:
+                        _udata = json_mod.load(f)
+                    _logs = _udata.get("logs", [])
+                    if not _logs:
+                        return _kakao_quickreply("📊 아직 기록된 토큰 사용량이 없습니다.", _admin_qr)
+                    # 최근 30일 집계
+                    from collections import defaultdict
+                    _day_total: dict = defaultdict(int)
+                    _user_total: dict = defaultdict(lambda: {"name": "", "total": 0, "calls": 0})
+                    _grand_total = 0
+                    _grand_calls = 0
+                    for _log in _logs:
+                        _d = _log.get("date", "")
+                        _tok = _log.get("total_tokens", 0)
+                        _uid = _log.get("user_id", "")
+                        _uname = _log.get("user_name", _uid)
+                        _day_total[_d] += 1
+                        _user_total[_uid]["name"] = _uname
+                        _user_total[_uid]["total"] += _tok
+                        _user_total[_uid]["calls"] += 1
+                        _grand_total += _tok
+                        _grand_calls += 1
+                    # 최근 7일
+                    _recent_days = sorted(_day_total.keys())[-7:]
+                    _dify_calls = sum(1 for l in _logs if l.get("dify"))
+                    _dify_tokens = sum(l.get("total_tokens", 0) for l in _logs if l.get("dify"))
+                    _lines = ["📊 [관리자] 챗봇 사용 현황\n",
+                              f"▸ 전체 조회: {_grand_calls}회",
+                              f"▸ LLM 호출: {_dify_calls}회 / {_dify_tokens:,} 토큰",
+                              "\n[ 최근 7일 일별 조회 수 ]",
+                    ]
+                    for _d in _recent_days:
+                        _lines.append(f"  {_d}: {_day_total[_d]}회")
+                    # 사용자별 TOP5
+                    _sorted_users = sorted(_user_total.values(), key=lambda x: x["calls"], reverse=True)[:5]
+                    _lines.append("\n[ 사용자별 TOP 5 (조회 수) ]")
+                    for _r in _sorted_users:
+                        _lines.append(f"  {_r['name']}: {_r['calls']}회")
+                    return _kakao_quickreply("\n".join(_lines), _admin_qr)
+                except Exception as _ue:
+                    logger.error(f"[관리자] 토큰 사용량 조회 오류: {_ue}")
+                    return _kakao_quickreply("⚠️ 토큰 사용량 조회 중 오류가 발생했습니다.", _admin_qr)
 
             # 사용자 등록 안내
             if re.match(r'^사용자\s*등록\s*안내$', utt_strip):
