@@ -194,7 +194,33 @@ def run_query(sql: str, *, raw: bool = False) -> list[dict]:
 # ─── 신규매출 분석 ─────────────────────────────────────────
 T_MAIN    = "h_hmfo.gd_dcube.`01_sap_sales_custmasters`"
 T_MISULGO = "h_hmfo.gd_dcube.`46_helo_periodic_unshipped`"
-T_PROFIT  = "h_hmfo.gd_dcube.`00_customers_cm`"          # 수익성(공헌이익) 테이블
+T_PROFIT  = "h_hmfo.gd_dcube.`00_customers_cm`"          # 수익성
+
+# 수익성 인텐트 키워드 패턴 (CM/공헌이익/수익성 등 다양한 표현 통합)
+_PROFIT_KW_PAT = r'수익성|[Cc][Mm]\b|공헌이익률?|공헌이익율?'
+
+# 수익성 최신 기간 캐시 (1시간)
+_profit_latest_cache: tuple[float, str] = (0.0, "")
+
+def _get_profit_latest_label() -> str:
+    """T_PROFIT 테이블에서 가장 최근 확정 기간 레이블 동적 조회 (예: '2026년 4월')"""
+    global _profit_latest_cache
+    cached_at, cached_label = _profit_latest_cache
+    if cached_label and time.time() - cached_at < 3600:
+        return cached_label
+    try:
+        rows = _safe_query(f"SELECT MAX(`날짜`) AS mx FROM {T_PROFIT}", raw=True)
+        if rows and rows[0].get("mx"):
+            mx = str(rows[0]["mx"])[:10]  # "2026-04-01"
+            yr, mo = mx[:4], str(int(mx[5:7]))
+            label = f"{yr}년 {mo}월"
+            _profit_latest_cache = (time.time(), label)
+            return label
+    except Exception as _e:
+        logger.warning(f"[수익성최신기간] 조회 실패: {_e}")
+    return "최신 데이터"
+
+
 _NEW_CUST_DATE = "20251001"
 
 
@@ -2239,7 +2265,7 @@ def _fetch_profit_branch(branch: str, period: str) -> str:
           AND {cond}
     """, raw=True)
     if not rows or rows[0].get("fi") is None:
-        return f"📊 {branch} {_period_label(period)} 수익성 데이터가 없습니다.\n※ 최신 데이터: 2026년 3월"
+        return f"📊 {branch} {_period_label(period)} 수익성 데이터가 없습니다.\n※ 현재 수익성 데이터는 {_get_profit_latest_label()}까지 제공되고 있습니다."
     r = rows[0]
     fi     = int(r["fi"]     or 0)
     gp     = int(r["gp"]     or 0)
@@ -2355,7 +2381,7 @@ def _fetch_profit_by_name(keyword: str, period: str, branch: str = "") -> str:
     """, raw=True)
     if not rows or rows[0].get("fi") is None:
         return (f"📊 [{keyword}] {_period_label(period)} 수익성 데이터가 없습니다.\n"
-                f"※ 현재 수익성 데이터는 26년 3월까지 제공되고 있습니다.")
+                f"※ 현재 수익성 데이터는 {_get_profit_latest_label()}까지 제공되고 있습니다.")
     r = rows[0]
     fi    = int(r.get("fi") or 0)
     gp    = int(r.get("gp") or 0)
@@ -4103,7 +4129,7 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
     # ─── 특정 팀+N월 수익성 직접 조회 ────────────────────────
     _PROFIT_TEAMS = ["외식1팀", "외식2팀", "외식3팀", "영남지점"]
     _pt_team = next((t for t in _PROFIT_TEAMS if t in query), None)
-    if _pt_team and re.search(r'수익성', query):
+    if _pt_team and re.search(_PROFIT_KW_PAT, query, re.IGNORECASE):
         _, _pt_ym = _extract_month_year(query)
         if re.search(r'이번달|이번\s*달', query):
             _pt_period = "이번달"
@@ -4133,8 +4159,8 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
     # ─── 특정 브랜드/거래처명 수익성 ─────────────────────────
     _PROFIT_TEAMS_SET = {"외식1팀", "외식2팀", "외식3팀", "영남지점"}
     _biz_profit_m = re.search(
-        r'(?:(\d{1,2})월|(\d{2,4})년\s*(\d{1,2})월)\s*(.{2,10}?)\s*수익성|'
-        r'(.{2,10}?)\s*(?:(\d{1,2})월|(\d{2,4})년\s*(\d{1,2})월)\s*수익성',
+        r'(?:(\d{1,2})월|(\d{2,4})년\s*(\d{1,2})월)\s*(.{2,10}?)\s*(?:수익성|[Cc][Mm]\b|공헌이익률?|공헌이익율?)|'
+        r'(.{2,10}?)\s*(?:(\d{1,2})월|(\d{2,4})년\s*(\d{1,2})월)\s*(?:수익성|[Cc][Mm]\b|공헌이익률?|공헌이익율?)',
         query
     )
     if _biz_profit_m and not any(t in query for t in _PROFIT_TEAMS_SET):
