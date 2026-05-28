@@ -4156,8 +4156,46 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
             _send_kakao_callback(callback_url, "⚠️ 수익성 조회 중 오류가 발생했습니다.", "팀수익성")
         return
 
-    # ─── 특정 브랜드/거래처명 수익성 ─────────────────────────
+    # ─── 특정 브랜드/거래처명 수익성 (월 없는 경우 → 최신 월 기본값) ─────
     _PROFIT_TEAMS_SET = {"외식1팀", "외식2팀", "외식3팀", "영남지점"}
+
+    # 월 없이 CM/공헌이익/수익성 키워드만 있는 경우 (예: "신화푸드 CM 알려줘")
+    _no_month_profit_m = None
+    if (re.search(_PROFIT_KW_PAT, query, re.IGNORECASE)
+            and not re.search(r'\d{1,2}월|\d{4}년|이번달|지난달|올해', query)
+            and not any(t in query for t in _PROFIT_TEAMS_SET)):
+        _no_month_profit_m = re.search(
+            r'(.{2,12}?)\s*(?:수익성|[Cc][Mm]\b|공헌이익률?|공헌이익율?)',
+            query
+        )
+    if _no_month_profit_m:
+        _nm_kw = _no_month_profit_m.group(1).strip()
+        _nm_kw = re.sub(r'[의는은이가을를]$', '', _nm_kw).strip()
+        if _nm_kw and len(_nm_kw) >= 2 and re.search(r'[가-힣A-Za-z]', _nm_kw):
+            # 최신 월 동적 조회
+            _nm_ym = _get_profit_latest_label()  # 레이블용
+            _, _nm_period = _extract_month_year("")  # yearmonth 형식 필요 → DB에서 직접
+            _nm_rows = _safe_query(
+                f"SELECT MAX(`날짜`) AS mx FROM {T_PROFIT}", raw=True
+            )
+            _nm_period = ""
+            if _nm_rows and _nm_rows[0].get("mx"):
+                _mx = str(_nm_rows[0]["mx"])[:7].replace("-", "")[:6]  # "202604"
+                _nm_period = _mx
+            if not _nm_period:
+                _, _nm_period = _extract_month_year("")
+            _nm_user = _load_users().get(user_id, {})
+            _nm_branch = _nm_user.get("team", "")
+            logger.info(f"[콜백] 월없는수익성: kw={_nm_kw}, period={_nm_period}, branch={_nm_branch}")
+            try:
+                _nm_text = _fetch_profit_by_name(_nm_kw, _nm_period, _nm_branch)
+                _nm_qr = [{"label": "🏠 메인 메뉴", "action": "message", "messageText": "메뉴"}]
+                _send_kakao_callback_qr(callback_url, _to_kakao_text(_nm_text), _nm_qr, "월없는수익성")
+            except Exception as e:
+                logger.error(f"[콜백] 월없는수익성 오류: {e}")
+                _send_kakao_callback(callback_url, "⚠️ 수익성 조회 중 오류가 발생했습니다.", "월없는수익성")
+            return
+
     _biz_profit_m = re.search(
         r'(?:(\d{1,2})월|(\d{2,4})년\s*(\d{1,2})월)\s*(.{2,10}?)\s*(?:수익성|[Cc][Mm]\b|공헌이익률?|공헌이익율?)|'
         r'(.{2,10}?)\s*(?:(\d{1,2})월|(\d{2,4})년\s*(\d{1,2})월)\s*(?:수익성|[Cc][Mm]\b|공헌이익률?|공헌이익율?)',
