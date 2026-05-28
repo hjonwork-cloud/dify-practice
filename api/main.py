@@ -2249,6 +2249,27 @@ def _fmt_pct(cm, fi) -> str:
     return "-"
 
 
+def _profit_qr_nav(subject: str, period: str) -> list[dict]:
+    """수익성 답변 후 전월/전년동월 빠른 조회 QR 버튼 생성.
+    subject: 팀명 또는 브랜드/거래처명
+    period: '202604' 형식 (특수값 이번달/지난달/올해는 버튼 미생성)
+    """
+    btns = []
+    if re.match(r'^\d{6}$', str(period)):
+        yr, mo = int(period[:4]), int(period[4:6])
+        # 전월
+        pm_yr, pm_mo = (yr - 1, 12) if mo == 1 else (yr, mo - 1)
+        pm_lbl = f"{str(pm_yr)[2:]}년 {pm_mo}월"
+        btns.append({"label": f"◀ 전월({pm_lbl})", "action": "message",
+                     "messageText": f"{subject} {pm_lbl} CM 알려줘"})
+        # 전년동월
+        py_lbl = f"{str(yr - 1)[2:]}년 {mo}월"
+        btns.append({"label": f"📅 전년동월({py_lbl})", "action": "message",
+                     "messageText": f"{subject} {py_lbl} CM 알려줘"})
+    btns.append({"label": "🏠 메인 메뉴", "action": "message", "messageText": "메뉴"})
+    return btns
+
+
 def _fetch_profit_branch(branch: str, period: str) -> str:
     """지점 전체 수익성 요약 (1행 합계) — 백만원 단위, CO기준"""
     cond = _profit_period_cond(period)
@@ -4156,7 +4177,7 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
         logger.info(f"[콜백] 팀수익성: team={_pt_team}, period={_pt_period}")
         try:
             _pt_text = _fetch_profit_branch(_pt_team, _pt_period)
-            _pt_follow_qr = [{"label": "🏠 메인 메뉴", "action": "message", "messageText": "메뉴"}]
+            _pt_follow_qr = _profit_qr_nav(_pt_team, _pt_period)
             _send_kakao_callback_qr(callback_url, _to_kakao_text(_pt_text + _PROFIT_NAME_GUIDE), _pt_follow_qr, "팀수익성")
         except Exception as e:
             logger.error(f"[콜백] 팀수익성 오류: {e}")
@@ -4194,7 +4215,7 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
             logger.info(f"[콜백] 월없는수익성: kw={_nm_kw}, period={_nm_period}, branch={_nm_branch}")
             try:
                 _nm_text = _fetch_profit_by_name(_nm_kw, _nm_period, _nm_branch)
-                _nm_qr = [{"label": "🏠 메인 메뉴", "action": "message", "messageText": "메뉴"}]
+                _nm_qr = _profit_qr_nav(_nm_kw, _nm_period)
                 _send_kakao_callback_qr(callback_url, _to_kakao_text(_nm_text), _nm_qr, "월없는수익성")
             except Exception as e:
                 logger.error(f"[콜백] 월없는수익성 오류: {e}")
@@ -4219,7 +4240,7 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
             logger.info(f"[콜백] 이름수익성: kw={_biz_kw}, ym={_biz_ym}, branch={_bp_branch}")
             try:
                 _bp_text = _fetch_profit_by_name(_biz_kw, _biz_ym, _bp_branch)
-                _bp_qr = [{"label": "🏠 메인 메뉴", "action": "message", "messageText": "메뉴"}]
+                _bp_qr = _profit_qr_nav(_biz_kw, _biz_ym)
                 _send_kakao_callback_qr(callback_url, _to_kakao_text(_bp_text), _bp_qr, "이름수익성")
             except Exception as e:
                 logger.error(f"[콜백] 이름수익성 오류: {e}")
