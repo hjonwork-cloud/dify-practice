@@ -2250,11 +2250,13 @@ def _fmt_pct(cm, fi) -> str:
 
 
 def _profit_qr_nav(subject: str, period: str) -> list[dict]:
-    """수익성 답변 후 전월/전년동월 빠른 조회 QR 버튼 생성.
+    """수익성 답변 후 전월/전년동월/전년동기 빠른 조회 QR 버튼 생성.
     subject: 팀명 또는 브랜드/거래처명
-    period: '202604' 형식 (특수값 이번달/지난달/올해는 버튼 미생성)
+    period: '202604' 또는 '2025'(누계) 형식
     """
+    import datetime as _dt
     btns = []
+    _cur_yr = _dt.datetime.now().year
     if re.match(r'^\d{6}$', str(period)):
         yr, mo = int(period[:4]), int(period[4:6])
         # 전월
@@ -2266,6 +2268,18 @@ def _profit_qr_nav(subject: str, period: str) -> list[dict]:
         py_lbl = f"{str(yr - 1)[2:]}년 {mo}월"
         btns.append({"label": f"📅 전년동월({py_lbl})", "action": "message",
                      "messageText": f"{subject} {py_lbl} CM 알려줘"})
+    elif str(period) == "올해" or (re.match(r'^\d{4}$', str(period)) and int(period) == _cur_yr):
+        # 올해 누계 → 전년동기
+        py = _cur_yr - 1
+        py_lbl = f"{str(py)[2:]}년"
+        btns.append({"label": f"📅 전년동기({py_lbl})", "action": "message",
+                     "messageText": f"{subject} {py_lbl} 누계 CM 알려줘"})
+    elif re.match(r'^\d{4}$', str(period)):
+        # 특정 연도 누계 → 전년동기
+        py = int(period) - 1
+        py_lbl = f"{str(py)[2:]}년"
+        btns.append({"label": f"📅 전년동기({py_lbl})", "action": "message",
+                     "messageText": f"{subject} {py_lbl} 누계 CM 알려줘"})
     btns.append({"label": "🏠 메인 메뉴", "action": "message", "messageText": "메뉴"})
     return btns
 
@@ -4156,16 +4170,17 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
             _pt_period = "이번달"
         elif re.search(r'지난달|지난\s*달|전달|전월', query):
             _pt_period = "지난달"
-        elif re.search(r'올해', query):
+        elif re.search(r'올해|누계', query) and not re.search(r'\d{1,2}월', query):
+            # 올해 누계 (연도 미지정 또는 올해 명시)
             _pt_period = "올해"
         elif re.search(r'(\d{2,4})년', query) and not re.search(r'\d{1,2}월', query):
-            # 연도만 있고 월은 없음 → 연도 누계
+            # 연도 누계
             _yr_m = re.search(r'(\d{2,4})년', query)
             _yr = int(_yr_m.group(1))
             if _yr < 100:
                 _yr = 2000 + _yr
             _pt_period = str(_yr)
-        elif not re.search(r'\d{1,2}월|\d{4}년|이번달|지난달|올해', query):
+        elif not re.search(r'\d{1,2}월|\d{4}년|이번달|지난달|올해|누계', query):
             # 월/기간 정보 없음 → 최신 확정 월 자동 적용
             _pt_latest = _safe_query(f"SELECT MAX(`날짜`) AS mx FROM {T_PROFIT}", raw=True)
             if _pt_latest and _pt_latest[0].get("mx"):
@@ -4187,29 +4202,40 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
     # ─── 특정 브랜드/거래처명 수익성 (월 없는 경우 → 최신 월 기본값) ─────
     _PROFIT_TEAMS_SET = {"외식1팀", "외식2팀", "외식3팀", "영남지점"}
 
-    # 월 없이 CM/공헌이익/수익성 키워드만 있는 경우 (예: "신화푸드 CM 알려줘")
+    # 월 없이 CM/공헌이익/수익성 키워드만 있는 경우 (예: "신화푸드 CM 알려줘", "신화푸드 올해 누계 CM")
     _no_month_profit_m = None
     if (re.search(_PROFIT_KW_PAT, query, re.IGNORECASE)
-            and not re.search(r'\d{1,2}월|\d{4}년|이번달|지난달|올해', query)
+            and not re.search(r'\d{1,2}월|이번달|지난달', query)
             and not any(t in query for t in _PROFIT_TEAMS_SET)):
         _no_month_profit_m = re.search(
+            r'(.{2,12}?)\s*(?:올해|누계|\d{2,4}년)?\s*(?:수익성|[Cc][Mm]\b|공헌이익률?|공헌이익율?)|'
             r'(.{2,12}?)\s*(?:수익성|[Cc][Mm]\b|공헌이익률?|공헌이익율?)',
             query
         )
     if _no_month_profit_m:
-        _nm_kw = _no_month_profit_m.group(1).strip()
+        _nm_kw = (_no_month_profit_m.group(1) or _no_month_profit_m.group(2) or "").strip()
+        _nm_kw = re.sub(r'\s*(올해|누계|\d{2,4}년)\s*$', '', _nm_kw).strip()
         _nm_kw = re.sub(r'[의는은이가을를]$', '', _nm_kw).strip()
         if _nm_kw and len(_nm_kw) >= 2 and re.search(r'[가-힣A-Za-z]', _nm_kw):
-            # 최신 월 DB에서 동적 조회
-            _nm_rows = _safe_query(
-                f"SELECT MAX(`날짜`) AS mx FROM {T_PROFIT}", raw=True
-            )
+            # 올해/누계/연도 키워드 처리
             _nm_period = ""
-            if _nm_rows and _nm_rows[0].get("mx"):
-                _mx = str(_nm_rows[0]["mx"])[:7].replace("-", "")[:6]  # "202604"
-                _nm_period = _mx
-            if not _nm_period:
-                _, _nm_period = _extract_month_year("")
+            _nm_year_m = re.search(r'(\d{2,4})년', query)
+            if re.search(r'올해|누계', query) or (_nm_year_m and not re.search(r'\d{1,2}월', query)):
+                if _nm_year_m:
+                    _nm_y = _nm_year_m.group(1)
+                    _nm_period = f"{int(_nm_y):04d}" if len(_nm_y) <= 2 else _nm_y
+                else:
+                    _nm_period = "올해"
+            else:
+                # 최신 월 DB에서 동적 조회
+                _nm_rows = _safe_query(
+                    f"SELECT MAX(`날짜`) AS mx FROM {T_PROFIT}", raw=True
+                )
+                if _nm_rows and _nm_rows[0].get("mx"):
+                    _mx = str(_nm_rows[0]["mx"])[:7].replace("-", "")[:6]  # "202604"
+                    _nm_period = _mx
+                if not _nm_period:
+                    _, _nm_period = _extract_month_year("")
             _nm_user = _load_users().get(user_id, {})
             _nm_branch = _nm_user.get("team", "")
             logger.info(f"[콜백] 월없는수익성: kw={_nm_kw}, period={_nm_period}, branch={_nm_branch}")
