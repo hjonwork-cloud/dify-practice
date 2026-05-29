@@ -4207,14 +4207,14 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
     if (re.search(_PROFIT_KW_PAT, query, re.IGNORECASE)
             and not re.search(r'\d{1,2}월|이번달|지난달', query)
             and not any(t in query for t in _PROFIT_TEAMS_SET)):
-        _no_month_profit_m = re.search(
-            r'(.{2,12}?)\s*(?:올해|누계|\d{2,4}년)?\s*(?:수익성|[Cc][Mm]\b|공헌이익률?|공헌이익율?)|'
-            r'(.{2,12}?)\s*(?:수익성|[Cc][Mm]\b|공헌이익률?|공헌이익율?)',
-            query
-        )
+        _no_month_profit_m = re.search(_PROFIT_KW_PAT, query, re.IGNORECASE)  # 수익성 키워드 존재 확인용
     if _no_month_profit_m:
-        _nm_kw = (_no_month_profit_m.group(1) or _no_month_profit_m.group(2) or "").strip()
-        _nm_kw = re.sub(r'\s*(올해|누계|\d{2,4}년)\s*$', '', _nm_kw).strip()
+        # query에서 수식어 제거 → 거래처명 추출 (앞글자 잘림 방지)
+        _nm_kw = re.sub(
+            r'(?:수익성|[Cc][Mm]\b|공헌이익률?|공헌이익율?|올해|누계|\d{2,4}년|알려줘|알려주세요|조회|확인|어때|보여줘)',
+            '', query, flags=re.IGNORECASE
+        ).strip()
+        _nm_kw = re.sub(r'\s+', ' ', _nm_kw).strip()
         _nm_kw = re.sub(r'[의는은이가을를]$', '', _nm_kw).strip()
         if _nm_kw and len(_nm_kw) >= 2 and re.search(r'[가-힣A-Za-z]', _nm_kw):
             # 올해/누계/연도 키워드 처리
@@ -4222,8 +4222,10 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
             _nm_year_m = re.search(r'(\d{2,4})년', query)
             if re.search(r'올해|누계', query) or (_nm_year_m and not re.search(r'\d{1,2}월', query)):
                 if _nm_year_m:
-                    _nm_y = _nm_year_m.group(1)
-                    _nm_period = f"{int(_nm_y):04d}" if len(_nm_y) <= 2 else _nm_y
+                    _nm_y = int(_nm_year_m.group(1))
+                    if _nm_y < 100:
+                        _nm_y += 2000   # 26 → 2026, 25 → 2025
+                    _nm_period = str(_nm_y)
                 else:
                     _nm_period = "올해"
             else:
