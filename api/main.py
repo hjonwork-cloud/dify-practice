@@ -2275,7 +2275,7 @@ def _profit_qr_nav(subject: str, period: str) -> list[dict]:
         btns.append({"label": f"📅 전년동월({py_lbl})", "action": "message",
                      "messageText": f"{subject} {py_lbl} CM 알려줘"})
     elif str(period) == "올해" or (re.match(r'^\d{4}$', str(period)) and int(period) == _cur_yr):
-        # 올해 누계 → 전년동기 (현재 데이터 제공 월까지만 비교)
+        # 올해 누계 → 전년동기(N월까지) + 전년 전체
         _qr_max_rows = _safe_query(f"SELECT MAX(`날짜`) AS mx FROM {T_PROFIT}", raw=True)
         _qr_max_mo = None
         if _qr_max_rows and _qr_max_rows[0].get("mx"):
@@ -2289,8 +2289,10 @@ def _profit_qr_nav(subject: str, period: str) -> list[dict]:
         else:
             btns.append({"label": f"📅 전년동기({py_lbl})", "action": "message",
                          "messageText": f"{subject} {py_lbl} 누계 CM 알려줘"})
+        btns.append({"label": f"📊 전년({py_lbl})", "action": "message",
+                     "messageText": f"{subject} {py_lbl} 누계 CM 알려줘"})
     elif re.match(r'^\d{4}$', str(period)):
-        # 특정 연도 누계 → 전년동기 (해당 연도 MAX월 기준)
+        # 특정 연도 누계 → 전년동기(N월까지) + 전년 전체
         _qr_max_rows2 = _safe_query(f"SELECT MAX(`날짜`) AS mx FROM {T_PROFIT} WHERE YEAR(`날짜`) = {period}", raw=True)
         _qr_max_mo2 = None
         if _qr_max_rows2 and _qr_max_rows2[0].get("mx"):
@@ -2304,6 +2306,8 @@ def _profit_qr_nav(subject: str, period: str) -> list[dict]:
         else:
             btns.append({"label": f"📅 전년동기({py_lbl})", "action": "message",
                          "messageText": f"{subject} {py_lbl} 누계 CM 알려줘"})
+        btns.append({"label": f"📊 전년({py_lbl})", "action": "message",
+                     "messageText": f"{subject} {py_lbl} 누계 CM 알려줘"})
     elif re.match(r'^\d{4}:\d{2}$', str(period)):
         # YYYY:MM 형식 (N월까지 누계) → 전년동기(N월까지) + 전년 전체 두 버튼
         _p_yy, _p_mm = str(period).split(':')
