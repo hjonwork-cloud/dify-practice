@@ -93,14 +93,36 @@ def generate_action_proposal(
 
 @router.get("/report/{proposal_id}", response_class=HTMLResponse)
 async def action_report(request: Request, proposal_id: str):
+    import traceback as _tb
+    try:
+        return await _action_report_inner(request, proposal_id)
+    except Exception as e:
+        err = _tb.format_exc()
+        import logging
+        logging.getLogger("action_router").error(f"[report] 500 오류:\n{err}")
+        return HTMLResponse(f"<pre>오류:\n{err}</pre>", status_code=500)
+
+
+def _render_template(name: str, **ctx) -> str:
+    """Starlette TemplateResponse 우회 — 직접 Jinja2 렌더링 (캐시 버그 회피)."""
+    from jinja2 import Environment, FileSystemLoader
+    env = Environment(loader=FileSystemLoader(str(_TEMPLATES_DIR)), autoescape=True)
+    tpl = env.get_template(name)
+    return tpl.render(**ctx)
+
+
+async def _action_report_inner(request: Request, proposal_id: str):
     proposal = get_proposal(proposal_id)
     base_url = str(request.base_url).rstrip("/")
 
     if not proposal or is_expired(proposal_id):
-        return templates.TemplateResponse(
+        html = _render_template(
             "action_report.html",
-            {"request": request, "expired": True, "proposal": {}, "base_url": base_url},
+            expired=True, proposal={}, base_url=base_url,
         )
+        return HTMLResponse(html)
+
+    mark_viewed(proposal_id, proposal.get("user_id", ""))
 
     summary = json.loads(proposal.get("summary_json") or "{}")
     detail  = json.loads(proposal.get("detail_json")  or "{}")
@@ -111,21 +133,19 @@ async def action_report(request: Request, proposal_id: str):
     today = datetime.date.today().isoformat()
     default_deadline = (datetime.date.today() + datetime.timedelta(days=14)).isoformat()
 
-    return templates.TemplateResponse(
+    html = _render_template(
         "action_report.html",
-        {
-            "request":          request,
-            "expired":          False,
-            "proposal":         proposal,
-            "summary":          summary,
-            "detail_rows":      detail_rows,
-            "detail_cols":      detail_cols,
-            "signal_type_label": SIGNAL_LABELS.get(proposal.get("action_type", ""), ""),
-            "today":            today,
-            "default_deadline": default_deadline,
-            "base_url":         base_url,
-        },
+        expired=False,
+        proposal=proposal,
+        summary=summary,
+        detail_rows=detail_rows,
+        detail_cols=detail_cols,
+        signal_type_label=SIGNAL_LABELS.get(proposal.get("action_type", ""), ""),
+        today=today,
+        default_deadline=default_deadline,
+        base_url=base_url,
     )
+    return HTMLResponse(html)
 
 
 # ─── 열람 기록 ──────────────────────────────────────────────
