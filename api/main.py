@@ -3588,10 +3588,41 @@ def _send_kakao_callback(callback_url: str, text: str, label: str = "콜백"):
         logger.error(f"[{label}] 전송 실패: {cb_err}")
 
 
+def _send_kakao_callback_card(
+    callback_url: str, title: str, desc: str, buttons: list, label: str = "콜백"
+):
+    """
+    카카오 콜백 — basicCard + buttons (webLink 포함 가능)
+    buttons 형식: [{"label": "텍스트", "action": "webLink", "webLinkUrl": "..."}]
+                  [{"label": "텍스트", "action": "message", "messageText": "..."}]
+    """
+    try:
+        payload = {
+            "version": "2.0",
+            "template": {
+                "outputs": [{
+                    "basicCard": {
+                        "title": title,
+                        "description": desc,
+                        "buttons": buttons,
+                    }
+                }],
+            },
+        }
+        body = json_mod.dumps(payload, ensure_ascii=False).encode('utf-8')
+        req = urllib.request.Request(callback_url, data=body, method='POST')
+        req.add_header('Content-Type', 'application/json; charset=utf-8')
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            logger.info(f"[{label}+card] 전송 완료: HTTP {resp.status}")
+    except Exception as e:
+        logger.error(f"[{label}+card] 전송 실패: {e}")
+        _send_kakao_callback(callback_url, f"{title}\n\n{desc}", label)
+
+
 def _send_kakao_callback_qr(
     callback_url: str, text: str, quickreplies: list, label: str = "콜백"
 ):
-    """카카오 콜백 전송 + QuickReply 버튼 포함"""
+    """카카오 콜백 전송 + QuickReply 버튼 포함 (message/block action만 지원)"""
     try:
         payload = {
             "version": "2.0",
@@ -4074,16 +4105,13 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                     base_url=_ngrok_url,
                 )
                 if _proposal_url:
-                    _action_msg = (
-                        f"📊 {_action_brand} 세일즈 액션 제안이 준비되었습니다.\n\n"
-                        f"🔗 아래 링크를 터치하면 세부 내용을 확인하고 실행여부를 답변할 수 있습니다.\n"
-                        f"⚠️ 링크 유효 시간: 48시간"
-                    )
-                    _action_qr = [
+                    _action_title = f"📊 {_action_brand} 세일즈 액션 제안"
+                    _action_desc = "시그널이 감지되었습니다.\n아래 버튼을 눌러 세부 내용을 확인하고 실행 여부를 답변해 주세요.\n⚠️ 링크 유효 시간: 48시간"
+                    _action_btns = [
                         {"label": "📋 액션 확인하기", "action": "webLink", "webLinkUrl": _proposal_url},
                         {"label": "🏠 메인 메뉴", "action": "message", "messageText": "메뉴"},
                     ]
-                    _send_kakao_callback_qr(callback_url, _action_msg, _action_qr, "액션제안")
+                    _send_kakao_callback_card(callback_url, _action_title, _action_desc, _action_btns, "액션제안")
                 else:
                     _send_kakao_callback(callback_url,
                         f"📊 {_action_brand}에 대한 새로운 액션 제안이 없습니다.\n(오늘 이미 모든 시그널을 제안드렸습니다)",
