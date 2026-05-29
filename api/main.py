@@ -2193,6 +2193,9 @@ def _profit_period_cond(period: str) -> str:
         return f"`날짜` = '{date_str}'"
     elif re.match(r'^\d{4}$', period):  # 2026 형식 (연도 누계)
         return f"YEAR(`날짜`) = {period}"
+    elif re.match(r'^\d{4}:\d{2}$', period):  # 2025:04 형식 (전년동기 Jan~N월)
+        _yy, _mm = period.split(':')
+        return f"YEAR(`날짜`) = {_yy} AND MONTH(`날짜`) <= {int(_mm)}"
     else:
         return "`날짜` IS NOT NULL"
 
@@ -2213,6 +2216,9 @@ def _period_label(period: str) -> str:
         return f"{period[:4]}년 {int(period[4:6])}월"
     elif re.match(r'^\d{4}$', period):  # 2026 형식 (연도 누계)
         return f"{period}년 누계"
+    elif re.match(r'^\d{4}:\d{2}$', period):  # 2025:04 형식 (전년동기)
+        _yy, _mm = period.split(':')
+        return f"{_yy}년 {int(_mm)}월까지 누계"
     return period
 
 
@@ -2269,17 +2275,35 @@ def _profit_qr_nav(subject: str, period: str) -> list[dict]:
         btns.append({"label": f"📅 전년동월({py_lbl})", "action": "message",
                      "messageText": f"{subject} {py_lbl} CM 알려줘"})
     elif str(period) == "올해" or (re.match(r'^\d{4}$', str(period)) and int(period) == _cur_yr):
-        # 올해 누계 → 전년동기
+        # 올해 누계 → 전년동기 (현재 데이터 제공 월까지만 비교)
+        _qr_max_rows = _safe_query(f"SELECT MAX(`날짜`) AS mx FROM {T_PROFIT}", raw=True)
+        _qr_max_mo = None
+        if _qr_max_rows and _qr_max_rows[0].get("mx"):
+            _qr_max_mo = int(str(_qr_max_rows[0]["mx"])[5:7])
         py = _cur_yr - 1
         py_lbl = f"{str(py)[2:]}년"
-        btns.append({"label": f"📅 전년동기({py_lbl})", "action": "message",
-                     "messageText": f"{subject} {py_lbl} 누계 CM 알려줘"})
+        if _qr_max_mo:
+            mo_lbl = f"{_qr_max_mo}월까지"
+            btns.append({"label": f"📅 전년동기({py_lbl} {mo_lbl})", "action": "message",
+                         "messageText": f"{subject} {py_lbl} {mo_lbl} 누계 CM 알려줘"})
+        else:
+            btns.append({"label": f"📅 전년동기({py_lbl})", "action": "message",
+                         "messageText": f"{subject} {py_lbl} 누계 CM 알려줘"})
     elif re.match(r'^\d{4}$', str(period)):
-        # 특정 연도 누계 → 전년동기
+        # 특정 연도 누계 → 전년동기 (해당 연도 MAX월 기준)
+        _qr_max_rows2 = _safe_query(f"SELECT MAX(`날짜`) AS mx FROM {T_PROFIT} WHERE YEAR(`날짜`) = {period}", raw=True)
+        _qr_max_mo2 = None
+        if _qr_max_rows2 and _qr_max_rows2[0].get("mx"):
+            _qr_max_mo2 = int(str(_qr_max_rows2[0]["mx"])[5:7])
         py = int(period) - 1
         py_lbl = f"{str(py)[2:]}년"
-        btns.append({"label": f"📅 전년동기({py_lbl})", "action": "message",
-                     "messageText": f"{subject} {py_lbl} 누계 CM 알려줘"})
+        if _qr_max_mo2:
+            mo_lbl = f"{_qr_max_mo2}월까지"
+            btns.append({"label": f"📅 전년동기({py_lbl} {mo_lbl})", "action": "message",
+                         "messageText": f"{subject} {py_lbl} {mo_lbl} 누계 CM 알려줘"})
+        else:
+            btns.append({"label": f"📅 전년동기({py_lbl})", "action": "message",
+                         "messageText": f"{subject} {py_lbl} 누계 CM 알려줘"})
     btns.append({"label": "🏠 메인 메뉴", "action": "message", "messageText": "메뉴"})
     return btns
 
@@ -4180,6 +4204,13 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
             if _yr < 100:
                 _yr = 2000 + _yr
             _pt_period = str(_yr)
+        elif re.search(r'(\d{2,4})년\s*(\d{1,2})월까지', query):
+            # 전년동기 QR 클릭: "25년 4월까지 누계" → "2025:04"
+            _until_team_m = re.search(r'(\d{2,4})년\s*(\d{1,2})월까지', query)
+            _ut_y2 = int(_until_team_m.group(1))
+            if _ut_y2 < 100:
+                _ut_y2 += 2000
+            _pt_period = f"{_ut_y2}:{int(_until_team_m.group(2)):02d}"
         elif not re.search(r'\d{1,2}월|\d{4}년|이번달|지난달|올해|누계', query):
             # 월/기간 정보 없음 → 최신 확정 월 자동 적용
             _pt_latest = _safe_query(f"SELECT MAX(`날짜`) AS mx FROM {T_PROFIT}", raw=True)
@@ -4248,6 +4279,34 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
             except Exception as e:
                 logger.error(f"[콜백] 월없는수익성 오류: {e}")
                 _send_kakao_callback(callback_url, "⚠️ 수익성 조회 중 오류가 발생했습니다.", "월없는수익성")
+            return
+
+    # ─── N년 N월까지 누계 (전년동기 QR 클릭 시 발생) ──────────────────────
+    _until_m = re.search(r'(\d{2,4})년\s*(\d{1,2})월까지', query)
+    if (_until_m and re.search(_PROFIT_KW_PAT, query, re.IGNORECASE)
+            and not any(t in query for t in _PROFIT_TEAMS_SET)):
+        _ut_y = int(_until_m.group(1))
+        if _ut_y < 100:
+            _ut_y += 2000
+        _ut_mo = int(_until_m.group(2))
+        _ut_period = f"{_ut_y}:{_ut_mo:02d}"  # "2025:04"
+        _ut_kw = re.sub(
+            r'(?:수익성|[Cc][Mm]\b|공헌이익률?|공헌이익율?|올해|누계|\d{2,4}년\s*\d{1,2}월까지|\d{2,4}년|\d{1,2}월까지|알려줘|알려주세요|조회|확인|어때|보여줘)',
+            '', query, flags=re.IGNORECASE
+        ).strip()
+        _ut_kw = re.sub(r'\s+', ' ', _ut_kw).strip()
+        _ut_kw = re.sub(r'[의는은이가을를]$', '', _ut_kw).strip()
+        if _ut_kw and len(_ut_kw) >= 2 and re.search(r'[가-힣A-Za-z]', _ut_kw):
+            _ut_user = _load_users().get(user_id, {})
+            _ut_branch = _ut_user.get("team", "")
+            logger.info(f"[콜백] 전년동기수익성: kw={_ut_kw}, period={_ut_period}")
+            try:
+                _ut_text = _fetch_profit_by_name(_ut_kw, _ut_period, _ut_branch)
+                _ut_qr = _profit_qr_nav(_ut_kw, str(_ut_y))
+                _send_kakao_callback_qr(callback_url, _to_kakao_text(_ut_text), _ut_qr, "전년동기수익성")
+            except Exception as e:
+                logger.error(f"[콜백] 전년동기수익성 오류: {e}")
+                _send_kakao_callback(callback_url, "⚠️ 수익성 조회 중 오류가 발생했습니다.", "전년동기수익성")
             return
 
     _biz_profit_m = re.search(
