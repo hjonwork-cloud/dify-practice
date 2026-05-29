@@ -2304,6 +2304,17 @@ def _profit_qr_nav(subject: str, period: str) -> list[dict]:
         else:
             btns.append({"label": f"📅 전년동기({py_lbl})", "action": "message",
                          "messageText": f"{subject} {py_lbl} 누계 CM 알려줘"})
+    elif re.match(r'^\d{4}:\d{2}$', str(period)):
+        # YYYY:MM 형식 (N월까지 누계) → 전년동기(N월까지) + 전년 전체 두 버튼
+        _p_yy, _p_mm = str(period).split(':')
+        _p_yy, _p_mm = int(_p_yy), int(_p_mm)
+        py = _p_yy - 1
+        py_lbl = f"{str(py)[2:]}년"
+        mo_lbl = f"{_p_mm}월까지"
+        btns.append({"label": f"📅 전년동기({py_lbl} {mo_lbl})", "action": "message",
+                     "messageText": f"{subject} {py_lbl} {mo_lbl} 누계 CM 알려줘"})
+        btns.append({"label": f"📊 전년({py_lbl})", "action": "message",
+                     "messageText": f"{subject} {py_lbl} 누계 CM 알려줘"})
     btns.append({"label": "🏠 메인 메뉴", "action": "message", "messageText": "메뉴"})
     return btns
 
@@ -4302,7 +4313,7 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
             logger.info(f"[콜백] 전년동기수익성: kw={_ut_kw}, period={_ut_period}")
             try:
                 _ut_text = _fetch_profit_by_name(_ut_kw, _ut_period, _ut_branch)
-                _ut_qr = _profit_qr_nav(_ut_kw, str(_ut_y))
+                _ut_qr = _profit_qr_nav(_ut_kw, _ut_period)
                 _send_kakao_callback_qr(callback_url, _to_kakao_text(_ut_text), _ut_qr, "전년동기수익성")
             except Exception as e:
                 logger.error(f"[콜백] 전년동기수익성 오류: {e}")
