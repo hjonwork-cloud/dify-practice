@@ -30,43 +30,88 @@ def _this_ym() -> str:
 # SIG-01: 단품 이탈 (3개월 이상 주문하다 2개월 연속 0)
 # ────────────────────────────────────────────────────────────
 def detect_item_churn(brand: str, qfn: QueryFn) -> dict | None:
-    """브랜드 내 단품 이탈 감지"""
+    """브랜드 내 단품 이탈 감지 (ZB본지점명 단위)"""
     ym3 = _ym_months_ago(3)
     ym2 = _ym_months_ago(2)
     ym1 = _ym_months_ago(1)
+
+    # ── 브랜드 개요: 수익성 테이블 최근 3개월 월별 ──
+    overview_rows = qfn(f"""
+        SELECT
+            DATE_FORMAT(`날짜`, '%Y%m') AS 년월,
+            FORMAT(ROUND(SUM(`FI매출액`) * 100 / 1000), 0) AS 매출액_천원,
+            CONCAT(ROUND(SUM(`매출총이익`) / NULLIF(SUM(`FI매출액`), 0) * 100, 1), '%') AS 매출총이익율,
+            FORMAT(ROUND(SUM(`공헌이익`) * 100 / 1000), 0) AS 공헌이익_천원,
+            COUNT(DISTINCT `거래처명`) AS 가맹점수
+        FROM {T_PROFIT}
+        WHERE `Zc본부명` LIKE '%{brand}%'
+          AND DATE_FORMAT(`날짜`, '%Y%m') IN ('{ym3}', '{ym2}', '{ym1}')
+        GROUP BY DATE_FORMAT(`날짜`, '%Y%m')
+        ORDER BY 년월
+    """, raw=True)
+
+    # ── 전체 본지점 수 (기준: ym3~ym1 출현한 고유 ZB본지점명) ──
+    total_rows = qfn(f"""
+        SELECT COUNT(DISTINCT `ZB본지점명`) AS total
+        FROM {T_MAIN}
+        WHERE `사업부명`='외식식재사업부'
+          AND `ZC본부명` LIKE '%{brand}%'
+          AND `년월` IN ('{ym3}','{ym2}','{ym1}')
+    """, raw=True)
+    total_stores = int(total_rows[0]["total"]) if total_rows else 0
+
+    # ── 이탈 감지 (ZB본지점명 × 품목 단위) ──
     rows = qfn(f"""
         WITH base AS (
-            SELECT `ZC본부명`, `자재명` AS item,
-                   SUM(CASE WHEN `년월`='{ym3}' THEN `매출액` ELSE 0 END) AS m3,
-                   SUM(CASE WHEN `년월`='{ym2}' THEN `매출액` ELSE 0 END) AS m2,
-                   SUM(CASE WHEN `년월`='{ym1}' THEN `매출액` ELSE 0 END) AS m1
+            SELECT `ZB본지점명`, `거래처명`, `자재명` AS item,
+                   SUM(CASE WHEN `년월`='{ym3}' THEN `매출액`   ELSE 0 END) AS m3,
+                   SUM(CASE WHEN `년월`='{ym2}' THEN `매출액`   ELSE 0 END) AS m2,
+                   SUM(CASE WHEN `년월`='{ym1}' THEN `매출액`   ELSE 0 END) AS m1,
+                   SUM(CASE WHEN `년월`='{ym3}' THEN `매출수량` ELSE 0 END) AS q3
             FROM {T_MAIN}
             WHERE `사업부명`='외식식재사업부'
               AND `ZC본부명` LIKE '%{brand}%'
               AND `년월` IN ('{ym3}','{ym2}','{ym1}')
-            GROUP BY `ZC본부명`, `자재명`
+            GROUP BY `ZB본지점명`, `거래처명`, `자재명`
         )
-        SELECT `ZC본부명`, item, m3, m2, m1
+        SELECT
+            `ZB본지점명` AS 본지점명,
+            `거래처명`,
+            item AS 품목,
+            FORMAT(ROUND(m3 * 100 / 1000), 0) AS `매출액(천원)`,
+            ROUND(q3) AS 수량
         FROM base
         WHERE m3 > 0 AND m2 = 0 AND m1 = 0
         ORDER BY m3 DESC
-        LIMIT 10
+        LIMIT 20
     """, raw=True)
+
     if not rows:
         return None
-    total_customers = len(set(r["ZC본부명"] for r in rows))
-    items = list({r["item"] for r in rows})[:5]
+
+    # ── 10% 필터: 이탈 관련 본지점이 전체의 10% 미만이면 무시 ──
+    churn_stores = len(set(r["본지점명"] for r in rows))
+    if total_stores > 0 and churn_stores / total_stores < 0.10:
+        return None
+
+    items = list({r["품목"] for r in rows})[:5]
+    churn_pct = round(churn_stores / total_stores * 100, 1) if total_stores else 0
+
     return {
         "action_type": "ITEM_CHURN",
-        "title": f"단품 이탈 감지 — {len(rows)}건",
+        "title": f"단품 이탈 감지 — {len(rows)}건 ({churn_stores}개 본지점)",
         "priority": 1,
         "summary": {
-            "이탈_품목수": len(rows),
-            "관련_가맹점수": total_customers,
+            "기준_기간": f"{ym3} ~ {ym1}",
+            "이탈_건수": len(rows),
+            "이탈_관련_본지점수": f"{churn_stores}개 ({churn_pct}%)",
+            "전체_본지점수": total_stores,
             "주요_이탈_품목": items,
-            "기준_기간": f"{ym3}~{ym1}",
         },
-        "detail": {"rows": rows[:10]},
+        "detail": {
+            "overview": overview_rows,
+            "rows": rows,
+        },
     }
 
 

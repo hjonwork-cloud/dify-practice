@@ -127,8 +127,9 @@ async def _action_report_inner(request: Request, proposal_id: str):
     summary = json.loads(proposal.get("summary_json") or "{}")
     detail  = json.loads(proposal.get("detail_json")  or "{}")
 
-    detail_rows = detail.get("rows", [])
-    detail_cols = list(detail_rows[0].keys()) if detail_rows else []
+    overview_rows = detail.get("overview", [])
+    detail_rows   = detail.get("rows", [])
+    detail_cols   = list(detail_rows[0].keys()) if detail_rows else []
 
     today = datetime.date.today().isoformat()
     default_deadline = (datetime.date.today() + datetime.timedelta(days=14)).isoformat()
@@ -138,6 +139,7 @@ async def _action_report_inner(request: Request, proposal_id: str):
         expired=False,
         proposal=proposal,
         summary=summary,
+        overview_rows=overview_rows,
         detail_rows=detail_rows,
         detail_cols=detail_cols,
         signal_type_label=SIGNAL_LABELS.get(proposal.get("action_type", ""), ""),

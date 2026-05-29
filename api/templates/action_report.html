@@ -63,6 +63,7 @@ body{font-family:'Pretendard Variable','Pretendard',-apple-system,'Segoe UI',san
 .btn-approve{background:linear-gradient(135deg,var(--blue),var(--blue-mid));color:var(--white);box-shadow:0 4px 16px rgba(0,98,177,.30);}
 .btn-hold{background:#fffbeb;color:#92400e;border:1.5px solid #fcd34d;font-weight:600;}
 .btn-reject{background:#f9fafb;color:var(--text-sub);border:1.5px solid var(--border);font-weight:600;}
+.btn-active{outline:3px solid var(--blue);outline-offset:2px;}
 
 /* ── 패널 ── */
 .hold-panel{display:none;background:#fffbeb;border:1.5px solid #fcd34d;border-radius:var(--radius);padding:16px;margin-top:12px;}
@@ -161,6 +162,31 @@ body{font-family:'Pretendard Variable','Pretendard',-apple-system,'Segoe UI',san
 
 <div class="section-gap"></div>
 
+<!-- 브랜드 개요 카드 -->
+{% if overview_rows %}
+<div class="card">
+  <div class="card-header"><span>&#128200;</span>&nbsp;브랜드 월별 현황 (최근 3개월)</div>
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr><th>년월</th><th>매출액(천원)</th><th>매출총이익율</th><th>공헌이익(천원)</th><th>가맹점수</th></tr>
+      </thead>
+      <tbody>
+        {% for r in overview_rows %}
+        <tr>
+          <td>{{ r.년월 }}</td>
+          <td style="text-align:right">{{ r.매출액_천원 }}</td>
+          <td style="text-align:right">{{ r.매출총이익율 }}</td>
+          <td style="text-align:right">{{ r.공헌이익_천원 }}</td>
+          <td style="text-align:right">{{ r.가맹점수 }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
 <!-- 시그널 요약 카드 -->
 <div class="card">
   <div class="card-header"><span>&#128203;</span>&nbsp;{{ proposal.title }}</div>
@@ -227,9 +253,9 @@ body{font-family:'Pretendard Variable','Pretendard',-apple-system,'Segoe UI',san
 <div class="action-section">
   <div class="action-title">이 제안에 대한 의견을 선택해주세요</div>
   <div class="btn-group">
-    <button class="btn btn-approve" id="btnApprove" onclick="onApprove()">&#9989; 실행하겠습니다</button>
-    <button class="btn btn-hold"    id="btnHold"    onclick="onHold()">&#9208; 보류</button>
-    <button class="btn btn-reject"  id="btnReject"  onclick="onReject()">&#10060; 해당없음</button>
+    <button class="btn btn-approve" id="btnApprove" onclick="toggleAction('approve')">&#9989; 실행하겠습니다</button>
+    <button class="btn btn-hold"    id="btnHold"    onclick="toggleAction('hold')">&#9208; 보류</button>
+    <button class="btn btn-reject"  id="btnReject"  onclick="toggleAction('reject')">&#10060; 해당없음</button>
   </div>
 
   <div class="hold-panel" id="holdPanel">
@@ -263,14 +289,50 @@ body{font-family:'Pretendard Variable','Pretendard',-apple-system,'Segoe UI',san
 const PROPOSAL_ID = "{{ proposal.proposal_id }}";
 const BASE_URL    = "{{ base_url }}";
 
-function onApprove(){disableBtns();showPanel('deadlinePanel');}
-function onHold(){disableBtns();showPanel('holdPanel');}
-async function onReject(){
-  if(!confirm('해당없음으로 처리하시겠습니까?\n(동일 시그널은 30일간 재제안되지 않습니다)'))return;
-  await respond({response:'reject',hold_reason:''});
+let _selectedAction = null;
+
+function toggleAction(type) {
+  const panels = {approve:'deadlinePanel', hold:'holdPanel', reject:null};
+  const btnIds  = {approve:'btnApprove', hold:'btnHold', reject:'btnReject'};
+
+  if (_selectedAction === type) {
+    // 같은 버튼 재클릭 → 선택 취소
+    _selectedAction = null;
+    ['deadlinePanel','holdPanel'].forEach(p => { document.getElementById(p).style.display='none'; });
+    Object.values(btnIds).forEach(id => {
+      const el = document.getElementById(id);
+      if(el){ el.classList.remove('btn-active'); el.style.opacity=''; }
+    });
+    return;
+  }
+
+  // 다른 버튼 선택
+  _selectedAction = type;
+  ['deadlinePanel','holdPanel'].forEach(p => { document.getElementById(p).style.display='none'; });
+  Object.entries(btnIds).forEach(([k,id]) => {
+    const el = document.getElementById(id);
+    if(!el) return;
+    if(k === type){ el.classList.add('btn-active'); el.style.opacity='1'; }
+    else { el.classList.remove('btn-active'); el.style.opacity='0.45'; }
+  });
+
+  if(type === 'approve') showPanel('deadlinePanel');
+  else if(type === 'hold') showPanel('holdPanel');
+  else if(type === 'reject') {
+    if(!confirm('해당없음으로 처리하시겠습니까?\n(동일 시그널은 30일간 재제안되지 않습니다)')){
+      _selectedAction = null;
+      Object.values(btnIds).forEach(id => {
+        const el = document.getElementById(id);
+        if(el){ el.classList.remove('btn-active'); el.style.opacity=''; }
+      });
+      return;
+    }
+    respond({response:'reject',hold_reason:''});
+  }
 }
 async function submitHold(){
-  await respond({response:'hold',hold_reason:document.getElementById('holdReason').value.trim()});
+  const reason = document.getElementById('holdReason').value.trim();
+  await respond({response:'hold', hold_reason: reason});
 }
 function selectQuick(el,days){
   document.querySelectorAll('.quick-btn').forEach(b=>b.classList.remove('selected'));
@@ -306,12 +368,6 @@ async function setDeadline(deadline){
     });
     const d=await r.json();if(d.ok)location.reload();
   }catch(e){showToast('오류');}
-}
-function disableBtns(){
-  ['btnApprove','btnHold','btnReject'].forEach(id=>{
-    const el=document.getElementById(id);
-    if(el){el.disabled=true;el.style.opacity='0.5';}
-  });
 }
 function showPanel(id){
   const p=document.getElementById(id);if(!p)return;
