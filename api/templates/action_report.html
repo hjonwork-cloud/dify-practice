@@ -2,290 +2,192 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>세일즈 액션 제안 — {{ proposal.brand_name }}</title>
+<link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" rel="stylesheet">
 <style>
-  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
-  :root {
-    --blue: #0062b1;
-    --blue-light: #e8f4fd;
-    --red: #e74c3c;
-    --green: #27ae60;
-    --orange: #f39c12;
-    --gray: #888;
-    --border: #eee;
-    --radius: 14px;
-  }
-  body {
-    font-family: -apple-system, 'Segoe UI', sans-serif;
-    background: #f2f4f7;
-    min-height: 100vh;
-    color: #222;
-  }
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+:root{
+  --blue:#0062b1;--blue-dark:#004a8c;--blue-mid:#1a7dd4;
+  --blue-light:#e3f0fb;--blue-ultra:#f0f7ff;
+  --white:#fff;--bg:#f0f4f8;--text:#111827;--text-sub:#6b7280;
+  --border:#e5eaf0;--red:#dc2626;--orange:#d97706;--green:#16a34a;
+  --radius-sm:10px;--radius:16px;--radius-lg:22px;
+  --shadow:0 2px 12px rgba(0,98,177,.10);
+}
+html{font-size:16px;}
+body{font-family:'Pretendard Variable','Pretendard',-apple-system,'Segoe UI',sans-serif;font-weight:400;background:var(--bg);min-height:100vh;color:var(--text);-webkit-font-smoothing:antialiased;}
 
-  /* ── 헤더 ── */
-  .header {
-    background: var(--blue);
-    color: #fff;
-    padding: 18px 20px 14px;
-    position: sticky; top: 0; z-index: 100;
-  }
-  .header .brand { font-size: 18px; font-weight: 700; }
-  .header .sub   { font-size: 12px; opacity: 0.8; margin-top: 2px; }
+/* ── 헤더 ── */
+.header{background:linear-gradient(135deg,var(--blue-dark) 0%,var(--blue) 60%,var(--blue-mid) 100%);color:var(--white);padding:20px;position:sticky;top:0;z-index:100;box-shadow:0 2px 16px rgba(0,0,0,.18);}
+.header-inner{display:flex;align-items:center;gap:14px;}
+.logo-wrap{background:var(--white);border-radius:var(--radius-sm);padding:6px 10px;display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 1px 6px rgba(0,0,0,.10);}
+.header-titles{flex:1;min-width:0;}
+.header-brand{font-size:18px;font-weight:800;letter-spacing:-0.5px;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.header-sub{font-size:11px;opacity:.72;margin-top:3px;}
 
-  /* ── 중요도 배지 ── */
-  .importance-bar {
-    display: flex; align-items: center; gap: 10px;
-    padding: 12px 20px;
-    background: #fff;
-    border-bottom: 1px solid var(--border);
-  }
-  .badge {
-    display: inline-block;
-    padding: 3px 10px; border-radius: 20px;
-    font-size: 12px; font-weight: 700;
-  }
-  .badge.high   { background: #fdecea; color: var(--red); }
-  .badge.medium { background: #fff8e1; color: var(--orange); }
-  .badge.low    { background: #e8f5e9; color: var(--green); }
-  .badge-meta { font-size: 12px; color: var(--gray); }
+/* ── 중요도 배너 ── */
+.importance-bar{background:var(--white);border-bottom:2px solid var(--blue-light);padding:12px 20px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.badge{display:inline-flex;align-items:center;gap:5px;padding:5px 12px;border-radius:20px;font-size:13px;font-weight:700;}
+.badge.high{background:#fee2e2;color:var(--red);}
+.badge.medium{background:#fef3c7;color:var(--orange);}
+.badge.low{background:#dcfce7;color:var(--green);}
+.badge-label{font-size:13px;font-weight:600;color:var(--blue);background:var(--blue-ultra);padding:5px 12px;border-radius:20px;border:1px solid #c7dff5;}
 
-  /* ── 카드 ── */
-  .card {
-    background: #fff;
-    border-radius: var(--radius);
-    margin: 16px;
-    box-shadow: 0 1px 6px rgba(0,0,0,0.07);
-    overflow: hidden;
-  }
-  .card-header {
-    padding: 14px 16px;
-    font-weight: 700; font-size: 15px;
-    border-bottom: 1px solid var(--border);
-    display: flex; align-items: center; gap: 8px;
-  }
-  .card-body { padding: 14px 16px; }
+/* ── 카드 ── */
+.card{background:var(--white);border-radius:var(--radius);margin:16px;box-shadow:var(--shadow);overflow:hidden;border:1px solid var(--border);}
+.card-header{background:linear-gradient(90deg,var(--blue),var(--blue-mid));color:var(--white);padding:14px 18px;font-size:15px;font-weight:700;letter-spacing:-0.3px;display:flex;align-items:center;gap:8px;}
+.card-body{padding:6px 0;}
+.kv-row{display:flex;justify-content:space-between;align-items:center;padding:11px 18px;border-bottom:1px solid #f3f6fa;gap:12px;}
+.kv-row:last-child{border-bottom:none;}
+.kv-key{font-size:14px;font-weight:500;color:var(--text-sub);flex-shrink:0;}
+.kv-value{font-size:14px;font-weight:700;text-align:right;word-break:keep-all;}
+.kv-value.accent{color:var(--blue);font-weight:800;}
 
-  /* ── 요약 행 ── */
-  .kv-row {
-    display: flex; justify-content: space-between;
-    padding: 7px 0; border-bottom: 1px solid #f5f5f5;
-    font-size: 14px;
-  }
-  .kv-row:last-child { border-bottom: none; }
-  .kv-key   { color: var(--gray); }
-  .kv-value { font-weight: 600; }
+/* ── 테이블 ── */
+.table-wrap{overflow-x:auto;}
+.data-table{width:100%;border-collapse:collapse;min-width:280px;}
+.data-table thead tr{background:var(--blue-ultra);}
+.data-table th{padding:10px 14px;text-align:left;font-weight:700;font-size:12px;color:var(--blue);border-bottom:2px solid #c7dff5;white-space:nowrap;}
+.data-table td{padding:10px 14px;border-bottom:1px solid #f0f4f8;font-size:13px;font-weight:500;}
+.data-table tr:last-child td{border-bottom:none;}
+.data-table tr:nth-child(even) td{background:#fafcff;}
 
-  /* ── 테이블 ── */
-  .data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  .data-table th {
-    background: #f8f9fa; padding: 8px 10px;
-    text-align: left; color: var(--gray); font-weight: 600;
-    border-bottom: 1px solid var(--border);
-  }
-  .data-table td { padding: 8px 10px; border-bottom: 1px solid #f5f5f5; }
-  .data-table tr:last-child td { border-bottom: none; }
+/* ── 버튼 ── */
+.action-section{margin:0 16px 24px;}
+.action-title{font-size:13px;font-weight:700;color:var(--text-sub);margin-bottom:12px;display:flex;align-items:center;gap:6px;}
+.action-title::before{content:'';display:block;width:3px;height:14px;background:var(--blue);border-radius:2px;}
+.btn-group{display:flex;flex-direction:column;gap:10px;}
+.btn{width:100%;padding:16px 20px;border:none;border-radius:var(--radius);font-family:inherit;font-size:16px;font-weight:700;cursor:pointer;transition:all .15s;display:flex;align-items:center;justify-content:center;gap:8px;letter-spacing:-0.3px;}
+.btn:active{transform:scale(.975);opacity:.88;}
+.btn-approve{background:linear-gradient(135deg,var(--blue),var(--blue-mid));color:var(--white);box-shadow:0 4px 16px rgba(0,98,177,.30);}
+.btn-hold{background:#fffbeb;color:#92400e;border:1.5px solid #fcd34d;font-weight:600;}
+.btn-reject{background:#f9fafb;color:var(--text-sub);border:1.5px solid var(--border);font-weight:600;}
 
-  /* ── 액션 버튼 영역 ── */
-  .action-section { margin: 0 16px 16px; }
-  .action-title { font-size: 13px; color: var(--gray); margin-bottom: 10px; font-weight: 600; }
+/* ── 패널 ── */
+.hold-panel{display:none;background:#fffbeb;border:1.5px solid #fcd34d;border-radius:var(--radius);padding:16px;margin-top:12px;}
+.deadline-panel{display:none;background:var(--blue-ultra);border:1.5px solid #93c5fd;border-radius:var(--radius);padding:16px;margin-top:12px;}
+.panel-label{font-size:13px;font-weight:700;display:block;margin-bottom:10px;}
+.hold-panel .panel-label{color:#92400e;}
+.deadline-panel .panel-label{color:var(--blue);}
+.hold-panel textarea{width:100%;min-height:90px;border:1.5px solid #fde68a;border-radius:var(--radius-sm);padding:12px;font-family:inherit;font-size:15px;resize:none;background:var(--white);outline:none;color:var(--text);}
+.hold-panel textarea:focus{border-color:#f59e0b;}
+.hold-submit{margin-top:10px;width:100%;padding:13px;background:#f59e0b;color:var(--white);border:none;border-radius:var(--radius-sm);font-family:inherit;font-weight:700;font-size:15px;cursor:pointer;}
+.quick-dates{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;}
+.quick-btn{padding:8px 16px;background:var(--white);border:1.5px solid #93c5fd;border-radius:20px;font-family:inherit;font-size:14px;font-weight:700;color:var(--blue);cursor:pointer;}
+.quick-btn.selected{background:var(--blue);color:var(--white);border-color:var(--blue);}
+.calendar-label{font-size:12px;font-weight:600;color:var(--text-sub);display:block;margin-bottom:6px;}
+.calendar-input{width:100%;padding:13px 16px;border:1.5px solid #93c5fd;border-radius:var(--radius-sm);font-family:inherit;font-size:16px;font-weight:600;color:var(--blue);background:var(--white);outline:none;}
+.calendar-input:focus{border-color:var(--blue);}
+.deadline-submit{margin-top:12px;width:100%;padding:15px;background:linear-gradient(135deg,var(--blue),var(--blue-mid));color:var(--white);border:none;border-radius:var(--radius);font-family:inherit;font-weight:800;font-size:16px;cursor:pointer;box-shadow:0 4px 16px rgba(0,98,177,.30);}
+.deadline-submit:active{opacity:.88;transform:scale(.98);}
 
-  .btn-group { display: flex; flex-direction: column; gap: 10px; }
-  .btn {
-    width: 100%; padding: 14px;
-    border: none; border-radius: var(--radius);
-    font-size: 15px; font-weight: 700; cursor: pointer;
-    transition: opacity 0.15s, transform 0.1s;
-    display: flex; align-items: center; justify-content: center; gap: 8px;
-  }
-  .btn:active { transform: scale(0.98); opacity: 0.85; }
-  .btn-approve { background: var(--blue); color: #fff; }
-  .btn-hold    { background: #fff3cd; color: #856404; border: 1px solid #ffc107; }
-  .btn-reject  { background: #f8f9fa; color: var(--gray); border: 1px solid var(--border); }
+/* ── 결과 배너 ── */
+.result-banner{margin:16px;border-radius:var(--radius-lg);padding:28px 20px;text-align:center;box-shadow:var(--shadow);}
+.result-banner .r-icon{font-size:48px;line-height:1;margin-bottom:12px;}
+.result-banner .r-title{font-size:20px;font-weight:800;letter-spacing:-0.5px;}
+.result-banner .r-meta{font-size:14px;font-weight:500;margin-top:6px;}
+.result-banner .r-id{display:inline-block;margin-top:12px;background:rgba(255,255,255,.5);padding:5px 14px;border-radius:12px;font-size:12px;font-weight:600;}
+.banner-complete{background:linear-gradient(135deg,#d1fae5,#a7f3d0);border:1.5px solid #6ee7b7;}
+.banner-complete .r-title{color:#065f46;}
+.banner-complete .r-meta{color:#047857;}
+.banner-reject{background:#f9fafb;border:1.5px solid var(--border);}
+.banner-reject .r-title{color:var(--text-sub);}
+.banner-hold{background:linear-gradient(135deg,#fefce8,#fef9c3);border:1.5px solid #fde047;}
+.banner-hold .r-title{color:#713f12;}
+.banner-hold .r-meta{color:#92400e;}
+.hold-reason-box{margin-top:12px;padding:12px 14px;background:rgba(255,255,255,.7);border-radius:var(--radius-sm);font-size:14px;font-weight:500;text-align:left;}
 
-  /* ── 보류 사유 입력 ── */
-  .hold-panel {
-    display: none;
-    background: #fffbee;
-    border: 1px solid #ffc107;
-    border-radius: var(--radius);
-    padding: 14px; margin-top: 10px;
-  }
-  .hold-panel label { font-size: 13px; font-weight: 600; color: #856404; display: block; margin-bottom: 8px; }
-  .hold-panel textarea {
-    width: 100%; min-height: 80px;
-    border: 1px solid #ffd966; border-radius: 8px;
-    padding: 10px; font-size: 14px; resize: none;
-    background: #fff; outline: none;
-  }
-  .hold-panel textarea:focus { border-color: #ffc107; }
-  .hold-submit {
-    margin-top: 10px; width: 100%;
-    padding: 11px; background: #ffc107; color: #333;
-    border: none; border-radius: 8px; font-weight: 700; font-size: 14px;
-    cursor: pointer;
-  }
-
-  /* ── 데드라인 달력 ── */
-  .deadline-panel {
-    display: none;
-    background: var(--blue-light);
-    border: 1px solid #b3d4f5;
-    border-radius: var(--radius);
-    padding: 14px; margin-top: 10px;
-  }
-  .deadline-panel label { font-size: 13px; font-weight: 600; color: var(--blue); display: block; margin-bottom: 10px; }
-  .quick-dates { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
-  .quick-btn {
-    padding: 7px 14px; background: #fff;
-    border: 1px solid var(--blue); border-radius: 20px;
-    font-size: 13px; color: var(--blue); font-weight: 600; cursor: pointer;
-  }
-  .quick-btn.selected { background: var(--blue); color: #fff; }
-  .calendar-input {
-    width: 100%; padding: 11px 14px;
-    border: 1px solid #b3d4f5; border-radius: 8px;
-    font-size: 15px; color: var(--blue); background: #fff; outline: none;
-  }
-  .calendar-input:focus { border-color: var(--blue); }
-  .deadline-submit {
-    margin-top: 10px; width: 100%;
-    padding: 13px; background: var(--blue); color: #fff;
-    border: none; border-radius: 10px; font-weight: 700; font-size: 15px;
-    cursor: pointer;
-  }
-
-  /* ── 완료 상태 ── */
-  .completed-banner {
-    background: #e8f5e9; border-radius: var(--radius);
-    padding: 20px; text-align: center; margin: 16px;
-    border: 1px solid #a5d6a7;
-  }
-  .completed-banner .icon { font-size: 40px; margin-bottom: 8px; }
-  .completed-banner .title { font-weight: 700; font-size: 16px; color: var(--green); }
-  .completed-banner .meta { font-size: 13px; color: var(--gray); margin-top: 6px; }
-  .completed-banner .action-id { 
-    margin-top: 10px; font-size: 12px; color: #aaa;
-    background: #f1f8f1; padding: 4px 10px; border-radius: 10px; display: inline-block;
-  }
-
-  .rejected-banner {
-    background: #f8f9fa; border-radius: var(--radius);
-    padding: 20px; text-align: center; margin: 16px;
-    border: 1px solid var(--border);
-  }
-  .rejected-banner .icon { font-size: 36px; margin-bottom: 8px; }
-  .rejected-banner .title { font-weight: 700; font-size: 16px; color: var(--gray); }
-
-  .hold-banner {
-    background: #fffbee; border-radius: var(--radius);
-    padding: 20px; margin: 16px;
-    border: 1px solid #ffc107;
-  }
-  .hold-banner .icon { font-size: 32px; }
-  .hold-banner .title { font-weight: 700; font-size: 15px; color: #856404; margin-top: 6px; }
-  .hold-banner .reason { font-size: 13px; color: #555; margin-top: 6px; background: #fff; padding: 10px; border-radius: 8px; }
-
-  /* ── 로딩 ── */
-  .spinner {
-    display: none; justify-content: center; align-items: center;
-    padding: 20px; gap: 8px; font-size: 14px; color: var(--gray);
-  }
-  .spinner.show { display: flex; }
-  .spin { width: 20px; height: 20px; border: 2px solid #ddd; border-top-color: var(--blue); border-radius: 50%; animation: spin 0.7s linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
-
-  /* ── 만료 ── */
-  .expired-wrap { text-align: center; padding: 60px 20px; }
-  .expired-wrap .icon { font-size: 48px; }
-  .expired-wrap h2 { margin-top: 12px; color: var(--gray); }
-  .expired-wrap p  { margin-top: 8px; font-size: 14px; color: #aaa; }
-  .expired-wrap .back-btn {
-    margin-top: 20px; display: inline-block;
-    padding: 12px 24px; background: var(--blue); color: #fff;
-    border-radius: 10px; font-weight: 700; text-decoration: none;
-  }
-
-  .toast {
-    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
-    background: #333; color: #fff; padding: 10px 20px; border-radius: 20px;
-    font-size: 14px; z-index: 999; opacity: 0;
-    transition: opacity 0.3s;
-    white-space: nowrap;
-  }
-  .toast.show { opacity: 1; }
+/* ── 스피너 / 만료 / 토스트 ── */
+.spinner{display:none;justify-content:center;align-items:center;padding:20px;gap:10px;font-size:14px;font-weight:600;color:var(--blue);}
+.spinner.show{display:flex;}
+.spin{width:22px;height:22px;border:2.5px solid #c7dff5;border-top-color:var(--blue);border-radius:50%;animation:spin .65s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg);}}
+.expired-wrap{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:80vh;padding:40px 24px;text-align:center;}
+.expired-wrap .e-icon{font-size:60px;margin-bottom:16px;}
+.expired-wrap h2{font-size:22px;font-weight:800;}
+.expired-wrap p{margin-top:8px;font-size:15px;color:var(--text-sub);}
+.expired-wrap .back-btn{margin-top:28px;display:inline-block;padding:14px 32px;background:linear-gradient(135deg,var(--blue),var(--blue-mid));color:var(--white);border-radius:var(--radius);font-weight:700;font-size:16px;text-decoration:none;box-shadow:0 4px 16px rgba(0,98,177,.28);}
+.toast{position:fixed;bottom:28px;left:50%;transform:translateX(-50%);background:rgba(17,24,39,.92);color:#fff;padding:11px 22px;border-radius:22px;font-size:14px;font-weight:600;z-index:999;opacity:0;transition:opacity .25s;white-space:nowrap;}
+.toast.show{opacity:1;}
+.section-gap{height:8px;}
+.bottom-space{height:36px;}
 </style>
 </head>
 <body>
 
 {% if expired %}
-<!-- ── 만료 페이지 ── -->
 <div class="expired-wrap">
-  <div class="icon">⏰</div>
+  <div class="e-icon">&#9200;</div>
   <h2>링크가 만료되었습니다</h2>
   <p>이 제안 링크는 48시간 동안만 유효합니다.</p>
-  <p style="margin-top:6px; font-size:13px; color:#bbb;">챗봇에서 다시 요청해주세요.</p>
+  <p style="margin-top:6px;font-size:13px;color:#9ca3af;">챗봇에 다시 요청해주세요.</p>
+  <a href="javascript:history.back()" class="back-btn">&#8592; 돌아가기</a>
 </div>
-
 {% else %}
 
-<!-- ── 헤더 ── -->
+<!-- 헤더 -->
 <div class="header">
-  <div class="brand">📊 {{ proposal.brand_name }} — 세일즈 액션 제안</div>
-  <div class="sub">분석일: {{ proposal.created_at[:10] }} · ID: {{ proposal.proposal_id[:8] }}</div>
+  <div class="header-inner">
+    <div class="logo-wrap">
+      <svg width="82" height="28" viewBox="0 0 200 60" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="186" cy="15" r="13" fill="none" stroke="#0062b1" stroke-width="2.5"/>
+        <ellipse cx="186" cy="15" rx="7" ry="13" fill="none" stroke="#0062b1" stroke-width="2"/>
+        <line x1="173" y1="15" x2="199" y2="15" stroke="#0062b1" stroke-width="2"/>
+        <line x1="174" y1="9"  x2="198" y2="9"  stroke="#0062b1" stroke-width="1.5"/>
+        <line x1="174" y1="21" x2="198" y2="21" stroke="#0062b1" stroke-width="1.5"/>
+        <text x="2" y="21" font-family="Arial Black,sans-serif" font-size="19" font-weight="900" fill="#0062b1">Dongwon</text>
+        <text x="2" y="42" font-family="Arial,sans-serif" font-size="13" font-weight="700" fill="#1a7dd4">&#46041;&#50896;&#54492;&#54616;&#54532;&#46300;</text>
+      </svg>
+    </div>
+    <div class="header-titles">
+      <div class="header-brand">{{ proposal.brand_name }}</div>
+      <div class="header-sub">세일즈 액션 제안 &middot; {{ proposal.created_at[:10] }}</div>
+    </div>
+  </div>
 </div>
 
-<!-- ── 중요도 배지 ── -->
+<!-- 중요도 배너 -->
 <div class="importance-bar">
   {% if proposal.priority == 1 %}
-  <span class="badge high">🔴 중요도 높음</span>
+  <span class="badge high">&#128308; 중요도 높음</span>
   {% elif proposal.priority == 2 %}
-  <span class="badge medium">🟡 중요도 보통</span>
+  <span class="badge medium">&#128993; 중요도 보통</span>
   {% else %}
-  <span class="badge low">🟢 중요도 낮음</span>
+  <span class="badge low">&#128994; 중요도 낮음</span>
   {% endif %}
-  <span class="badge-meta">{{ signal_type_label }}</span>
+  <span class="badge-label">{{ signal_type_label }}</span>
 </div>
 
-<!-- ── 시그널 요약 ── -->
+<div class="section-gap"></div>
+
+<!-- 시그널 요약 카드 -->
 <div class="card">
-  <div class="card-header">📋 {{ proposal.title }}</div>
+  <div class="card-header"><span>&#128203;</span>&nbsp;{{ proposal.title }}</div>
   <div class="card-body">
     {% for k, v in summary.items() %}
     <div class="kv-row">
       <span class="kv-key">{{ k }}</span>
-      <span class="kv-value">
-        {% if v is iterable and v is not string %}
-          {{ v | join(', ') }}
-        {% else %}
-          {{ v }}
-        {% endif %}
+      <span class="kv-value {% if '\ub960' in k or '\uc218' in k %}accent{% endif %}">
+        {%- if v is iterable and v is not string -%}{{ v | join(' · ') }}{%- else -%}{{ v }}{%- endif -%}
       </span>
     </div>
     {% endfor %}
   </div>
 </div>
 
-<!-- ── 세부 데이터 ── -->
+<!-- 세부 데이터 카드 -->
 {% if detail_rows %}
 <div class="card">
-  <div class="card-header">📂 세부 데이터</div>
-  <div class="card-body" style="padding:0; overflow-x:auto;">
+  <div class="card-header"><span>&#128194;</span>&nbsp;세부 데이터</div>
+  <div class="table-wrap">
     <table class="data-table">
       <thead>
-        <tr>
-          {% for col in detail_cols %}
-          <th>{{ col }}</th>
-          {% endfor %}
-        </tr>
+        <tr>{% for col in detail_cols %}<th>{{ col }}</th>{% endfor %}</tr>
       </thead>
       <tbody>
         {% for row in detail_rows %}
-        <tr>
-          {% for col in detail_cols %}
-          <td>{{ row.get(col, '-') }}</td>
-          {% endfor %}
-        </tr>
+        <tr>{% for col in detail_cols %}<td>{{ row.get(col, '-') }}</td>{% endfor %}</tr>
         {% endfor %}
       </tbody>
     </table>
@@ -293,178 +195,143 @@
 </div>
 {% endif %}
 
-<!-- ── 완료/거부/보류 상태 표시 ── -->
+<!-- 상태별 렌더 -->
 {% if proposal.status == 'completed' %}
-<div class="completed-banner">
-  <div class="icon">✅</div>
-  <div class="title">실행 등록 완료</div>
-  <div class="meta">데드라인: {{ proposal.deadline }} · 담당: {{ proposal.user_id }}</div>
-  <div class="meta" style="margin-top:4px;">등록: {{ proposal.completed_at[:16].replace('T',' ') }}</div>
-  <div class="action-id">ACT-{{ proposal.proposal_id[:8].upper() }}</div>
+<div class="result-banner banner-complete">
+  <div class="r-icon">&#9989;</div>
+  <div class="r-title">실행 등록 완료</div>
+  <div class="r-meta">데드라인 &middot; {{ proposal.deadline }}</div>
+  <div class="r-meta" style="margin-top:4px;">등록 &middot; {{ proposal.completed_at[:16].replace('T',' ') }}</div>
+  <div class="r-id">ACT-{{ proposal.proposal_id[:8].upper() }}</div>
 </div>
 
 {% elif proposal.status == 'rejected' %}
-<div class="rejected-banner">
-  <div class="icon">❌</div>
-  <div class="title">해당없음으로 처리되었습니다</div>
-  <div style="font-size:13px; color:#aaa; margin-top:6px;">{{ proposal.responded_at[:16].replace('T',' ') }}</div>
+<div class="result-banner banner-reject">
+  <div class="r-icon">&#10060;</div>
+  <div class="r-title">해당없음으로 처리됨</div>
+  <div class="r-meta">{{ proposal.responded_at[:16].replace('T',' ') }}</div>
 </div>
 
 {% elif proposal.status == 'hold' %}
-<div class="hold-banner">
-  <div class="icon">⏸</div>
-  <div class="title">보류 처리되었습니다</div>
+<div class="result-banner banner-hold">
+  <div class="r-icon">&#9208;</div>
+  <div class="r-title">보류 처리됨</div>
   {% if proposal.hold_reason %}
-  <div class="reason">사유: {{ proposal.hold_reason }}</div>
+  <div class="hold-reason-box">사유: {{ proposal.hold_reason }}</div>
   {% endif %}
-  <div style="font-size:12px; color:#aaa; margin-top:8px;">{{ proposal.responded_at[:16].replace('T',' ') }}</div>
+  <div class="r-meta" style="margin-top:10px;">{{ proposal.responded_at[:16].replace('T',' ') }}</div>
 </div>
 
 {% else %}
-<!-- ── 액션 버튼 (미응답 상태) ── -->
+<!-- 액션 버튼 (미응답) -->
 <div class="action-section">
   <div class="action-title">이 제안에 대한 의견을 선택해주세요</div>
   <div class="btn-group">
-    <button class="btn btn-approve" onclick="onApprove()">✅ 실행하겠습니다</button>
-    <button class="btn btn-hold"    onclick="onHold()">⏸ 보류</button>
-    <button class="btn btn-reject"  onclick="onReject()">❌ 해당없음</button>
+    <button class="btn btn-approve" id="btnApprove" onclick="onApprove()">&#9989; 실행하겠습니다</button>
+    <button class="btn btn-hold"    id="btnHold"    onclick="onHold()">&#9208; 보류</button>
+    <button class="btn btn-reject"  id="btnReject"  onclick="onReject()">&#10060; 해당없음</button>
   </div>
 
-  <!-- 보류 사유 패널 -->
   <div class="hold-panel" id="holdPanel">
-    <label>보류 사유를 입력해주세요</label>
-    <textarea id="holdReason" placeholder="예) 이미 진행 중인 건입니다 / 다음 분기에 재검토 예정 ..."></textarea>
+    <span class="panel-label">&#9208; 보류 사유를 입력해주세요</span>
+    <textarea id="holdReason" placeholder="예) 이미 진행 중인 건입니다&#10;예) 다음 분기에 재검토 예정"></textarea>
     <button class="hold-submit" onclick="submitHold()">보류 확정</button>
   </div>
 
-  <!-- 데드라인 달력 패널 -->
   <div class="deadline-panel" id="deadlinePanel">
-    <label>실행 데드라인을 선택해주세요</label>
-    <div class="quick-dates" id="quickDates">
-      <button class="quick-btn" onclick="selectQuick(this, 7)">+7일</button>
-      <button class="quick-btn" onclick="selectQuick(this, 14)">+14일</button>
-      <button class="quick-btn" onclick="selectQuick(this, 30)">+1개월</button>
+    <span class="panel-label">&#128197; 실행 데드라인을 선택해주세요</span>
+    <div class="quick-dates">
+      <button class="quick-btn" onclick="selectQuick(this,7)">+7일</button>
+      <button class="quick-btn" onclick="selectQuick(this,14)">+14일</button>
+      <button class="quick-btn" onclick="selectQuick(this,30)">+1개월</button>
     </div>
+    <span class="calendar-label">직접 선택</span>
     <input type="date" class="calendar-input" id="deadlineInput"
            min="{{ today }}" value="{{ default_deadline }}">
-    <button class="deadline-submit" onclick="submitDeadline()">📅 데드라인 등록하기</button>
+    <button class="deadline-submit" onclick="submitDeadline()">&#128197; 데드라인 등록하기</button>
   </div>
 
-  <div class="spinner" id="spinner"><div class="spin"></div> 처리 중...</div>
+  <div class="spinner" id="spinner"><div class="spin"></div>처리 중입니다…</div>
 </div>
 {% endif %}
 
+<div class="bottom-space"></div>
 {% endif %}
 
-<!-- 토스트 -->
 <div class="toast" id="toast"></div>
-
 <script>
-  const PROPOSAL_ID = "{{ proposal.proposal_id }}";
-  const BASE_URL    = "{{ base_url }}";
+const PROPOSAL_ID = "{{ proposal.proposal_id }}";
+const BASE_URL    = "{{ base_url }}";
 
-  // ─── 실행 클릭 ────────────────────────
-  function onApprove() {
-    document.querySelectorAll('.btn-group .btn').forEach(b => b.disabled = true);
-    const p = document.getElementById('deadlinePanel');
-    p.style.display = 'block';
-    p.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  }
-
-  // ─── 보류 클릭 ────────────────────────
-  function onHold() {
-    document.querySelectorAll('.btn-group .btn').forEach(b => b.disabled = true);
-    const p = document.getElementById('holdPanel');
-    p.style.display = 'block';
-    p.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  }
-
-  // ─── 해당없음 클릭 ───────────────────
-  async function onReject() {
-    if (!confirm('해당없음으로 처리하시겠습니까?')) {
-      return;
-    }
-    await respond({ response: 'reject', hold_reason: '' });
-  }
-
-  // ─── 보류 확정 ───────────────────────
-  async function submitHold() {
-    const reason = document.getElementById('holdReason').value.trim();
-    await respond({ response: 'hold', hold_reason: reason });
-  }
-
-  // ─── 데드라인 빠른 선택 ──────────────
-  function selectQuick(el, days) {
-    document.querySelectorAll('.quick-btn').forEach(b => b.classList.remove('selected'));
-    el.classList.add('selected');
-    const d = new Date();
-    d.setDate(d.getDate() + days);
-    document.getElementById('deadlineInput').value = d.toISOString().slice(0, 10);
-  }
-
-  // ─── 데드라인 등록 ───────────────────
-  async function submitDeadline() {
-    const dl = document.getElementById('deadlineInput').value;
-    if (!dl) { showToast('날짜를 선택해주세요'); return; }
-    // 먼저 실행 응답 기록
-    await respond({ response: 'approve', hold_reason: '' }, false);
-    // 이후 데드라인 설정
-    await setDeadline(dl);
-  }
-
-  // ─── 공통 응답 POST ──────────────────
-  async function respond(body, reload = true) {
-    document.getElementById('spinner').classList.add('show');
-    try {
-      const res = await fetch(`${BASE_URL}/action/respond`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ proposal_id: PROPOSAL_ID, ...body }),
-      });
-      const data = await res.json();
-      if (data.ok && reload) location.reload();
-    } catch (e) {
-      showToast('오류가 발생했습니다. 다시 시도해주세요.');
-    } finally {
-      document.getElementById('spinner').classList.remove('show');
-    }
-  }
-
-  async function setDeadline(deadline) {
-    document.getElementById('spinner').classList.add('show');
-    try {
-      const res = await fetch(`${BASE_URL}/action/deadline`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ proposal_id: PROPOSAL_ID, deadline }),
-      });
-      const data = await res.json();
-      if (data.ok) location.reload();
-    } catch (e) {
-      showToast('오류가 발생했습니다.');
-    } finally {
-      document.getElementById('spinner').classList.remove('show');
-    }
-  }
-
-  // ─── 토스트 ──────────────────────────
-  function showToast(msg) {
-    const t = document.getElementById('toast');
-    t.textContent = msg;
-    t.classList.add('show');
-    setTimeout(() => t.classList.remove('show'), 2500);
-  }
-
-  // ─── 페이지 열람 기록 ────────────────
-  (async () => {
-    try {
-      await fetch(`${BASE_URL}/action/view`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ proposal_id: PROPOSAL_ID }),
-      });
-    } catch (_) {}
-  })();
+function onApprove(){disableBtns();showPanel('deadlinePanel');}
+function onHold(){disableBtns();showPanel('holdPanel');}
+async function onReject(){
+  if(!confirm('해당없음으로 처리하시겠습니까?\n(동일 시그널은 30일간 재제안되지 않습니다)'))return;
+  await respond({response:'reject',hold_reason:''});
+}
+async function submitHold(){
+  await respond({response:'hold',hold_reason:document.getElementById('holdReason').value.trim()});
+}
+function selectQuick(el,days){
+  document.querySelectorAll('.quick-btn').forEach(b=>b.classList.remove('selected'));
+  el.classList.add('selected');
+  const d=new Date();d.setDate(d.getDate()+days);
+  document.getElementById('deadlineInput').value=d.toISOString().slice(0,10);
+}
+async function submitDeadline(){
+  const dl=document.getElementById('deadlineInput').value;
+  if(!dl){showToast('날짜를 선택해주세요');return;}
+  showSpinner(true);
+  await respond({response:'approve',hold_reason:''},false);
+  await setDeadline(dl);
+  showSpinner(false);
+}
+async function respond(body,reload=true){
+  showSpinner(true);
+  try{
+    const r=await fetch(BASE_URL+'/action/respond',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({proposal_id:PROPOSAL_ID,...body})
+    });
+    const d=await r.json();
+    if(d.ok&&reload)location.reload();
+  }catch(e){showToast('오류가 발생했습니다.');}
+  finally{if(reload)showSpinner(false);}
+}
+async function setDeadline(deadline){
+  try{
+    const r=await fetch(BASE_URL+'/action/deadline',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({proposal_id:PROPOSAL_ID,deadline})
+    });
+    const d=await r.json();if(d.ok)location.reload();
+  }catch(e){showToast('오류');}
+}
+function disableBtns(){
+  ['btnApprove','btnHold','btnReject'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(el){el.disabled=true;el.style.opacity='0.5';}
+  });
+}
+function showPanel(id){
+  const p=document.getElementById(id);if(!p)return;
+  p.style.display='block';
+  setTimeout(()=>p.scrollIntoView({behavior:'smooth',block:'nearest'}),80);
+}
+function showSpinner(v){document.getElementById('spinner').classList.toggle('show',v);}
+function showToast(msg){
+  const t=document.getElementById('toast');
+  t.textContent=msg;t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'),2800);
+}
+(async()=>{
+  try{
+    await fetch(BASE_URL+'/action/view',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({proposal_id:PROPOSAL_ID})
+    });
+  }catch(_){}
+})();
 </script>
 </body>
 </html>
