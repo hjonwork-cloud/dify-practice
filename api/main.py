@@ -4089,8 +4089,9 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                         f"📊 {_action_brand}에 대한 새로운 액션 제안이 없습니다.\n(오늘 이미 모든 시그널을 제안드렸습니다)",
                         "액션제안")
             except Exception as _ae:
-                logger.error(f"[콜백] 액션제안 오류: {_ae}")
-                _send_kakao_callback(callback_url, "⚠️ 액션 제안 생성 중 오류가 발생했습니다.", "액션제안")
+                import traceback as _tb
+                logger.error(f"[콜백] 액션제안 오류: {_ae}\n{_tb.format_exc()}")
+                _send_kakao_callback(callback_url, f"⚠️ 액션 제안 오류: {type(_ae).__name__}: {str(_ae)[:80]}", "액션제안")
             return
 
     # ── 플랜트별 매출 조회 (QR 버튼 messageText: "플랜트별 ZC 브랜드명 YYYYMM") ──

@@ -11,6 +11,21 @@ from pathlib import Path
 DB_PATH = Path(__file__).parent / "action_store.db"
 
 
+def _to_serializable(obj):
+    """Decimal / date / datetime 등 비직렬화 타입을 JSON 직렬화 가능 형태로 재귀 변환"""
+    import decimal
+    if isinstance(obj, dict):
+        return {k: _to_serializable(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_to_serializable(v) for v in obj]
+    if isinstance(obj, decimal.Decimal):
+        f = float(obj)
+        return int(f) if f == int(f) else f
+    if isinstance(obj, (datetime.date, datetime.datetime)):
+        return obj.isoformat()
+    return obj
+
+
 def _get_conn() -> sqlite3.Connection:
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
@@ -93,8 +108,8 @@ def create_proposal(
             now.isoformat(timespec="seconds"),
             expires.isoformat(timespec="seconds"),
             user_id, target_team, brand_name, action_type, title, priority,
-            json.dumps(summary, ensure_ascii=False),
-            json.dumps(detail, ensure_ascii=False),
+            json.dumps(_to_serializable(summary), ensure_ascii=False),
+            json.dumps(_to_serializable(detail), ensure_ascii=False),
         ))
         _log(conn, pid, user_id, "created", {})
     return pid

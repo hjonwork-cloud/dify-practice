@@ -193,12 +193,12 @@ def detect_low_cm(brand: str, qfn: QueryFn) -> dict | None:
         "summary": {
             "해당_가맹수": len(rows),
             "최대_매출_가맹": rows[0]["거래처명"] if rows else "-",
-            "평균_CM률": f"{sum(r['cm']/r['fi']*100 for r in rows if r['fi'])/len(rows):.1f}%",
+            "평균_CM률": f"{sum(float(r['cm'] or 0)/float(r['fi'] or 1)*100 for r in rows)/len(rows):.1f}%",
         },
         "detail": {"rows": [{
             "거래처명": r["거래처명"],
-            "매출_백만": int((r["fi"] or 0) // 1_000_000),
-            "CM률": f"{(r['cm'] or 0)/(r['fi'] or 1)*100:.1f}%",
+            "매출_백만": int((float(r["fi"]) if r["fi"] else 0) // 1_000_000),
+            "CM률": f"{(float(r['cm']) if r['cm'] else 0)/(float(r['fi']) if r['fi'] else 1)*100:.1f}%",
         } for r in rows]},
     }
 
