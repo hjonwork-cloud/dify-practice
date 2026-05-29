@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>세일즈 액션 제안 — {{ proposal.brand_name }}</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  :root {
+    --blue: #0062b1;
+    --blue-light: #e8f4fd;
+    --red: #e74c3c;
+    --green: #27ae60;
+    --orange: #f39c12;
+    --gray: #888;
+    --border: #eee;
+    --radius: 14px;
+  }
+  body {
+    font-family: -apple-system, 'Segoe UI', sans-serif;
+    background: #f2f4f7;
+    min-height: 100vh;
+    color: #222;
+  }
+
+  /* ── 헤더 ── */
+  .header {
+    background: var(--blue);
+    color: #fff;
+    padding: 18px 20px 14px;
+    position: sticky; top: 0; z-index: 100;
+  }
+  .header .brand { font-size: 18px; font-weight: 700; }
+  .header .sub   { font-size: 12px; opacity: 0.8; margin-top: 2px; }
+
+  /* ── 중요도 배지 ── */
+  .importance-bar {
+    display: flex; align-items: center; gap: 10px;
+    padding: 12px 20px;
+    background: #fff;
+    border-bottom: 1px solid var(--border);
+  }
+  .badge {
+    display: inline-block;
+    padding: 3px 10px; border-radius: 20px;
+    font-size: 12px; font-weight: 700;
+  }
+  .badge.high   { background: #fdecea; color: var(--red); }
+  .badge.medium { background: #fff8e1; color: var(--orange); }
+  .badge.low    { background: #e8f5e9; color: var(--green); }
+  .badge-meta { font-size: 12px; color: var(--gray); }
+
+  /* ── 카드 ── */
+  .card {
+    background: #fff;
+    border-radius: var(--radius);
+    margin: 16px;
+    box-shadow: 0 1px 6px rgba(0,0,0,0.07);
+    overflow: hidden;
+  }
+  .card-header {
+    padding: 14px 16px;
+    font-weight: 700; font-size: 15px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .card-body { padding: 14px 16px; }
+
+  /* ── 요약 행 ── */
+  .kv-row {
+    display: flex; justify-content: space-between;
+    padding: 7px 0; border-bottom: 1px solid #f5f5f5;
+    font-size: 14px;
+  }
+  .kv-row:last-child { border-bottom: none; }
+  .kv-key   { color: var(--gray); }
+  .kv-value { font-weight: 600; }
+
+  /* ── 테이블 ── */
+  .data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .data-table th {
+    background: #f8f9fa; padding: 8px 10px;
+    text-align: left; color: var(--gray); font-weight: 600;
+    border-bottom: 1px solid var(--border);
+  }
+  .data-table td { padding: 8px 10px; border-bottom: 1px solid #f5f5f5; }
+  .data-table tr:last-child td { border-bottom: none; }
+
+  /* ── 액션 버튼 영역 ── */
+  .action-section { margin: 0 16px 16px; }
+  .action-title { font-size: 13px; color: var(--gray); margin-bottom: 10px; font-weight: 600; }
+
+  .btn-group { display: flex; flex-direction: column; gap: 10px; }
+  .btn {
+    width: 100%; padding: 14px;
+    border: none; border-radius: var(--radius);
+    font-size: 15px; font-weight: 700; cursor: pointer;
+    transition: opacity 0.15s, transform 0.1s;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+  }
+  .btn:active { transform: scale(0.98); opacity: 0.85; }
+  .btn-approve { background: var(--blue); color: #fff; }
+  .btn-hold    { background: #fff3cd; color: #856404; border: 1px solid #ffc107; }
+  .btn-reject  { background: #f8f9fa; color: var(--gray); border: 1px solid var(--border); }
+
+  /* ── 보류 사유 입력 ── */
+  .hold-panel {
+    display: none;
+    background: #fffbee;
+    border: 1px solid #ffc107;
+    border-radius: var(--radius);
+    padding: 14px; margin-top: 10px;
+  }
+  .hold-panel label { font-size: 13px; font-weight: 600; color: #856404; display: block; margin-bottom: 8px; }
+  .hold-panel textarea {
+    width: 100%; min-height: 80px;
+    border: 1px solid #ffd966; border-radius: 8px;
+    padding: 10px; font-size: 14px; resize: none;
+    background: #fff; outline: none;
+  }
+  .hold-panel textarea:focus { border-color: #ffc107; }
+  .hold-submit {
+    margin-top: 10px; width: 100%;
+    padding: 11px; background: #ffc107; color: #333;
+    border: none; border-radius: 8px; font-weight: 700; font-size: 14px;
+    cursor: pointer;
+  }
+
+  /* ── 데드라인 달력 ── */
+  .deadline-panel {
+    display: none;
+    background: var(--blue-light);
+    border: 1px solid #b3d4f5;
+    border-radius: var(--radius);
+    padding: 14px; margin-top: 10px;
+  }
+  .deadline-panel label { font-size: 13px; font-weight: 600; color: var(--blue); display: block; margin-bottom: 10px; }
+  .quick-dates { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  .quick-btn {
+    padding: 7px 14px; background: #fff;
+    border: 1px solid var(--blue); border-radius: 20px;
+    font-size: 13px; color: var(--blue); font-weight: 600; cursor: pointer;
+  }
+  .quick-btn.selected { background: var(--blue); color: #fff; }
+  .calendar-input {
+    width: 100%; padding: 11px 14px;
+    border: 1px solid #b3d4f5; border-radius: 8px;
+    font-size: 15px; color: var(--blue); background: #fff; outline: none;
+  }
+  .calendar-input:focus { border-color: var(--blue); }
+  .deadline-submit {
+    margin-top: 10px; width: 100%;
+    padding: 13px; background: var(--blue); color: #fff;
+    border: none; border-radius: 10px; font-weight: 700; font-size: 15px;
+    cursor: pointer;
+  }
+
+  /* ── 완료 상태 ── */
+  .completed-banner {
+    background: #e8f5e9; border-radius: var(--radius);
+    padding: 20px; text-align: center; margin: 16px;
+    border: 1px solid #a5d6a7;
+  }
+  .completed-banner .icon { font-size: 40px; margin-bottom: 8px; }
+  .completed-banner .title { font-weight: 700; font-size: 16px; color: var(--green); }
+  .completed-banner .meta { font-size: 13px; color: var(--gray); margin-top: 6px; }
+  .completed-banner .action-id { 
+    margin-top: 10px; font-size: 12px; color: #aaa;
+    background: #f1f8f1; padding: 4px 10px; border-radius: 10px; display: inline-block;
+  }
+
+  .rejected-banner {
+    background: #f8f9fa; border-radius: var(--radius);
+    padding: 20px; text-align: center; margin: 16px;
+    border: 1px solid var(--border);
+  }
+  .rejected-banner .icon { font-size: 36px; margin-bottom: 8px; }
+  .rejected-banner .title { font-weight: 700; font-size: 16px; color: var(--gray); }
+
+  .hold-banner {
+    background: #fffbee; border-radius: var(--radius);
+    padding: 20px; margin: 16px;
+    border: 1px solid #ffc107;
+  }
+  .hold-banner .icon { font-size: 32px; }
+  .hold-banner .title { font-weight: 700; font-size: 15px; color: #856404; margin-top: 6px; }
+  .hold-banner .reason { font-size: 13px; color: #555; margin-top: 6px; background: #fff; padding: 10px; border-radius: 8px; }
+
+  /* ── 로딩 ── */
+  .spinner {
+    display: none; justify-content: center; align-items: center;
+    padding: 20px; gap: 8px; font-size: 14px; color: var(--gray);
+  }
+  .spinner.show { display: flex; }
+  .spin { width: 20px; height: 20px; border: 2px solid #ddd; border-top-color: var(--blue); border-radius: 50%; animation: spin 0.7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── 만료 ── */
+  .expired-wrap { text-align: center; padding: 60px 20px; }
+  .expired-wrap .icon { font-size: 48px; }
+  .expired-wrap h2 { margin-top: 12px; color: var(--gray); }
+  .expired-wrap p  { margin-top: 8px; font-size: 14px; color: #aaa; }
+  .expired-wrap .back-btn {
+    margin-top: 20px; display: inline-block;
+    padding: 12px 24px; background: var(--blue); color: #fff;
+    border-radius: 10px; font-weight: 700; text-decoration: none;
+  }
+
+  .toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    background: #333; color: #fff; padding: 10px 20px; border-radius: 20px;
+    font-size: 14px; z-index: 999; opacity: 0;
+    transition: opacity 0.3s;
+    white-space: nowrap;
+  }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+
+{% if expired %}
+<!-- ── 만료 페이지 ── -->
+<div class="expired-wrap">
+  <div class="icon">⏰</div>
+  <h2>링크가 만료되었습니다</h2>
+  <p>이 제안 링크는 48시간 동안만 유효합니다.</p>
+  <p style="margin-top:6px; font-size:13px; color:#bbb;">챗봇에서 다시 요청해주세요.</p>
+</div>
+
+{% else %}
+
+<!-- ── 헤더 ── -->
+<div class="header">
+  <div class="brand">📊 {{ proposal.brand_name }} — 세일즈 액션 제안</div>
+  <div class="sub">분석일: {{ proposal.created_at[:10] }} · ID: {{ proposal.proposal_id[:8] }}</div>
+</div>
+
+<!-- ── 중요도 배지 ── -->
+<div class="importance-bar">
+  {% if proposal.priority == 1 %}
+  <span class="badge high">🔴 중요도 높음</span>
+  {% elif proposal.priority == 2 %}
+  <span class="badge medium">🟡 중요도 보통</span>
+  {% else %}
+  <span class="badge low">🟢 중요도 낮음</span>
+  {% endif %}
+  <span class="badge-meta">{{ signal_type_label }}</span>
+</div>
+
+<!-- ── 시그널 요약 ── -->
+<div class="card">
+  <div class="card-header">📋 {{ proposal.title }}</div>
+  <div class="card-body">
+    {% for k, v in summary.items() %}
+    <div class="kv-row">
+      <span class="kv-key">{{ k }}</span>
+      <span class="kv-value">
+        {% if v is iterable and v is not string %}
+          {{ v | join(', ') }}
+        {% else %}
+          {{ v }}
+        {% endif %}
+      </span>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+
+<!-- ── 세부 데이터 ── -->
+{% if detail_rows %}
+<div class="card">
+  <div class="card-header">📂 세부 데이터</div>
+  <div class="card-body" style="padding:0; overflow-x:auto;">
+    <table class="data-table">
+      <thead>
+        <tr>
+          {% for col in detail_cols %}
+          <th>{{ col }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in detail_rows %}
+        <tr>
+          {% for col in detail_cols %}
+          <td>{{ row.get(col, '-') }}</td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+<!-- ── 완료/거부/보류 상태 표시 ── -->
+{% if proposal.status == 'completed' %}
+<div class="completed-banner">
+  <div class="icon">✅</div>
+  <div class="title">실행 등록 완료</div>
+  <div class="meta">데드라인: {{ proposal.deadline }} · 담당: {{ proposal.user_id }}</div>
+  <div class="meta" style="margin-top:4px;">등록: {{ proposal.completed_at[:16].replace('T',' ') }}</div>
+  <div class="action-id">ACT-{{ proposal.proposal_id[:8].upper() }}</div>
+</div>
+
+{% elif proposal.status == 'rejected' %}
+<div class="rejected-banner">
+  <div class="icon">❌</div>
+  <div class="title">해당없음으로 처리되었습니다</div>
+  <div style="font-size:13px; color:#aaa; margin-top:6px;">{{ proposal.responded_at[:16].replace('T',' ') }}</div>
+</div>
+
+{% elif proposal.status == 'hold' %}
+<div class="hold-banner">
+  <div class="icon">⏸</div>
+  <div class="title">보류 처리되었습니다</div>
+  {% if proposal.hold_reason %}
+  <div class="reason">사유: {{ proposal.hold_reason }}</div>
+  {% endif %}
+  <div style="font-size:12px; color:#aaa; margin-top:8px;">{{ proposal.responded_at[:16].replace('T',' ') }}</div>
+</div>
+
+{% else %}
+<!-- ── 액션 버튼 (미응답 상태) ── -->
+<div class="action-section">
+  <div class="action-title">이 제안에 대한 의견을 선택해주세요</div>
+  <div class="btn-group">
+    <button class="btn btn-approve" onclick="onApprove()">✅ 실행하겠습니다</button>
+    <button class="btn btn-hold"    onclick="onHold()">⏸ 보류</button>
+    <button class="btn btn-reject"  onclick="onReject()">❌ 해당없음</button>
+  </div>
+
+  <!-- 보류 사유 패널 -->
+  <div class="hold-panel" id="holdPanel">
+    <label>보류 사유를 입력해주세요</label>
+    <textarea id="holdReason" placeholder="예) 이미 진행 중인 건입니다 / 다음 분기에 재검토 예정 ..."></textarea>
+    <button class="hold-submit" onclick="submitHold()">보류 확정</button>
+  </div>
+
+  <!-- 데드라인 달력 패널 -->
+  <div class="deadline-panel" id="deadlinePanel">
+    <label>실행 데드라인을 선택해주세요</label>
+    <div class="quick-dates" id="quickDates">
+      <button class="quick-btn" onclick="selectQuick(this, 7)">+7일</button>
+      <button class="quick-btn" onclick="selectQuick(this, 14)">+14일</button>
+      <button class="quick-btn" onclick="selectQuick(this, 30)">+1개월</button>
+    </div>
+    <input type="date" class="calendar-input" id="deadlineInput"
+           min="{{ today }}" value="{{ default_deadline }}">
+    <button class="deadline-submit" onclick="submitDeadline()">📅 데드라인 등록하기</button>
+  </div>
+
+  <div class="spinner" id="spinner"><div class="spin"></div> 처리 중...</div>
+</div>
+{% endif %}
+
+{% endif %}
+
+<!-- 토스트 -->
+<div class="toast" id="toast"></div>
+
+<script>
+  const PROPOSAL_ID = "{{ proposal.proposal_id }}";
+  const BASE_URL    = "{{ base_url }}";
+
+  // ─── 실행 클릭 ────────────────────────
+  function onApprove() {
+    document.querySelectorAll('.btn-group .btn').forEach(b => b.disabled = true);
+    const p = document.getElementById('deadlinePanel');
+    p.style.display = 'block';
+    p.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  // ─── 보류 클릭 ────────────────────────
+  function onHold() {
+    document.querySelectorAll('.btn-group .btn').forEach(b => b.disabled = true);
+    const p = document.getElementById('holdPanel');
+    p.style.display = 'block';
+    p.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  // ─── 해당없음 클릭 ───────────────────
+  async function onReject() {
+    if (!confirm('해당없음으로 처리하시겠습니까?')) {
+      return;
+    }
+    await respond({ response: 'reject', hold_reason: '' });
+  }
+
+  // ─── 보류 확정 ───────────────────────
+  async function submitHold() {
+    const reason = document.getElementById('holdReason').value.trim();
+    await respond({ response: 'hold', hold_reason: reason });
+  }
+
+  // ─── 데드라인 빠른 선택 ──────────────
+  function selectQuick(el, days) {
+    document.querySelectorAll('.quick-btn').forEach(b => b.classList.remove('selected'));
+    el.classList.add('selected');
+    const d = new Date();
+    d.setDate(d.getDate() + days);
+    document.getElementById('deadlineInput').value = d.toISOString().slice(0, 10);
+  }
+
+  // ─── 데드라인 등록 ───────────────────
+  async function submitDeadline() {
+    const dl = document.getElementById('deadlineInput').value;
+    if (!dl) { showToast('날짜를 선택해주세요'); return; }
+    // 먼저 실행 응답 기록
+    await respond({ response: 'approve', hold_reason: '' }, false);
+    // 이후 데드라인 설정
+    await setDeadline(dl);
+  }
+
+  // ─── 공통 응답 POST ──────────────────
+  async function respond(body, reload = true) {
+    document.getElementById('spinner').classList.add('show');
+    try {
+      const res = await fetch(`${BASE_URL}/action/respond`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ proposal_id: PROPOSAL_ID, ...body }),
+      });
+      const data = await res.json();
+      if (data.ok && reload) location.reload();
+    } catch (e) {
+      showToast('오류가 발생했습니다. 다시 시도해주세요.');
+    } finally {
+      document.getElementById('spinner').classList.remove('show');
+    }
+  }
+
+  async function setDeadline(deadline) {
+    document.getElementById('spinner').classList.add('show');
+    try {
+      const res = await fetch(`${BASE_URL}/action/deadline`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ proposal_id: PROPOSAL_ID, deadline }),
+      });
+      const data = await res.json();
+      if (data.ok) location.reload();
+    } catch (e) {
+      showToast('오류가 발생했습니다.');
+    } finally {
+      document.getElementById('spinner').classList.remove('show');
+    }
+  }
+
+  // ─── 토스트 ──────────────────────────
+  function showToast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 2500);
+  }
+
+  // ─── 페이지 열람 기록 ────────────────
+  (async () => {
+    try {
+      await fetch(`${BASE_URL}/action/view`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ proposal_id: PROPOSAL_ID }),
+      });
+    } catch (_) {}
+  })();
+</script>
+</body>
+</html>

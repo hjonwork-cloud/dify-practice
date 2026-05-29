@@ -41,6 +41,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ─── 액션 제안 라우터 등록 ──────────────────────────────────
+from action_router import router as _action_router
+app.include_router(_action_router)
+
 # ─── 인증 토큰 캐시 ──────────────────────────────────────
 TOKEN_FILE = os.path.join(os.path.dirname(__file__), ".token_cache")
 _cached_token: str | None = None
@@ -4044,11 +4048,50 @@ def _build_personal_detail(sp_compact: str) -> str:
 
 
 def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
-    """백그라운드: Dify 호출 → 카드형 변환 → 카카오 콜백 전송
+    """백그라우드: Dify 호출 → 카드형 변환 → 카카오 콜백 전송
     카카오 콜백 타임아웃은 약 1분이므로 Dify 호출을 50초로 제한.
     """
     t0 = time.time()
     logger.info(f"[콜백] 시작: user={user_id}, query={query[:80]}")
+
+    # ─── 세일즈 액션 제안 (예: "샐러디 액션 제안해줘") ─────────────────
+    _action_m = re.search(r'(.{2,15}?)\s*액션\s*제안', query)
+    if _action_m:
+        _action_brand = _action_m.group(1).strip()
+        _action_brand = re.sub(r'[의는은이가을를]$', '', _action_brand).strip()
+        if _action_brand and len(_action_brand) >= 2:
+            logger.info(f"[콜백] 액션제안: brand={_action_brand}")
+            try:
+                from action_router import generate_action_proposal, _get_base_url
+                _ngrok_url = _get_base_url()
+                _user_info = _load_users().get(user_id, {})
+                _action_team = _user_info.get("team", "")
+                _proposal_url = generate_action_proposal(
+                    brand=_action_brand,
+                    user_id=user_id,
+                    target_team=_action_team,
+                    query_fn=_safe_query,
+                    base_url=_ngrok_url,
+                )
+                if _proposal_url:
+                    _action_msg = (
+                        f"📊 {_action_brand} 세일즈 액션 제안이 준비되었습니다.\n\n"
+                        f"🔗 아래 링크를 터치하면 세부 내용을 확인하고 실행여부를 답변할 수 있습니다.\n"
+                        f"⚠️ 링크 유효 시간: 48시간"
+                    )
+                    _action_qr = [
+                        {"label": "📋 액션 확인하기", "action": "webLink", "webLinkUrl": _proposal_url},
+                        {"label": "🏠 메인 메뉴", "action": "message", "messageText": "메뉴"},
+                    ]
+                    _send_kakao_callback_qr(callback_url, _action_msg, _action_qr, "액션제안")
+                else:
+                    _send_kakao_callback(callback_url,
+                        f"📊 {_action_brand}에 대한 새로운 액션 제안이 없습니다.\n(오늘 이미 모든 시그널을 제안드렸습니다)",
+                        "액션제안")
+            except Exception as _ae:
+                logger.error(f"[콜백] 액션제안 오류: {_ae}")
+                _send_kakao_callback(callback_url, "⚠️ 액션 제안 생성 중 오류가 발생했습니다.", "액션제안")
+            return
 
     # ── 플랜트별 매출 조회 (QR 버튼 messageText: "플랜트별 ZC 브랜드명 YYYYMM") ──
     _plant_m = re.match(r'^플랜트별\s+(ZC|ZA|ZT)\s+(.+)\s+(\d{6})$', query.strip())
