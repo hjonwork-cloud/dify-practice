@@ -63,8 +63,10 @@ def generate_action_proposal(
     시그널 감지 후 제안 생성 → 카카오 전송용 URL 반환
     이미 당일 해당 브랜드에 모든 시그널을 보낸 경우 None 반환
     """
-    # 당일 이미 보낸 타입 제외
-    sent_today = get_today_sent_types(user_id, brand)
+    # 당일 이미 보낸 타입 제외 (TODO: 개발 완료 후 아래 주석 해제)
+    # sent_today = get_today_sent_types(user_id, brand)
+    # signals = run_all_signals(brand, query_fn, exclude_types=sent_today)
+    sent_today = []  # 임시: 일일 제한 비활성화
     signals = run_all_signals(brand, query_fn, exclude_types=sent_today)
     if not signals:
         return None
@@ -83,7 +85,7 @@ def generate_action_proposal(
         priority=chosen.get("priority", 2),
         target_team=target_team,
     )
-    record_daily_sent(user_id, brand, chosen["action_type"])
+    # record_daily_sent(user_id, brand, chosen["action_type"])  # 임시: 일일 제한 비활성화
 
     url = f"{base_url.rstrip('/')}/action/report/{pid}"
     return url

@@ -2736,14 +2736,14 @@ def _fetch_unshipped(
         )
 
     if date_str:
-        return _run_query(f"`출고일자` = '{date_str}'")
+        return _run_query(f"`출고일자` = '{date_str}'"), False
     # 날짜 미지정: 오늘 먼저 시도 → 없으면 MAX 날짜로 fallback
     import datetime as _dt
     today_str = _dt.date.today().strftime("%Y-%m-%d")
     rows = _run_query(f"`출고일자` = '{today_str}'")
     if rows:
-        return rows
-    return _run_query(f"`출고일자` = (SELECT MAX(`출고일자`) FROM {T_MISULGO})")
+        return rows, False
+    return _run_query(f"`출고일자` = (SELECT MAX(`출고일자`) FROM {T_MISULGO})"), True
 
 
 def _fetch_unshipped_by_team(
@@ -2776,14 +2776,14 @@ def _fetch_unshipped_by_team(
         )
 
     if date_str:
-        return _run_team_query(f"`출고일자` = '{date_str}'")
+        return _run_team_query(f"`출고일자` = '{date_str}'"), False
     # fallback: 오늘 먼저, 없으면 MAX 날짜
     import datetime as _dt
     today_str = _dt.date.today().strftime("%Y-%m-%d")
     rows = _run_team_query(f"`출고일자` = '{today_str}'")
     if rows:
-        return rows
-    return _run_team_query(f"`출고일자` = (SELECT MAX(`출고일자`) FROM {T_MISULGO})")
+        return rows, False
+    return _run_team_query(f"`출고일자` = (SELECT MAX(`출고일자`) FROM {T_MISULGO})"), True
 
 
 def _build_unshipped_markdown(
@@ -2791,6 +2791,7 @@ def _build_unshipped_markdown(
     sp_name: str,
     only_gyucheck: bool = False,
     is_team: bool = False,
+    is_fallback: bool = False,
 ) -> str:
     # is_team이면 이미 팀명 그대로 사용 (중복 '팀' 방지), 개인이면 '님' 접미사
     label    = sp_name                               # 화면 표시용
@@ -2799,8 +2800,10 @@ def _build_unshipped_markdown(
         filter_txt = " (영업귀책)" if only_gyucheck else ""
         return f"✅ {label}{honorific} 담당 미출고{filter_txt} 건이 없습니다."
 
+    import datetime as _dt2
     date_val = rows[0].get("출고일자", "")
-    lines = [f"📦 {label}{honorific} 미출고 현황 ({date_val})", ""]
+    fallback_note = f"\n※ 오늘({_dt2.date.today().strftime('%m-%d')}) 데이터 미적재 — 최신 출고일 기준" if is_fallback else ""
+    lines = [f"📦 {label}{honorific} 미출고 현황 ({date_val}){fallback_note}", ""]
     lines.append(f"• 전체 {len(rows)}건")
     lines.append("")
     if is_team:
@@ -4814,10 +4817,10 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
         ]
         try:
             if is_team:
-                rows_u = _fetch_unshipped_by_team(sp_name_u, date_str, only_gyucheck)
+                rows_u, _is_fallback = _fetch_unshipped_by_team(sp_name_u, date_str, only_gyucheck)
             else:
-                rows_u = _fetch_unshipped(sp_name_u, date_str, only_gyucheck)
-            text_u = _build_unshipped_markdown(rows_u, sp_name_u, only_gyucheck, is_team=is_team)
+                rows_u, _is_fallback = _fetch_unshipped(sp_name_u, date_str, only_gyucheck)
+            text_u = _build_unshipped_markdown(rows_u, sp_name_u, only_gyucheck, is_team=is_team, is_fallback=_is_fallback)
             if is_team and rows_u:
                 # 담당자 건수 내림차순으로 개별 QR 동적 생성 (최대 9명)
                 from collections import Counter as _Counter_qr

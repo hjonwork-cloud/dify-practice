@@ -81,7 +81,7 @@ def detect_item_churn(brand: str, qfn: QueryFn) -> dict | None:
             FORMAT(ROUND(m3 * 100 / 1000), 0) AS `매출액(천원)`,
             ROUND(q3) AS 수량
         FROM base
-        WHERE m3 > 0 AND m2 = 0 AND m1 = 0
+        WHERE m3 > 0 AND m1 = 0
         ORDER BY m3 DESC
         LIMIT 20
     """, raw=True)
@@ -89,9 +89,9 @@ def detect_item_churn(brand: str, qfn: QueryFn) -> dict | None:
     if not rows:
         return None
 
-    # ── 10% 필터: 이탈 관련 본지점이 전체의 10% 미만이면 무시 ──
+    # ── 10% 필터: 이탈 관련 본지점이 전체의 10% 미만이면 무시 (TODO: 개발 완료 후 0.10으로 복원)
     churn_stores = len(set(r["본지점명"] for r in rows))
-    if total_stores > 0 and churn_stores / total_stores < 0.10:
+    if total_stores > 0 and churn_stores / total_stores < 0.0:  # 임시: 필터 비활성화
         return None
 
     items = list({r["품목"] for r in rows})[:5]
@@ -265,17 +265,23 @@ def run_all_signals(brand: str, qfn: QueryFn, exclude_types: list[str] = None) -
     exclude_types: 당일 이미 발송된 타입 제외
     Returns: 감지된 시그널 목록 (priority 오름차순)
     """
+    import logging as _logging
+    _log = _logging.getLogger("action_signals")
     exclude_types = exclude_types or []
     results = []
     for sig_type, fn in SIGNAL_REGISTRY.items():
         if sig_type in exclude_types:
+            _log.info(f"[시그널] {sig_type} 제외(당일전송)")
             continue
         try:
             result = fn(brand, qfn)
             if result:
                 result["action_type"] = sig_type
                 results.append(result)
-        except Exception:
-            pass
+                _log.info(f"[시그널] {sig_type} 감지됨: {result.get('title')}")
+            else:
+                _log.info(f"[시그널] {sig_type} 해당없음")
+        except Exception as e:
+            _log.warning(f"[시그널] {sig_type} 오류: {e}")
     results.sort(key=lambda x: x.get("priority", 9))
     return results
