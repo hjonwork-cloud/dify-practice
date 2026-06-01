@@ -5367,19 +5367,14 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                                 res2 = _fetch_brand_monthly_sales(_bnm, _ym_prev2)
                                 if isinstance(res2, tuple):
                                     matched2, sales2, level2 = res2
-                                    try:
-                                        card = _build_brand_forecast_card(
-                                            matched2, sales2, _ym_prev2,
-                                            _dt_mod.date.today(), level_label=level2
-                                        )
-                                        card += f"\n📌 집계단위: {level2}\n※ {_mo_now}월 데이터 미적재 — {_mo_prev2}월 기준"
-                                    except Exception:
-                                        card = (
-                                            f"{matched2}의 {_mo_prev2}월 매출액은 "
-                                            f"{_format_value(sales2)}백만원입니다."
-                                            f"\n📌 집계단위: {level2}\n※ {_mo_now}월 데이터 미적재 — {_mo_prev2}월 기준"
-                                        )
-                                    _brand_send(callback_url, card, level2, matched2, _ym_prev2)
+                                    # fallback: 단순 포맷 (forecast카드 사용 시 "이번달" 라벨 혼란)
+                                    card = (
+                                        f"📊 {matched2} {_mo_prev2}월 매출액\n\n"
+                                        f"{_format_value(sales2)}백만원\n\n"
+                                        f"📌 집계단위: {level2}\n"
+                                        f"※ {_mo_now}월 데이터 미적재 — {_mo_prev2}월 기준"
+                                    )
+                                    _send_kakao_callback_qr(callback_url, card, _SALES_FOLLOW_QR, "브랜드매출")
                                 elif isinstance(res2, list):
                                     _short3 = res2[:5]
                                     options3 = "\n".join(f"  {i+1}. {n}" for i, n in enumerate(_short3))
