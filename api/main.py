@@ -5357,7 +5357,49 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                         # None → 퍼지 검색
                         _candidates2 = _fuzzy_search_candidates(_bnm, _ym_now)
                         if not _candidates2:
-                            pass  # fall through to 영업사원 총매출 bypass
+                            # 당월 데이터 없음 → 전월로 fallback
+                            import datetime as _dt_fb
+                            _prev_m = (_dt_fb.date.today().replace(day=1) - _dt_fb.timedelta(days=1))
+                            _ym_prev2 = _prev_m.strftime("%Y%m")
+                            _mo_prev2 = _prev_m.month
+                            logger.info(f"[콜백] 브랜드매출 당월({_ym_now}) 없음 → 전월({_ym_prev2}) fallback: brand={_bnm}")
+                            try:
+                                res2 = _fetch_brand_monthly_sales(_bnm, _ym_prev2)
+                                if isinstance(res2, tuple):
+                                    matched2, sales2, level2 = res2
+                                    try:
+                                        card = _build_brand_forecast_card(
+                                            matched2, sales2, _ym_prev2,
+                                            _dt_mod.date.today(), level_label=level2
+                                        )
+                                        card += f"\n📌 집계단위: {level2}\n※ {_mo_now}월 데이터 미적재 — {_mo_prev2}월 기준"
+                                    except Exception:
+                                        card = (
+                                            f"{matched2}의 {_mo_prev2}월 매출액은 "
+                                            f"{_format_value(sales2)}백만원입니다."
+                                            f"\n📌 집계단위: {level2}\n※ {_mo_now}월 데이터 미적재 — {_mo_prev2}월 기준"
+                                        )
+                                    _brand_send(callback_url, card, level2, matched2, _ym_prev2)
+                                elif isinstance(res2, list):
+                                    _short3 = res2[:5]
+                                    options3 = "\n".join(f"  {i+1}. {n}" for i, n in enumerate(_short3))
+                                    _user_pending_candidates[user_id] = {
+                                        "month_num": _mo_prev2,
+                                        "yearmonth": _ym_prev2,
+                                        "candidates": {n: "브랜드(ZC)" for n in _short3},
+                                    }
+                                    _qr_list3 = [{"label": n, "action": "message", "messageText": n} for n in _short3]
+                                    _send_kakao_callback_qr(callback_url,
+                                        f"'{_bnm}'와(과) 유사한 브랜드가 여러 개 있습니다.\n{options3}\n\n버튼으로 선택해주세요.",
+                                        _qr_list3, "브랜드매출")
+                                else:
+                                    _send_kakao_callback(callback_url,
+                                        f"'{_bnm}' 관련 매출 데이터를 찾을 수 없습니다.\n정확한 브랜드명으로 다시 입력해주세요.",
+                                        "브랜드매출")
+                            except Exception as _e2:
+                                logger.error(f"[콜백] 브랜드매출 전월fallback 오류: {_e2}")
+                                _send_kakao_callback(callback_url, "⚠️ 브랜드 매출 조회 중 오류가 발생했습니다.", "브랜드매출")
+                            return
                         elif len(_candidates2) == 1:
                             exact_name2, _, exact_level2 = _candidates2[0]
                             _user_pending_confirm[user_id] = {
