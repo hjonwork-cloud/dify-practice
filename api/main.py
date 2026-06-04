@@ -4886,7 +4886,9 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                 _send_kakao_callback(callback_url, "⚠️ 사업부 매출 조회 중 오류가 발생했습니다.", "사업부매출")
             return
 
-        mt_m = _MONTHLY_TOTAL_PATTERN.search(query)
+        # "사업부 N월" / "N월 사업부" 처럼 단독 "사업부" 키워드 → 외식식재사업부로 정규화
+        _query_for_dept = re.sub(r'(?<![가-힣A-Za-z0-9])사업부(?![가-힣A-Za-z0-9])', '외식식재사업부', query)
+        mt_m = _MONTHLY_TOTAL_PATTERN.search(_query_for_dept)
         if mt_m:
             # 그룹 1+2: "사업부/지점 N월" 순서  /  그룹 3+4: "N월 ... 사업부/지점" 순서
             if mt_m.group(1) and mt_m.group(2):
