@@ -1,4 +1,4 @@
-﻿CREATE OR REPLACE VIEW h_hmfo_fsi.gd_rst_ing.chatbot_sales_custmasters_compat_v AS
+﻿CREATE OR REPLACE VIEW h_hmfo_fsi_dm.gd_rst_ing.chatbot_sales_custmasters_compat_v AS
 WITH cm AS (
   SELECT
     *,

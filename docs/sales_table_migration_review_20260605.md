@@ -124,4 +124,4 @@
 2. `ZC본부명`은 원천 컬럼 요청 전까지 공백으로 둔다.
 3. `자재그룹/자재그룹명/기존자재번호`는 별도 상품/자재 마스터 확보 전까지 null placeholder로 둔다.
 4. 202605 일부 누락 이슈는 IT 확인 후 재검증 필요.
-5. `h_hmfo_fsi.gd_rst_ing` 스키마에는 현재 사용자에게 CREATE TABLE 권한이 없어 직접 생성 실패함. SQL 파일은 `docs/create_chatbot_sales_custmasters_compat_v.sql`에 저장됨.
+5. `h_hmfo_fsi.gd_rst_ing` 스키마에는 현재 사용자에게 CREATE TABLE 권한이 없어 생성 대상은 `h_hmfo_fsi_dm.gd_rst_ing.chatbot_sales_custmasters_compat_v`로 변경함. SQL 파일은 `docs/create_chatbot_sales_custmasters_compat_v.sql`에 저장됨.
