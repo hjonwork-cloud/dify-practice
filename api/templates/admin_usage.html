@@ -1,0 +1,18 @@
+{% extends 'admin_base.html' %}{% block title %}토큰 사용량{% endblock %}{% block content %}
+<div class="page-heading"><div><p class="eyebrow">USAGE ANALYTICS</p><h1>토큰 사용량</h1><p>사용자별 조회 횟수와 LLM 토큰 사용량입니다.</p></div></div>
+<section class="metric-grid usage-metrics">
+  <article class="metric-card blue"><span class="metric-icon">◐</span><p>전체 조회</p><strong>{{ '{:,}'.format(total_calls) }}</strong><span class="muted">누적 요청 수</span></article>
+  <article class="metric-card yellow"><span class="metric-icon">✦</span><p>LLM 호출</p><strong>{{ '{:,}'.format(llm_calls) }}</strong><span class="muted">Dify 응답 생성</span></article>
+  <article class="metric-card navy"><span class="metric-icon">↗</span><p>총 토큰</p><strong>{{ '{:,}'.format(total_tokens) }}</strong><span class="muted">prompt + completion</span></article>
+</section>
+<section class="dashboard-grid">
+  <article class="panel table-panel"><div class="panel-head"><div><p class="eyebrow">BY USER</p><h2>사용자별 사용량</h2></div><input class="table-search" data-target="usageTable" placeholder="이름 검색"></div>
+  <div class="table-scroll"><table id="usageTable"><thead><tr><th>사용자</th><th>조회</th><th>LLM</th><th>토큰</th><th>최근</th></tr></thead><tbody>
+  {% for u in users %}<tr data-search="{{ u.name }}"><td><b>{{ u.name }}</b></td><td>{{ u.calls }}회</td><td>{{ u.llm }}회</td><td>{{ '{:,}'.format(u.tokens) }}</td><td><small>{{ (u.last or '-')[:16] }}</small></td></tr>{% else %}<tr><td colspan="5"><div class="empty"><b>기록된 사용량이 없습니다.</b><span>사용자가 챗봇을 이용하면 이곳에 집계됩니다.</span></div></td></tr>{% endfor %}
+  </tbody></table></div></article>
+  <article class="panel table-panel"><div class="panel-head"><div><p class="eyebrow">DAILY</p><h2>최근 일별 조회</h2></div></div>
+  <div class="table-scroll"><table><thead><tr><th>날짜</th><th>조회</th><th>토큰</th></tr></thead><tbody>
+  {% for d in days %}<tr><td>{{ d.date }}</td><td>{{ d.calls }}회</td><td>{{ '{:,}'.format(d.tokens) }}</td></tr>{% else %}<tr><td colspan="3">데이터가 없습니다.</td></tr>{% endfor %}
+  </tbody></table></div></article>
+</section>
+{% endblock %}

@@ -1,4 +1,4 @@
-﻿CREATE OR REPLACE VIEW h_hmfo_fsi_dm.gd_rst_ing.chatbot_sales_custmasters_compat_v AS
+﻿CREATE OR REPLACE VIEW h_hmfo_fsi_dm.gd_rst_ing.sales_custmasters_compat_v AS
 WITH cm AS (
   SELECT
     *,
@@ -63,8 +63,8 @@ SELECT
   s.`단위` AS `단위`,
   CAST(NULL AS STRING) AS `통화`,
   CAST(NULL AS STRING) AS `배송구분`,
-  LPAD(COALESCE(NULLIF(c.`FC본부`, ''), NULLIF(c.`ZP본사`, ''), s.`고객코드`), 10, '0') AS `ZC본부`,
-  CAST('' AS STRING) AS `ZC본부명`,
+  LPAD(COALESCE(NULLIF(c.`FC본부`, ''), s.`고객코드`), 10, '0') AS `ZC본부`,
+  COALESCE(NULLIF(TRIM(c.`FC본부명`), ''), s.`고객명`) AS `ZC본부명`,
   c.`1레벨` AS `고객계층1`,
   c.`2레벨` AS `고객계층2`,
   c.`3레벨` AS `고객계층3`,

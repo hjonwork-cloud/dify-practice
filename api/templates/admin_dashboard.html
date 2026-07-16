@@ -1,0 +1,13 @@
+{% extends 'admin_base.html' %}{% block title %}대시보드{% endblock %}{% block content %}
+<div class="page-heading"><div><p class="eyebrow">OPERATIONS OVERVIEW</p><h1>좋은 아침입니다, {{ admin.display_name }}님.</h1><p>사용자 질문과 운영 대기 항목을 확인하세요.</p></div><a class="btn primary" href="/admin/voc?status=new">신규 VOC 확인 <span>→</span></a></div>
+<section class="metric-grid">
+  <article class="metric-card blue"><span class="metric-icon">◌</span><p>신규 VOC</p><strong>{{ metrics.new }}</strong><a href="/admin/voc?status=new">바로 확인하기 →</a></article>
+  <article class="metric-card yellow"><span class="metric-icon">◷</span><p>처리 대기</p><strong>{{ metrics.pending }}</strong><a href="/admin/voc">업무 이어가기 →</a></article>
+  <article class="metric-card green"><span class="metric-icon">✦</span><p>공개 FAQ</p><strong>{{ metrics.published }}</strong><a href="/admin/faq">답변 관리하기 →</a></article>
+  <article class="metric-card navy"><span class="metric-icon">↗</span><p>최근 7일 접수</p><strong>{{ metrics.recent }}</strong><span class="muted">관리자 {{ metrics.admins }}명 운영 중</span></article>
+</section>
+<section class="dashboard-grid">
+  <article class="panel"><div class="panel-head"><div><p class="eyebrow">REPEATED QUESTIONS</p><h2>반복 문의 우선 처리</h2></div><a href="/admin/voc">전체 보기</a></div>{% if metrics.top_cases %}<div class="case-list">{% for item in metrics.top_cases %}<a class="case-row" href="/admin/voc/{{ item.case_id }}"><span class="rank">{{ loop.index }}</span><span class="case-question">{{ item.representative_question }}</span><span class="count-badge">{{ item.occurrence_count }}회</span><span class="status {{ item.status }}">{{ item.status }}</span></a>{% endfor %}</div>{% else %}<div class="empty"><b>아직 접수된 VOC가 없습니다.</b><span>미지원 질문이 접수되면 이곳에 표시됩니다.</span></div>{% endif %}</article>
+  <article class="panel accent-panel"><p class="eyebrow">NEXT EXPANSION</p><h2>세일즈 액션 제안</h2><p>액션 제안 현황과 담당자 응답을 이 콘솔에서 함께 관리할 수 있도록 준비 중입니다.</p><div class="mini-stat"><span>현재 단계</span><b>읽기 전용 연동 설계</b></div><span class="soon">COMING SOON</span></article>
+</section>
+{% endblock %}

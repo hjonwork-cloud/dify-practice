@@ -7,8 +7,8 @@ import datetime
 from typing import Callable
 
 # ─── 테이블 상수 ────────────────────────────────────────────
-T_MAIN    = "h_hmfo.gd_dcube.`01_sap_sales_custmasters`"
-T_MISULGO = "h_hmfo.gd_dcube.`46_helo_periodic_unshipped`"
+T_MAIN    = "h_hmfo_fsi_dm.gd_rst_ing.sales_custmasters_compat_v"
+T_MISULGO = "h_hmfo_fsi_dm.gd_rst_ing.unshipped_compat_v"
 T_PROFIT  = "h_hmfo.gd_dcube.`00_customers_cm`"
 
 QueryFn = Callable[..., list[dict]]

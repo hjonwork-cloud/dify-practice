@@ -53,7 +53,7 @@ for ZC_CODE, BRAND_NAME in BRANDS:
 SELECT `년월` AS ym,
        SUM(`매출액`)/1000000 AS sales,
        COUNT(DISTINCT `ZB본지점`) AS stores
-FROM h_hmfo.gd_dcube.`01_sap_sales_custmasters`
+FROM h_hmfo_fsi_dm.gd_rst_ing.sales_custmasters_compat_v
 WHERE `사업부명` = '외식식재사업부' AND `ZC본부` = '{ZC_CODE}'
 GROUP BY `년월` ORDER BY `년월`
 """
@@ -70,7 +70,7 @@ GROUP BY `년월` ORDER BY `년월`
         last_6m = add_months("202604", -6)
         sql3 = f"""
 SELECT `대금청구일` AS date, SUM(`매출액`)/1000000 AS sales
-FROM h_hmfo.gd_dcube.`01_sap_sales_custmasters`
+FROM h_hmfo_fsi_dm.gd_rst_ing.sales_custmasters_compat_v
 WHERE `사업부명` = '외식식재사업부' AND `ZC본부` = '{ZC_CODE}'
   AND `년월` >= '{last_6m}' AND `년월` < '202604'
 GROUP BY `대금청구일` ORDER BY `대금청구일`
@@ -80,7 +80,7 @@ GROUP BY `대금청구일` ORDER BY `대금청구일`
         # SQL5: 실제 4월 1~7일 누계
         sql5 = f"""
 SELECT SUM(`매출액`)/1000000 AS sales_7d
-FROM h_hmfo.gd_dcube.`01_sap_sales_custmasters`
+FROM h_hmfo_fsi_dm.gd_rst_ing.sales_custmasters_compat_v
 WHERE `사업부명` = '외식식재사업부' AND `ZC본부` = '{ZC_CODE}'
   AND `대금청구일` >= '20260401' AND `대금청구일` <= '20260407'
 """

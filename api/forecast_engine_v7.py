@@ -844,7 +844,7 @@ def backtest(actual, brand_type):
 # ══════════════════════════════════════════════════════════════════════
 # 단일 브랜드 예측 API  (main.py 에서 임포트하여 사용)
 # ══════════════════════════════════════════════════════════════════════
-T_MAIN_FE = "h_hmfo.gd_dcube.`01_sap_sales_custmasters`"
+T_MAIN_FE = "h_hmfo_fsi_dm.gd_rst_ing.sales_custmasters_compat_v"
 
 def predict_single_brand(zc_name: str, today: date, run_q) -> dict | None:
     """
@@ -988,7 +988,7 @@ SELECT `년월`,
        SUM(`매출액`) / 1000000 AS sales,
        COUNT(DISTINCT `ZB본지점`) AS stores,
        SUM(`매출액`) / 1000000 / COUNT(DISTINCT `ZB본지점`) AS per_store
-FROM h_hmfo.gd_dcube.`01_sap_sales_custmasters`
+FROM h_hmfo_fsi_dm.gd_rst_ing.sales_custmasters_compat_v
 WHERE `사업부명` = '외식식재사업부' AND `ZC본부` = '{ZC_CODE}'
   AND `년월` <= '202604'
 GROUP BY `년월` ORDER BY `년월`
@@ -1015,7 +1015,7 @@ GROUP BY `년월` ORDER BY `년월`
     # SQL2: 신규/폐업 점포
     sql2 = f"""
 SELECT `ZB본지점`, MIN(`년월`) AS first_ym, MAX(`년월`) AS last_ym
-FROM h_hmfo.gd_dcube.`01_sap_sales_custmasters`
+FROM h_hmfo_fsi_dm.gd_rst_ing.sales_custmasters_compat_v
 WHERE `사업부명` = '외식식재사업부' AND `ZC본부` = '{ZC_CODE}'
   AND `년월` <= '202604'
 GROUP BY `ZB본지점`
@@ -1040,7 +1040,7 @@ GROUP BY `ZB본지점`
     last_6m = add_months(CUR_YM, -6)   # 예: 202510
     sql3 = f"""
 SELECT `대금청구일` AS date, SUM(`매출액`)/1000000 AS sales
-FROM h_hmfo.gd_dcube.`01_sap_sales_custmasters`
+FROM h_hmfo_fsi_dm.gd_rst_ing.sales_custmasters_compat_v
 WHERE `사업부명` = '외식식재사업부' AND `ZC본부` = '{ZC_CODE}'
   AND `년월` >= '{last_6m}' AND `년월` < '{CUR_YM}'
 GROUP BY `대금청구일` ORDER BY `대금청구일`

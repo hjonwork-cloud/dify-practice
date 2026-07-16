@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}관리자 콘솔{% endblock %} | 동원홈푸드</title>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net">
+  <link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" rel="stylesheet">
+  <link href="/static/admin.css?v={{ asset_v }}" rel="stylesheet">
+</head>
+<body>
+<div class="shell">
+  <aside class="sidebar">
+    <a class="brand" href="/admin" aria-label="관리자 콘솔 홈">
+      <span class="brand-mark"><img src="/static/dongwon-homefood-logo.png" alt="동원홈푸드"></span>
+      <span class="brand-copy"><strong>운영 관리자</strong><small>CHATBOT CONSOLE</small></span>
+    </a>
+    <nav class="nav" aria-label="관리자 메뉴">
+      <a class="nav-link {% if request.url.path == '/admin' or request.url.path == '/admin/' %}active{% endif %}" href="/admin"><span>▦</span>대시보드</a>
+      <a class="nav-link {% if '/admin/voc' in request.url.path %}active{% endif %}" href="/admin/voc"><span>◌</span>VOC 질문함</a>
+      <a class="nav-link {% if '/admin/faq' in request.url.path %}active{% endif %}" href="/admin/faq"><span>✦</span>FAQ 관리</a>
+      {% if admin.role == 'system_admin' %}<a class="nav-link {% if '/admin/users' in request.url.path %}active{% endif %}" href="/admin/users"><span>♙</span>사용자 관리</a>{% endif %}
+      <a class="nav-link {% if '/admin/usage' in request.url.path %}active{% endif %}" href="/admin/usage"><span>◐</span>토큰 사용량</a>
+      <a class="nav-link {% if '/admin/audit' in request.url.path %}active{% endif %}" href="/admin/audit"><span>◷</span>감사 이력</a>
+      <span class="nav-section">COMING SOON</span>
+      <span class="nav-link disabled"><span>↗</span>액션 제안 관리</span>
+    </nav>
+    <div class="sidebar-foot"><span class="live-dot"></span>관리자 운영 환경</div>
+  </aside>
+  <main class="main">
+    <header class="topbar">
+      <button class="menu-toggle" onclick="document.body.classList.toggle('menu-open')" aria-label="메뉴 열기">☰</button>
+      <div class="topbar-spacer"></div>
+      <div class="admin-profile"><span class="avatar">{{ admin.display_name[:1] }}</span><span><b>{{ admin.display_name }}</b><small>{{ admin.role.replace('_', ' ') }}</small></span></div>
+      <form action="/admin/logout" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="logout" type="submit">로그아웃</button></form>
+    </header>
+    <section class="content">{% block content %}{% endblock %}</section>
+  </main>
+</div>
+<script src="/static/admin.js?v={{ asset_v }}"></script>
+</body>
+</html>

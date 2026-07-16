@@ -1,0 +1,28 @@
+{
+  "md_file": "34_노지캠핑_후기_캠핑장소_찾기_실전_팁_정리.md",
+  "source_url": "https://alliwantischicken.tistory.com/34",
+  "image_count": 3,
+  "images": [
+    {
+      "index": 1,
+      "url": "https://blog.kakaocdn.net/dna/bopp6Q/btsL3yqhdNm/AAAAAAAAAAAAAAAAAAAAAFG-_86OJ7NuSRmwxFeiOoCxKCJ5eYjdQcs-hqSqMAMU/img.jpg?credential=yqXZFxpELC7KVnFOS48ylbz2pIh7yKj8&expires=1782831599&allow_ip=&allow_referer=&signature=kFHII4UbZTCrdMdEV%2BFoYoegxHs%3D",
+      "file": "01.jpg",
+      "size": 1320644,
+      "content_type": "image/jpeg"
+    },
+    {
+      "index": 2,
+      "url": "https://blog.kakaocdn.net/dna/w7HHv/btsL40skcNk/AAAAAAAAAAAAAAAAAAAAADVerH7AQh1poMq8tMrADULA_8R6mzu1j4OPA5_8QJ5z/img.jpg?credential=yqXZFxpELC7KVnFOS48ylbz2pIh7yKj8&expires=1782831599&allow_ip=&allow_referer=&signature=3kct6dAr%2FG43GbOaecdrJU2ayjI%3D",
+      "file": "02.jpg",
+      "size": 1121227,
+      "content_type": "image/jpeg"
+    },
+    {
+      "index": 3,
+      "url": "https://blog.kakaocdn.net/dna/IgA5I/btsL4WpVIA7/AAAAAAAAAAAAAAAAAAAAAEaInQgdVxrkZpBgLolWcji8hUcBJp0qREvAC7y4T9TY/img.jpg?credential=yqXZFxpELC7KVnFOS48ylbz2pIh7yKj8&expires=1782831599&allow_ip=&allow_referer=&signature=3O4ZFLggyWJHvN9390BWAxVumWI%3D",
+      "file": "03.jpg",
+      "size": 1342148,
+      "content_type": "image/jpeg"
+    }
+  ]
+}

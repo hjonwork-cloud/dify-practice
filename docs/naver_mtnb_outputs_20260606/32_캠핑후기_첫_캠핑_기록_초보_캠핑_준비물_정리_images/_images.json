@@ -1,0 +1,28 @@
+{
+  "md_file": "32_캠핑후기_첫_캠핑_기록_초보_캠핑_준비물_정리.md",
+  "source_url": "https://alliwantischicken.tistory.com/32",
+  "image_count": 3,
+  "images": [
+    {
+      "index": 1,
+      "url": "https://blog.kakaocdn.net/dna/4X4Qm/btsIUMYc3D4/AAAAAAAAAAAAAAAAAAAAAP1u4mDx9iXdMLCn8JLq2GtVEirPHqtpvoow8FFSXzZw/img.jpg?credential=yqXZFxpELC7KVnFOS48ylbz2pIh7yKj8&expires=1782831599&allow_ip=&allow_referer=&signature=ilQ1tidgU7AmCkj7jlObKUw%2BEJ8%3D",
+      "file": "01.jpg",
+      "size": 288798,
+      "content_type": "image/jpeg"
+    },
+    {
+      "index": 2,
+      "url": "https://blog.kakaocdn.net/dna/8kh90/btsITssOs1Y/AAAAAAAAAAAAAAAAAAAAAMxbolH-E7_IaCdYQn0iFDsLgoECzgGHsU2sojBYHtRA/img.jpg?credential=yqXZFxpELC7KVnFOS48ylbz2pIh7yKj8&expires=1782831599&allow_ip=&allow_referer=&signature=3hAJrGXM26tn%2F0nd62TTMsbaygw%3D",
+      "file": "02.jpg",
+      "size": 234133,
+      "content_type": "image/jpeg"
+    },
+    {
+      "index": 3,
+      "url": "https://blog.kakaocdn.net/dna/bzsDsD/btsIUUPq9yH/AAAAAAAAAAAAAAAAAAAAABGBg_SSLZdbkE57YwTca7-mjGegehnCCW_kQi5QI9LE/img.jpg?credential=yqXZFxpELC7KVnFOS48ylbz2pIh7yKj8&expires=1782831599&allow_ip=&allow_referer=&signature=q%2Br28D9%2FZq166SRceZunui9Cp0k%3D",
+      "file": "03.jpg",
+      "size": 207514,
+      "content_type": "image/jpeg"
+    }
+  ]
+}

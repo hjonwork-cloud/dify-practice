@@ -11,3 +11,13 @@ api/_admin_whitelist.json
 api/_admin_blacklist.json
 api/_migrate_users.py
 api/_fix_label.py
+
+# chatbot admin console data
+api/admin_console.db
+api/admin_console.db-shm
+api/admin_console.db-wal
+
+# secrets / generated / accidental files
+api/.token_cache
+api/action_store.db
+api/$null

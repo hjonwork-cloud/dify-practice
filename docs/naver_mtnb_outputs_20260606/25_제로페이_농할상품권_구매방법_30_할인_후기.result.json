@@ -1,0 +1,775 @@
+{
+  "title": "제로페이 농할상품권 구매방법, 30% 할인 후기",
+  "source": "E:\\git-copilot\\dify-practice\\docs\\naver_migration_original_posts_20260606\\25_제로페이_농할상품권_구매방법_30_할인_후기.md",
+  "htmlFile": "E:\\git-copilot\\dify-practice\\docs\\naver_mtnb_outputs_20260606\\25_제로페이_농할상품권_구매방법_30_할인_후기.naver.html",
+  "previewFile": "E:\\git-copilot\\dify-practice\\docs\\naver_mtnb_outputs_20260606\\25_제로페이_농할상품권_구매방법_30_할인_후기.preview.html",
+  "frontmatter": {
+    "source_url": "https://alliwantischicken.tistory.com/25",
+    "original_title": "[제로페이] 농할상품권 30프로 싸게 사는법! 구매후기(상품권 3차 발행일은?)",
+    "suggested_titles": [
+      "제로페이 농할상품권 구매방법, 30% 할인 후기",
+      "농할상품권 발행일 정리, 제로페이 구매 팁",
+      "제로페이 할인 활용, 농할상품권 실구매 후기"
+    ],
+    "tags": [
+      "제로페이",
+      "농할상품권",
+      "상품권할인",
+      "장보기절약"
+    ]
+  },
+  "errors": [
+    {
+      "code": "MDX_PARSE_ERROR",
+      "message": "MDX 파싱 오류: Unexpected character `1` (U+0031) before name, expected a character that can start a name, such as a letter, `$`, or `_`",
+      "severity": "error",
+      "position": {
+        "line": 193,
+        "column": 2,
+        "offset": 6283
+      }
+    }
+  ],
+  "blocks": [
+    {
+      "id": "heading:a2i1eg",
+      "type": "heading"
+    },
+    {
+      "id": "blank:g9lbcp#1",
+      "type": "blank"
+    },
+    {
+      "id": "blockquote:1rd5lze",
+      "type": "blockquote"
+    },
+    {
+      "id": "blank:g9lbcp#2",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:1qmzc33",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#3",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:1uedxvf",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#4",
+      "type": "blank"
+    },
+    {
+      "id": "unordered-list:ugfk80",
+      "type": "unordered-list"
+    },
+    {
+      "id": "blank:g9lbcp#5",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:18jey4f",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#6",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:1nbi2el",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#7",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:1uv1iwq",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#8",
+      "type": "blank"
+    },
+    {
+      "id": "heading:1txj53a",
+      "type": "heading"
+    },
+    {
+      "id": "blank:g9lbcp#9",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:jz6ra5",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#10",
+      "type": "blank"
+    },
+    {
+      "id": "blockquote:g8mdgu",
+      "type": "blockquote"
+    },
+    {
+      "id": "blank:g9lbcp#11",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:1g2gog4",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#12",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:zqlya4",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#13",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:fezodm",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#14",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:gkqn7o",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#15",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:1hnxpnr",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#16",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:egzhrk",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#17",
+      "type": "blank"
+    },
+    {
+      "id": "blockquote:1na68fs",
+      "type": "blockquote"
+    },
+    {
+      "id": "blank:g9lbcp#18",
+      "type": "blank"
+    },
+    {
+      "id": "blockquote:1aoqr3a",
+      "type": "blockquote"
+    },
+    {
+      "id": "blank:g9lbcp#19",
+      "type": "blank"
+    },
+    {
+      "id": "heading:1g2xynb",
+      "type": "heading"
+    },
+    {
+      "id": "blank:g9lbcp#20",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:jdxfz9",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#21",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:two94h",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#22",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:g5l1b2",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#23",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:12fl7oj",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#24",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:vieybv",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#25",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:7xm990",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#26",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:16t8qk3",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#27",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:1igoklv",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#28",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:1virn5z",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#29",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:vjo8tm",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#30",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:1k9ue8u",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#31",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:iaqm36",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#32",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:1emgrc9",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#33",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:sl0py1",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#34",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:fvxisd",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#35",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:hcb037",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#36",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:qhzmd1",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#37",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:1a5a6mj",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#38",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:14l3skc",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#39",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:106nzih",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#40",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:ok1tfj",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#41",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:1ynmxes",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#42",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:1k6ixn3",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#43",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:1jdqnpd",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#44",
+      "type": "blank"
+    },
+    {
+      "id": "blockquote:xi5h99",
+      "type": "blockquote"
+    },
+    {
+      "id": "blank:g9lbcp#45",
+      "type": "blank"
+    },
+    {
+      "id": "heading:1a0cs05",
+      "type": "heading"
+    },
+    {
+      "id": "blank:g9lbcp#46",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:1fwcxij",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#47",
+      "type": "blank"
+    },
+    {
+      "id": "ordered-list:sbkl2z",
+      "type": "ordered-list"
+    },
+    {
+      "id": "blank:g9lbcp#48",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:1d85ovd",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#49",
+      "type": "blank"
+    },
+    {
+      "id": "ordered-list:1nq7048",
+      "type": "ordered-list"
+    },
+    {
+      "id": "blank:g9lbcp#50",
+      "type": "blank"
+    },
+    {
+      "id": "blockquote:17rm8t",
+      "type": "blockquote"
+    },
+    {
+      "id": "blank:g9lbcp#51",
+      "type": "blank"
+    },
+    {
+      "id": "blockquote:1rlh68e",
+      "type": "blockquote"
+    },
+    {
+      "id": "blank:g9lbcp#52",
+      "type": "blank"
+    },
+    {
+      "id": "blockquote:rvydu6",
+      "type": "blockquote"
+    },
+    {
+      "id": "blank:g9lbcp#53",
+      "type": "blank"
+    },
+    {
+      "id": "blockquote:1lcd5w2",
+      "type": "blockquote"
+    },
+    {
+      "id": "blank:g9lbcp#54",
+      "type": "blank"
+    },
+    {
+      "id": "blockquote:6kpv37",
+      "type": "blockquote"
+    },
+    {
+      "id": "blank:g9lbcp#55",
+      "type": "blank"
+    },
+    {
+      "id": "blockquote:1frfbbm",
+      "type": "blockquote"
+    },
+    {
+      "id": "blank:g9lbcp#56",
+      "type": "blank"
+    },
+    {
+      "id": "ordered-list:2vlt5f",
+      "type": "ordered-list"
+    },
+    {
+      "id": "blank:g9lbcp#57",
+      "type": "blank"
+    },
+    {
+      "id": "blockquote:o3xb0c",
+      "type": "blockquote"
+    },
+    {
+      "id": "blank:g9lbcp#58",
+      "type": "blank"
+    },
+    {
+      "id": "blockquote:1tn32p0",
+      "type": "blockquote"
+    },
+    {
+      "id": "blank:g9lbcp#59",
+      "type": "blank"
+    },
+    {
+      "id": "blockquote:ollg41",
+      "type": "blockquote"
+    },
+    {
+      "id": "blank:g9lbcp#60",
+      "type": "blank"
+    },
+    {
+      "id": "blockquote:br5qka",
+      "type": "blockquote"
+    },
+    {
+      "id": "blank:g9lbcp#61",
+      "type": "blank"
+    },
+    {
+      "id": "blockquote:1dr28ya",
+      "type": "blockquote"
+    },
+    {
+      "id": "blank:g9lbcp#62",
+      "type": "blank"
+    },
+    {
+      "id": "blockquote:ex3dq6",
+      "type": "blockquote"
+    },
+    {
+      "id": "blank:g9lbcp#63",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:x1lwpu",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#64",
+      "type": "blank"
+    },
+    {
+      "id": "ordered-list:wmiuha",
+      "type": "ordered-list"
+    },
+    {
+      "id": "blank:g9lbcp#65",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:oxebl1",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#66",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:16x6mv3",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#67",
+      "type": "blank"
+    },
+    {
+      "id": "blockquote:1l95as7",
+      "type": "blockquote"
+    },
+    {
+      "id": "blank:g9lbcp#68",
+      "type": "blank"
+    },
+    {
+      "id": "blockquote:1ho7hle",
+      "type": "blockquote"
+    },
+    {
+      "id": "blank:g9lbcp#69",
+      "type": "blank"
+    },
+    {
+      "id": "blockquote:gasaqo",
+      "type": "blockquote"
+    },
+    {
+      "id": "blank:g9lbcp#70",
+      "type": "blank"
+    },
+    {
+      "id": "blockquote:qbvjuu",
+      "type": "blockquote"
+    },
+    {
+      "id": "blank:g9lbcp#71",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:11xjpoy",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#72",
+      "type": "blank"
+    },
+    {
+      "id": "blockquote:18a9k3g",
+      "type": "blockquote"
+    },
+    {
+      "id": "blank:g9lbcp#73",
+      "type": "blank"
+    },
+    {
+      "id": "blockquote:lqnhh6",
+      "type": "blockquote"
+    },
+    {
+      "id": "blank:g9lbcp#74",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:f7keq4",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#75",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:1ygmplr",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#76",
+      "type": "blank"
+    },
+    {
+      "id": "ordered-list:8uuiv1",
+      "type": "ordered-list"
+    },
+    {
+      "id": "blank:g9lbcp#77",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:1ngr8nj",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#78",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:6uz7q0",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#79",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:4k6z2p",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#80",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:95e2w1",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#81",
+      "type": "blank"
+    },
+    {
+      "id": "blockquote:14u2k6b",
+      "type": "blockquote"
+    },
+    {
+      "id": "blank:g9lbcp#82",
+      "type": "blank"
+    },
+    {
+      "id": "blockquote:tl9hgo",
+      "type": "blockquote"
+    },
+    {
+      "id": "blank:g9lbcp#83",
+      "type": "blank"
+    },
+    {
+      "id": "blockquote:es7glu",
+      "type": "blockquote"
+    },
+    {
+      "id": "blank:g9lbcp#84",
+      "type": "blank"
+    },
+    {
+      "id": "blockquote:xavk3o",
+      "type": "blockquote"
+    },
+    {
+      "id": "blank:g9lbcp#85",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:sa4rtw",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#86",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:1v9948j",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#87",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:19lmn9d",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#88",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:1xr063u",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#89",
+      "type": "blank"
+    },
+    {
+      "id": "blockquote:2gv2z5",
+      "type": "blockquote"
+    },
+    {
+      "id": "blank:g9lbcp#90",
+      "type": "blank"
+    },
+    {
+      "id": "blockquote:1bj97uq",
+      "type": "blockquote"
+    },
+    {
+      "id": "blank:g9lbcp#91",
+      "type": "blank"
+    },
+    {
+      "id": "paragraph:ej6eyh",
+      "type": "paragraph"
+    },
+    {
+      "id": "blank:g9lbcp#92",
+      "type": "blank"
+    },
+    {
+      "id": "tags:rf520a",
+      "type": "tags"
+    }
+  ]
+}

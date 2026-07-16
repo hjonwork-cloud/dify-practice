@@ -18,6 +18,18 @@ NGROK_DOMAIN = "perfunctorily-stumpless-leticia.ngrok-free.dev"
 CHECK_SEC  = 30
 LOG_FILE   = r"e:\git-copilot\dify-practice\watchdog.log"
 
+# Databricks PAT(Personal Access Token) — 서버 시작 시 DATABRICKS_TOKEN 환경변수로 자동 주입.
+# 장기 토큰이라 만료/재인증이 없어 커넥션 풀과 궁합이 좋다. (교체 시 이 값만 갱신)
+DATABRICKS_TOKEN = "dapiafd0c55621ca4f4473a1ee44ebcc9076"
+
+
+def _server_env():
+    """서버 프로세스에 전달할 환경변수 (기존 환경 + DATABRICKS_TOKEN 주입)."""
+    env = os.environ.copy()
+    if DATABRICKS_TOKEN:
+        env["DATABRICKS_TOKEN"] = DATABRICKS_TOKEN
+    return env
+
 # ── 상태 색상 ──────────────────────────────────────────────────
 C_BG       = "#1e1e1e"
 C_PANEL    = "#2d2d2d"
@@ -357,8 +369,9 @@ class WatchdogApp:
         def _run():
             subprocess.Popen(
                 [PYTHON, "-m", "uvicorn", "main:app",
-                 "--host", "0.0.0.0", "--port", str(PORT), "--reload"],
+                 "--host", "0.0.0.0", "--port", str(PORT)],
                 cwd=API_DIR,
+                env=_server_env(),
                 creationflags=subprocess.CREATE_NO_WINDOW
             )
             time.sleep(4)
@@ -395,8 +408,9 @@ class WatchdogApp:
             # 시작
             subprocess.Popen(
                 [PYTHON, "-m", "uvicorn", "main:app",
-                 "--host", "0.0.0.0", "--port", str(PORT), "--reload"],
+                 "--host", "0.0.0.0", "--port", str(PORT)],
                 cwd=API_DIR,
+                env=_server_env(),
                 creationflags=subprocess.CREATE_NO_WINDOW
             )
             time.sleep(4)

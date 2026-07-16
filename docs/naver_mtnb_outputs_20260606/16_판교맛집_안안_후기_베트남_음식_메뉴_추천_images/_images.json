@@ -1,0 +1,28 @@
+{
+  "md_file": "16_판교맛집_안안_후기_베트남_음식_메뉴_추천.md",
+  "source_url": "https://alliwantischicken.tistory.com/16",
+  "image_count": 3,
+  "images": [
+    {
+      "index": 1,
+      "url": "https://blog.kakaocdn.net/dna/bB1RAd/btrVecMJgNj/AAAAAAAAAAAAAAAAAAAAAHcK3xftdYNOGjJR3iTTYUvNfuNsVpW45l7hsaK9OKV1/img.jpg?credential=yqXZFxpELC7KVnFOS48ylbz2pIh7yKj8&expires=1782831599&allow_ip=&allow_referer=&signature=7CwbjPnDJ8tmDXO%2Fi9Mlr95KsRg%3D",
+      "file": "01.jpg",
+      "size": 908364,
+      "content_type": "image/jpeg"
+    },
+    {
+      "index": 2,
+      "url": "https://blog.kakaocdn.net/dna/yTWJD/btrVjSslASP/AAAAAAAAAAAAAAAAAAAAAPYYjjOwN_ffVEt0x3V3xYCK-8ggjV2tQSBVNKqj_q1c/img.jpg?credential=yqXZFxpELC7KVnFOS48ylbz2pIh7yKj8&expires=1782831599&allow_ip=&allow_referer=&signature=KpKy%2FJsBCMuMi9R5qSISXAPfe%2FY%3D",
+      "file": "02.jpg",
+      "size": 1556748,
+      "content_type": "image/jpeg"
+    },
+    {
+      "index": 3,
+      "url": "https://blog.kakaocdn.net/dna/0EWHy/btrVfsOYHhh/AAAAAAAAAAAAAAAAAAAAANhuiwAEZ08tZQBALiKgoBgLmMzTdHVcOmcx7AFYGIwH/img.jpg?credential=yqXZFxpELC7KVnFOS48ylbz2pIh7yKj8&expires=1782831599&allow_ip=&allow_referer=&signature=eGa2ZadKuSldiTOPH4F4aJVrBE8%3D",
+      "file": "03.jpg",
+      "size": 1759891,
+      "content_type": "image/jpeg"
+    }
+  ]
+}

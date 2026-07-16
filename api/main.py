@@ -7,6 +7,7 @@ Databricks → Dify 연결용 FastAPI 미들웨어 서버
 from fastapi import FastAPI, HTTPException, Security, Depends, BackgroundTasks, Request
 from fastapi.security.api_key import APIKeyHeader
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from databricks.sdk import WorkspaceClient
 from databricks import sql as dbsql
@@ -20,6 +21,7 @@ import urllib.request
 import urllib.error
 import json as json_mod
 import threading
+import queue as _queue_mod
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -33,6 +35,7 @@ DIFY_TOKEN = os.getenv("DIFY_API_TOKEN", "app-jyij8qDVuJHBQojM8Hxj7wgu")
 # ────────────────────────────────────────────────────────
 
 app = FastAPI(title="Databricks-Dify Bridge", version="1.0.0")
+app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")), name="static")
 
 app.add_middleware(
     CORSMiddleware,
@@ -44,6 +47,25 @@ app.add_middleware(
 # ─── 액션 제안 라우터 등록 ──────────────────────────────────
 from action_router import router as _action_router
 app.include_router(_action_router)
+from admin_router import router as _admin_router
+app.include_router(_admin_router)
+import admin_db  # VOC 접수 / 공개 FAQ 자동응답
+
+# 직접 처리 규칙과 공개 FAQ로 답하지 못한 질문의 처리 방식.
+# 기본값은 Dify 호출을 하지 않고 VOC로 접수한다. (운영 기본 = 차단)
+_DIFY_FALLBACK_ENABLED = os.getenv("ENABLE_DIFY_FALLBACK", "false").lower() == "true"
+
+# 미인식 질문 접수 시 사용자에게 보내는 안내 문구
+_VOC_GUIDE_MESSAGE = (
+    "🙇 아직 이 질문에 대한 답변은 준비되어 있지 않습니다.\n\n"
+    "저는 이런 내용을 도와드릴 수 있어요.\n"
+    "• 매출 실적 (사업부·팀·브랜드·거래처)\n"
+    "• 수익성 / CM 분석\n"
+    "• 미출고 현황\n"
+    "• 신규매출 조회\n\n"
+    "문의하신 내용은 관리자에게 전달했어요.\n"
+    "빠른 시일 내에 답변드릴 수 있도록 준비하겠습니다. 🙏"
+)
 
 # ─── 인증 토큰 캐시 ──────────────────────────────────────
 TOKEN_FILE = os.path.join(os.path.dirname(__file__), ".token_cache")
@@ -75,6 +97,12 @@ def get_token() -> str:
     global _cached_token, _workspace_client
     if _cached_token:
         return _cached_token
+    # 0) 환경변수 PAT 우선 — 장기 토큰이라 만료/재인증이 없어 지속 커넥션에 최적
+    env_pat = os.getenv("DATABRICKS_TOKEN", "").strip()
+    if env_pat:
+        _cached_token = env_pat
+        logger.info("✅ 환경변수 PAT(DATABRICKS_TOKEN) 사용")
+        return _cached_token
     # 파일 캐시에서 먼저 시도
     saved = _load_token_from_file()
     if saved:
@@ -97,9 +125,90 @@ def get_token() -> str:
     return _cached_token
 
 # 서버 시작 시 파일 캐시 자동 로드
-_cached_token = _load_token_from_file()
+_cached_token = os.getenv("DATABRICKS_TOKEN", "").strip() or _load_token_from_file()
 if _cached_token:
     logger.info("✅ 시작 시 저장된 토큰 로드됨")
+
+
+# ─── Databricks 커넥션 풀 ────────────────────────────────
+# 매 쿼리마다 새 세션을 여는 대신 커넥션을 재사용한다.
+# 세션 오픈(핸드셰이크+인증) 오버헤드가 응답 지연의 대부분이었다.
+# 각 스레드가 풀에서 커넥션 1개를 빌려 쓰므로 병렬 쿼리도 안전하다.
+class _ConnectionPool:
+    def __init__(self, size: int):
+        self._size = max(1, size)
+        self._pool: _queue_mod.LifoQueue = _queue_mod.LifoQueue()
+        self._created = 0
+        self._lock = threading.Lock()
+
+    def _create(self):
+        token = get_token()
+        hostname = HOST.replace("https://", "")
+        return dbsql.connect(
+            server_hostname=hostname,
+            http_path=HTTP_PATH,
+            access_token=token,
+        )
+
+    def acquire(self):
+        # 1) 유휴 커넥션 재사용
+        try:
+            return self._pool.get_nowait()
+        except _queue_mod.Empty:
+            pass
+        # 2) 여유가 있으면 새로 생성 (락은 카운터 갱신 동안만 점유)
+        make = False
+        with self._lock:
+            if self._created < self._size:
+                self._created += 1
+                make = True
+        if make:
+            try:
+                return self._create()
+            except Exception:
+                with self._lock:
+                    self._created -= 1
+                raise
+        # 3) 포화 상태 → 반환될 때까지 대기
+        return self._pool.get()
+
+    def release(self, conn, healthy: bool = True):
+        if conn is None:
+            return
+        if healthy:
+            self._pool.put(conn)
+        else:
+            with self._lock:
+                self._created -= 1
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    def close_all(self):
+        """서버 종료 시 유휴 커넥션 정리."""
+        while True:
+            try:
+                c = self._pool.get_nowait()
+            except _queue_mod.Empty:
+                break
+            try:
+                c.close()
+            except Exception:
+                pass
+        with self._lock:
+            self._created = 0
+
+
+_CONN_POOL = _ConnectionPool(int(os.getenv("DB_POOL_SIZE", "5")))
+
+
+@app.on_event("shutdown")
+def _shutdown_conn_pool():
+    try:
+        _CONN_POOL.close_all()
+    except Exception:
+        pass
 
 
 NAME_FILTER_COLUMNS = [
@@ -161,17 +270,18 @@ def run_query(sql: str, *, raw: bool = False) -> list[dict]:
         sql = _replace_za_with_zc(sql)
 
     def _execute_once() -> list[dict]:
-        token = get_token()
-        hostname = HOST.replace("https://", "")
-        with dbsql.connect(
-            server_hostname=hostname,
-            http_path=HTTP_PATH,
-            access_token=token
-        ) as conn:
+        conn = _CONN_POOL.acquire()
+        healthy = True
+        try:
             with conn.cursor() as cur:
                 cur.execute(sql)
                 cols = [d[0] for d in cur.description]
                 return [dict(zip(cols, row)) for row in cur.fetchall()]
+        except Exception:
+            healthy = False  # 문제 발생 커넥션은 폐기 (풀로 반환하지 않음)
+            raise
+        finally:
+            _CONN_POOL.release(conn, healthy=healthy)
 
     try:
         return _execute_once()
@@ -186,6 +296,9 @@ def run_query(sql: str, *, raw: bool = False) -> list[dict]:
                 "open session",
                 "error during request to server",
                 "opensession",
+                "session",
+                "closed",
+                "connection",
             ]
         )
         if not should_retry:
@@ -196,8 +309,10 @@ def run_query(sql: str, *, raw: bool = False) -> list[dict]:
 
 
 # ─── 신규매출 분석 ─────────────────────────────────────────
-T_MAIN    = "h_hmfo.gd_dcube.`01_sap_sales_custmasters`"
-T_MISULGO = "h_hmfo.gd_dcube.`46_helo_periodic_unshipped`"
+# Stage 1 migration: core chatbot sales queries use the FSI compatibility view.
+# Action signals and forecast remain on the legacy table until separately validated.
+T_MAIN    = "h_hmfo_fsi_dm.gd_rst_ing.sales_custmasters_compat_v"
+T_MISULGO = "h_hmfo_fsi_dm.gd_rst_ing.unshipped_compat_v"
 T_PROFIT  = "h_hmfo.gd_dcube.`00_customers_cm`"          # 수익성
 
 # 수익성 인텐트 키워드 패턴 (CM/공헌이익/수익성 등 다양한 표현 통합)
@@ -1209,22 +1324,7 @@ def _build_dept_forecast_card(
         from forecast_engine_v7 import KOR_HOLIDAYS as _HOLI
     except Exception:
         _HOLI = set()
-    # 실배송 없는 날 (설날·추석 전날+당일) → DB 조회
     _HOLIDAY_BOOST = 1.5
-    try:
-        _nd_rows = _safe_query(
-            "SELECT no_delivery_date AS dt FROM h_hmfo_fsi_dm.gd_rst_ing.dim_holidays"
-            f" WHERE holiday_year IN ({int(ym_now[:4])-1}, {int(ym_now[:4])})",
-            raw=True,
-        )
-        import datetime as _dt_nd
-        def _to_date_nd(v):
-            if isinstance(v, _dt_nd.date): return v
-            s = str(v).replace("-", "")
-            return _dt_nd.date(int(s[:4]), int(s[4:6]), int(s[6:8]))
-        _NO_DELIVERY = {_to_date_nd(r["dt"]) for r in _nd_rows}
-    except Exception:
-        _NO_DELIVERY = set()
 
     year = int(ym_now[:4])
     mo   = int(ym_now[4:])
@@ -1234,6 +1334,59 @@ def _build_dept_forecast_card(
     prev_ym   = prev_date.strftime("%Y%m")
     prev_mo   = prev_date.month
     yoy_ym    = f"{year - 1}{mo:02d}"
+
+    # ── 독립 쿼리 4종 병렬 실행 ──
+    #    실배송 없는 날 · 당월 일별 · 전월 일별 · 전월/전년/YTD 집계(연간 스캔)
+    #    각 쿼리가 커넥션 풀에서 개별 커넥션을 빌려 동시에 처리된다.
+    def _q_nodelivery():
+        return _safe_query(
+            "SELECT no_delivery_date AS dt FROM h_hmfo_fsi_dm.gd_rst_ing.dim_holidays"
+            f" WHERE holiday_year IN ({year - 1}, {year})",
+            raw=True,
+        )
+
+    def _q_daily(ym: str, having: float):
+        return _safe_query(f"""
+            SELECT `대금청구일` AS dt,
+                   ROUND(SUM(`매출액`)/1000000, 4) AS daily
+            FROM {T_MAIN}
+            WHERE `{dept_key}` = '{dept_name}' AND `년월` = '{ym}'
+            GROUP BY `대금청구일`
+            HAVING ROUND(SUM(`매출액`)/1000000, 4) >= {having}
+            ORDER BY `대금청구일`
+        """, raw=True)
+
+    def _q_agg_main():
+        # data_day에 의존하지 않는 집계 4종을 한 번의 스캔으로 처리
+        return _safe_query(f"""
+            SELECT
+              ROUND(SUM(CASE WHEN `년월`='{prev_ym}' THEN `매출액` ELSE 0 END)/1000000,2) AS prev_total,
+              ROUND(SUM(CASE WHEN `년월`='{yoy_ym}'  THEN `매출액` ELSE 0 END)/1000000,2) AS yoy_total,
+              ROUND(SUM(CASE WHEN `년월`>='{year}01' AND `년월`<'{ym_now}' THEN `매출액` ELSE 0 END)/1000000,2) AS ytd_this_prior,
+              ROUND(SUM(CASE WHEN `년월`>='{year-1}01' AND `년월`<'{yoy_ym}' THEN `매출액` ELSE 0 END)/1000000,2) AS ytd_last_prior
+            FROM {T_MAIN} WHERE `{dept_key}` = '{dept_name}'
+        """)
+
+    with ThreadPoolExecutor(max_workers=4) as _ex_dept:
+        _fut_nd    = _ex_dept.submit(_q_nodelivery)
+        _fut_cur   = _ex_dept.submit(_q_daily, ym_now, 0.01)
+        _fut_prev  = _ex_dept.submit(_q_daily, prev_ym, 0.1)
+        _fut_agg   = _ex_dept.submit(_q_agg_main)
+        _nd_rows    = _fut_nd.result()
+        _daily_rows = _fut_cur.result()
+        _prev_rows  = _fut_prev.result()
+        _agg_main   = _fut_agg.result()
+
+    # 실배송 없는 날 (설날·추석 전날+당일) 집합화
+    try:
+        import datetime as _dt_nd
+        def _to_date_nd(v):
+            if isinstance(v, _dt_nd.date): return v
+            s = str(v).replace("-", "")
+            return _dt_nd.date(int(s[:4]), int(s[4:6]), int(s[6:8]))
+        _NO_DELIVERY = {_to_date_nd(r["dt"]) for r in _nd_rows}
+    except Exception:
+        _NO_DELIVERY = set()
 
     def _dq(where_extra: str) -> float:
         try:
@@ -1245,20 +1398,7 @@ def _build_dept_forecast_card(
         except Exception:
             return 0.0
 
-    # ── ① 당월 일별 매출 조회 (HAVING 0.01 이상) ──────────────────
-    try:
-        _daily_rows = _safe_query(f"""
-            SELECT `대금청구일` AS dt,
-                   ROUND(SUM(`매출액`)/1000000, 4) AS daily
-            FROM {T_MAIN}
-            WHERE `{dept_key}` = '{dept_name}' AND `년월` = '{ym_now}'
-            GROUP BY `대금청구일`
-            HAVING ROUND(SUM(`매출액`)/1000000, 4) >= 0.01
-            ORDER BY `대금청구일`
-        """, raw=True)
-    except Exception:
-        _daily_rows = []
-
+    # ── ① 당월 일별 매출 (위에서 병렬로 이미 조회한 _daily_rows 사용) ──
     # data_day = 의미 있는 데이터의 마지막 날
     data_day = today.day  # fallback
     _dow_sales: dict = _dd_dept(list)  # {0(Mon)..6(Sun): [sales,...]}
@@ -1282,17 +1422,9 @@ def _build_dept_forecast_card(
     if data_day == 0:
         data_day = today.day
 
-    # ── ② 전월 일별 DOW 평균 (당월 DOW 데이터 부족 시 fallback) ──
+    # ── ② 전월 일별 DOW 평균 (위에서 병렬로 이미 조회한 _prev_rows 사용) ──
     _prev_dow_sales: dict = _dd_dept(list)
     try:
-        _prev_rows = _safe_query(f"""
-            SELECT `대금청구일` AS dt,
-                   ROUND(SUM(`매출액`)/1000000, 4) AS daily
-            FROM {T_MAIN}
-            WHERE `{dept_key}` = '{dept_name}' AND `년월` = '{prev_ym}'
-            GROUP BY `대금청구일`
-            HAVING ROUND(SUM(`매출액`)/1000000, 4) >= 0.1
-        """, raw=True)
         for _r in _prev_rows:
             _ds = str(_r["dt"])
             _dt_obj = _dt_dept.date(int(_ds[:4]), int(_ds[4:6]), int(_ds[6:8]))
@@ -1333,21 +1465,36 @@ def _build_dept_forecast_card(
 
     forecast = sales_so_far + _remaining
 
-    prev_total = _dq(f"AND `년월` = '{prev_ym}'")
-    yoy_total  = _dq(f"AND `년월` = '{yoy_ym}'")
+    # ── 집계 결과 조립: 연간 스캔 4종은 병렬 배치(_agg_main)에서 이미 계산됨.
+    #    data_day에 의존하는 전년 부분월(ytd_last_partial)만 단일 월 스캔으로 조회 ──
+    prev_total = yoy_total = 0.0
+    _ytd_this_prior = _ytd_last_prior = 0.0
+    try:
+        if _agg_main:
+            _a = _agg_main[0]
+            prev_total      = float(_a.get("prev_total") or 0.0)
+            yoy_total       = float(_a.get("yoy_total") or 0.0)
+            _ytd_this_prior = float(_a.get("ytd_this_prior") or 0.0)
+            _ytd_last_prior = float(_a.get("ytd_last_prior") or 0.0)
+    except Exception as _agg_e:
+        logger.warning(f"[예측카드] 집계 조립 실패: {_agg_e}")
 
-    # YTD 이번 해
-    ytd_this = sales_so_far
-    if mo > 1:
-        ytd_this += _dq(f"AND `년월` >= '{year}01' AND `년월` < '{ym_now}'")
-
-    # YTD 전년 동기
-    ytd_last = 0.0
-    if mo > 1:
-        ytd_last += _dq(f"AND `년월` >= '{year-1}01' AND `년월` < '{yoy_ym}'")
     _day_from = f"{year-1}{mo:02d}01"
     _day_to   = f"{year-1}{mo:02d}{data_day:02d}"
-    ytd_last += _dq(f"AND `대금청구일` >= '{_day_from}' AND `대금청구일` <= '{_day_to}'")
+    _ytd_last_partial = 0.0
+    try:
+        _pr = _safe_query(f"""
+            SELECT ROUND(COALESCE(SUM(`매출액`),0)/1000000,2) AS sales
+            FROM {T_MAIN}
+            WHERE `{dept_key}` = '{dept_name}'
+              AND `대금청구일` >= '{_day_from}' AND `대금청구일` <= '{_day_to}'
+        """)
+        _ytd_last_partial = float(_pr[0]["sales"]) if _pr else 0.0
+    except Exception:
+        _ytd_last_partial = 0.0
+
+    ytd_this = sales_so_far + _ytd_this_prior          # 올해 누계
+    ytd_last = _ytd_last_prior + _ytd_last_partial     # 전년 동기 누계
 
     def _pct(new_val, old_val):
         if old_val <= 0:
@@ -2329,6 +2476,11 @@ def _profit_qr_nav(subject: str, period: str) -> list[dict]:
 
 def _fetch_profit_branch(branch: str, period: str) -> str:
     """지점 전체 수익성 요약 (1행 합계) — 백만원 단위, CO기준"""
+    return _fetch_profit_org(branch, period, "지점명", "지점")
+
+
+def _fetch_profit_org(org_name: str, period: str, org_column: str, org_label: str) -> str:
+    """조직 단위 수익성 요약. 사업부 또는 지점명 컬럼으로 집계한다."""
     cond = _profit_period_cond(period)
     rows = _safe_query(f"""
         SELECT
@@ -2339,11 +2491,11 @@ def _fetch_profit_branch(branch: str, period: str) -> str:
             SUM(`변동비`)       AS varfee,
             SUM(`공헌이익`)     AS cm
         FROM {T_PROFIT}
-        WHERE `지점명` = '{branch}'
+        WHERE `{org_column}` = '{org_name}'
           AND {cond}
     """, raw=True)
     if not rows or rows[0].get("fi") is None:
-        return f"📊 {branch} {_period_label(period)} 수익성 데이터가 없습니다.\n※ 현재 수익성 데이터는 {_get_profit_latest_label()}까지 제공되고 있습니다."
+        return f"📊 [{org_label}] {org_name} {_period_label(period)} 수익성 데이터가 없습니다.\n※ 현재 수익성 데이터는 {_get_profit_latest_label()}까지 제공되고 있습니다."
     r = rows[0]
     fi     = int(r["fi"]     or 0)
     gp     = int(r["gp"]     or 0)
@@ -2352,7 +2504,7 @@ def _fetch_profit_branch(branch: str, period: str) -> str:
     var    = int(r["varfee"] or 0)
     cm     = int(r["cm"]     or 0)
     lines = [
-        f"💰 {branch} {_period_label(period)} 수익성 분석",
+        f"💰 {org_name} {_period_label(period)} 수익성 분석",
         "",
         f"📌 매출액(CO): {_fmt_mil(fi)}",
         f"📌 매출총이익: {_fmt_mil(gp)} ({_pct(gp, fi)})",
@@ -2940,7 +3092,7 @@ def get_divisions():
     try:
         rows = run_query("""
             SELECT DISTINCT `사업부`, `사업부명`
-            FROM h_hmfo.gd_dcube.`01_sap_sales_custmasters`
+            FROM h_hmfo_fsi_dm.gd_rst_ing.sales_custmasters_compat_v
             ORDER BY `사업부`
         """)
         return {"divisions": rows}
@@ -2966,7 +3118,7 @@ def get_sales(req: SalesRequest):
     sql = f"""
         SELECT `사업부`, `사업부명`, `대금청구일`,
                SUM(`매출액`) AS 매출액합계
-        FROM h_hmfo.gd_dcube.`01_sap_sales_custmasters`
+         FROM h_hmfo_fsi_dm.gd_rst_ing.sales_custmasters_compat_v
         {where_sql}
         GROUP BY `사업부`, `사업부명`, `대금청구일`
         ORDER BY `대금청구일` DESC
@@ -3023,25 +3175,28 @@ AUTH_DEPT = "외식식재사업부"  # 허용 사업부
 _USERS_FILE     = r"E:\data\chatbot\_registered_users.json"
 _WHITELIST_FILE = r"E:\data\chatbot\_admin_whitelist.json"
 _BLACKLIST_FILE = r"E:\data\chatbot\_admin_blacklist.json"
+_TEAM_OVERRIDE_FILE = r"E:\data\chatbot\_admin_team_overrides.json"
 _USAGE_FILE     = r"E:\data\chatbot\_token_usage.json"
 _users_lock = threading.Lock()
 _usage_lock = threading.Lock()
 
-# 관리자급 수기 등록 화이트리스트 (DB에 영업사원 매출 없어도 등록 허용)
-_MANAGER_WHITELIST: dict[str, dict] = {
-    "20115003": {"영업사원명": "손상웅", "영업사원": "20115003", "지점명": "외식1팀"},
-    "20065782": {"영업사원명": "권봉주", "영업사원": "20065782", "지점명": "외식3팀"},
-    "20191191": {"영업사원명": "박상천", "영업사원": "20191191", "지점명": "외식식재사업부"},
-    "20115029": {"영업사원명": "강동민", "영업사원": "20115029", "지점명": "외식식재사업부"},
-    "20210054": {"영업사원명": "최희조", "영업사원": "20210054", "지점명": "외식식재사업부"},
-    "20190061": {"영업사원명": "박지웅", "영업사원": "20190061", "지점명": "신규개발파트"},
-    "20190801": {"영업사원명": "김남우", "영업사원": "20190801", "지점명": "신규개발파트"},
-}
+# 관리자가 조직원 소속을 지정할 때 선택 가능한 소속(팀) 목록
+TEAM_OPTIONS = ["외식1팀", "외식2팀", "외식3팀", "신규개발파트", "영남지점"]
 
-# 퇴사자 블랙리스트 (등록 차단)
-_BLOCKED_EMPLOYEES: set[str] = {
-    "20065629",  # 엄철용
+# 초기 seed 데이터 — 최초 1회 JSON(_WHITELIST_FILE/_BLACKLIST_FILE)로 이관된 뒤
+# 카톡·웹 관리자 콘솔 모두 JSON을 단일 소스로 사용한다. (이후 수정은 웹/카톡에서)
+_SEED_WHITELIST: dict[str, dict] = {
+    "20115003": {"name": "손상웅", "team": "외식1팀"},
+    "20065782": {"name": "권봉주", "team": "외식3팀"},
+    "20191191": {"name": "박상천", "team": "외식식재사업부"},
+    "20115029": {"name": "강동민", "team": "외식식재사업부"},
+    "20190061": {"name": "박지웅", "team": "신규개발파트"},
+    "20190801": {"name": "김남우", "team": "신규개발파트"},
 }
+_SEED_BLACKLIST: list[str] = [
+    "20065629",  # 엄철용
+]
+_SEED_MARKER_FILE = r"E:\data\chatbot\_seed_done.json"
 
 
 def _load_users() -> dict:
@@ -3081,6 +3236,51 @@ def _load_blacklist() -> list:
 def _save_blacklist(bl: list):
     with open(_BLACKLIST_FILE, "w", encoding="utf-8") as f:
         json_mod.dump(bl, f, ensure_ascii=False, indent=2)
+
+
+def _load_team_overrides() -> dict:
+    """관리자가 수정한 조직원 소속 오버라이드. {emp_code: team}"""
+    if os.path.exists(_TEAM_OVERRIDE_FILE):
+        try:
+            with open(_TEAM_OVERRIDE_FILE, "r", encoding="utf-8") as f:
+                return json_mod.load(f)
+        except (OSError, ValueError):
+            return {}
+    return {}
+
+
+def _save_team_overrides(ov: dict):
+    with open(_TEAM_OVERRIDE_FILE, "w", encoding="utf-8") as f:
+        json_mod.dump(ov, f, ensure_ascii=False, indent=2)
+
+
+def _seed_admin_lists():
+    """최초 1회 하드코딩 seed를 JSON 화이트/블랙리스트로 이관한다.
+    마커 파일이 있으면 실행하지 않아 웹에서 삭제한 항목이 되살아나지 않는다."""
+    try:
+        if os.path.exists(_SEED_MARKER_FILE):
+            return
+        os.makedirs(os.path.dirname(_SEED_MARKER_FILE), exist_ok=True)
+        now = time.strftime("%Y-%m-%d %H:%M:%S")
+        with _users_lock:
+            wl = _load_whitelist()
+            for emp, info in _SEED_WHITELIST.items():
+                if emp not in wl:
+                    wl[emp] = {"name": info["name"], "team": info.get("team", ""), "added_at": now}
+            _save_whitelist(wl)
+            bl = _load_blacklist()
+            for emp in _SEED_BLACKLIST:
+                if emp not in bl:
+                    bl.append(emp)
+            _save_blacklist(bl)
+        with open(_SEED_MARKER_FILE, "w", encoding="utf-8") as f:
+            json_mod.dump({"seeded_at": now}, f, ensure_ascii=False)
+        logger.info("[seed] 관리자 화이트/블랙리스트 초기 이관 완료")
+    except Exception as e:
+        logger.warning(f"[seed] 초기 이관 실패: {e}")
+
+
+_seed_admin_lists()
 
 
 def _is_registered(user_id: str) -> bool:
@@ -3180,48 +3380,46 @@ def _find_user_by_emp_code(emp_code: str) -> str | None:
 
 def _verify_employee(name: str, emp_code: str) -> dict | None:
     """사원명+사번 인증. 화이트리스트 → DB 순서로 확인.
+
+
     Returns: {영업사원명, 영업사원, 지점명} or None
     """
-    # 퇴사자 차단 (하드코딩 + 관리자 블랙리스트)
-    if emp_code in _BLOCKED_EMPLOYEES:
-        logger.warning(f"[인증] 블랙리스트 차단(하드코딩): emp_code={emp_code}")
-        return None
+    # 퇴사자 차단 (관리자 블랙리스트 — JSON 단일 소스)
     if emp_code in _load_blacklist():
-        logger.warning(f"[인증] 블랙리스트 차단(관리자): emp_code={emp_code}")
+        logger.warning(f"[인증] 블랙리스트 차단: emp_code={emp_code}")
         return None
 
-    # 관리자 동적 화이트리스트 확인
+    # 관리자 화이트리스트 확인 (JSON 단일 소스, DB 조회 불필요)
+    result = None
     _dyn_wl = _load_whitelist()
     if emp_code in _dyn_wl:
         wl_entry = _dyn_wl[emp_code]
         compact_input = re.sub(r"\s+", "", name)
         compact_wl = re.sub(r"\s+", "", wl_entry.get("name", ""))
         if compact_input in compact_wl or compact_wl in compact_input:
-            logger.info(f"[인증] 동적 화이트리스트 매칭: {wl_entry.get('name')}")
-            return {"영업사원명": wl_entry.get("name", name), "영업사원": emp_code, "지점명": wl_entry.get("team", "")}
-
-    # 관리자 화이트리스트 우선 확인 (DB 조회 불필요)
-    if emp_code in _MANAGER_WHITELIST:
-        wl = _MANAGER_WHITELIST[emp_code]
-        compact_input = re.sub(r"\s+", "", name)
-        compact_wl = re.sub(r"\s+", "", wl["영업사원명"])
-        if compact_input in compact_wl or compact_wl in compact_input:
-            logger.info(f"[인증] 화이트리스트 매칭: {wl['영업사원명']}")
-            return wl
+            logger.info(f"[인증] 화이트리스트 매칭: {wl_entry.get('name')}")
+            result = {"영업사원명": wl_entry.get("name", name), "영업사원": emp_code, "지점명": wl_entry.get("team", "")}
 
     # DB 조회
-    compact_name = re.sub(r"\s+", "", name)
-    rows = _safe_query(f"""
-        SELECT DISTINCT `영업사원명`, `영업사원`, `지점명`
-        FROM {T_MAIN}
-        WHERE `사업부명` = '{AUTH_DEPT}'
-          AND `영업사원` = '{emp_code}'
-          AND regexp_replace(`영업사원명`, ' ', '') LIKE '%{compact_name}%'
-        LIMIT 1
-    """)
-    if rows:
-        return rows[0]
-    return None
+    if result is None:
+        compact_name = re.sub(r"\s+", "", name)
+        rows = _safe_query(f"""
+            SELECT DISTINCT `영업사원명`, `영업사원`, `지점명`
+            FROM {T_MAIN}
+            WHERE `사업부명` = '{AUTH_DEPT}'
+              AND `영업사원` = '{emp_code}'
+              AND regexp_replace(`영업사원명`, ' ', '') LIKE '%{compact_name}%'
+            LIMIT 1
+        """)
+        if rows:
+            result = rows[0]
+
+    # 관리자가 지정한 소속 오버라이드 적용
+    if result is not None:
+        _ov = _load_team_overrides().get(emp_code)
+        if _ov:
+            result = {**result, "지점명": _ov}
+    return result
 
 
 def _register_user(user_id: str, name: str, emp_code: str, db_info: dict) -> str:
@@ -4318,6 +4516,33 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
         except Exception as e:
             logger.error(f"[콜백] 팀수익성 오류: {e}")
             _send_kakao_callback(callback_url, "⚠️ 수익성 조회 중 오류가 발생했습니다.", "팀수익성")
+        return
+
+    # ─── 사업부 수익성 직접 조회 ──────────────────────────────
+    # "사업부 CM"은 외식식재사업부의 최신 확정 월 CM으로 해석한다.
+    _profit_business = "외식식재사업부" if (
+        re.search(r'외식식재사업부', query)
+        or re.fullmatch(r'\s*사업부\s*(?:수익성|[Cc][Mm]\b|공헌이익률?|공헌이익율?)\s*(?:알려줘|알려주세요|조회|확인)?\s*', query, re.IGNORECASE)
+    ) else None
+    if _profit_business and re.search(_PROFIT_KW_PAT, query, re.IGNORECASE):
+        if re.search(r'올해|누계', query) and not re.search(r'\d{1,2}월', query):
+            _pb_period = "올해"
+        elif re.search(r'(\d{2,4})년', query) and not re.search(r'\d{1,2}월', query):
+            _pb_year = int(re.search(r'(\d{2,4})년', query).group(1))
+            _pb_period = str(_pb_year + 2000 if _pb_year < 100 else _pb_year)
+        elif re.search(r'\d{1,2}월', query):
+            _, _pb_period = _extract_month_year(query)
+        else:
+            _pb_latest = _safe_query(f"SELECT MAX(`날짜`) AS mx FROM {T_PROFIT}", raw=True)
+            _pb_period = str(_pb_latest[0]["mx"])[:7].replace("-", "") if _pb_latest and _pb_latest[0].get("mx") else _extract_month_year("")[1]
+        logger.info(f"[콜백] 사업부수익성: business={_profit_business}, period={_pb_period}")
+        try:
+            _pb_text = _fetch_profit_org(_profit_business, _pb_period, "사업부", "사업부")
+            _pb_qr = _profit_qr_nav(_profit_business, _pb_period)
+            _send_kakao_callback_qr(callback_url, _to_kakao_text(_pb_text + _PROFIT_NAME_GUIDE), _pb_qr, "사업부수익성")
+        except Exception as e:
+            logger.error(f"[콜백] 사업부수익성 오류: {e}")
+            _send_kakao_callback(callback_url, "⚠️ 사업부 수익성 조회 중 오류가 발생했습니다.", "사업부수익성")
         return
 
     # ─── 특정 브랜드/거래처명 수익성 (월 없는 경우 → 최신 월 기본값) ─────
@@ -5581,6 +5806,34 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
     def _send_callback(text: str):
         _send_kakao_callback(callback_url, text, "콜백")
 
+    # ─── 미인식 질문 처리: 공개 FAQ 자동응답 → 없으면 VOC 접수 (Dify 기본 차단) ───
+    # 여기까지 도달했다는 것은 위의 직접 처리 규칙에 걸리지 않았다는 뜻이다.
+    try:
+        _faq = admin_db.find_published_faq(query)
+    except Exception as _fe:
+        logger.warning(f"[VOC] 공개 FAQ 조회 실패: {_fe}")
+        _faq = None
+    if _faq:
+        logger.info(f"[VOC] 공개 FAQ 자동응답: faq_id={_faq.get('faq_id')}")
+        _send_kakao_callback_qr(
+            callback_url, _to_kakao_text(_faq.get("answer", "")), _MAIN_MENU_QR, "FAQ자동응답"
+        )
+        return
+
+    if not _DIFY_FALLBACK_ENABLED:
+        try:
+            _voc_user = _load_users().get(user_id, {})
+            _voc_case_id = admin_db.record_unanswered_question(
+                query, user_id,
+                user_name=_voc_user.get("name", ""),
+                team=_voc_user.get("team", ""),
+            )
+            logger.info(f"[VOC] 미인식 질문 접수: case_id={_voc_case_id}, query={query[:60]}")
+        except Exception as _ve:
+            logger.error(f"[VOC] 미인식 질문 접수 실패: {_ve}")
+        _send_kakao_callback_qr(callback_url, _VOC_GUIDE_MESSAGE, _MAIN_MENU_QR, "VOC접수")
+        return
+
     # Dify 쿼리에 사업부 제한 항상 주입 (이 챗봇은 외식식재사업부 전용)
     ctx = _user_last_sales.get(user_id)
     scope = ctx["target_name"] if ctx else "외식식재사업부"
@@ -5589,7 +5842,7 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
     prev_year = str(int(current_year) - 1)
     dify_query = (
         f"[SQL 작성 규칙]\n"
-        f"- 테이블: h_hmfo.gd_dcube.`01_sap_sales_custmasters`\n"
+        f"- 테이블: h_hmfo_fsi_dm.gd_rst_ing.sales_custmasters_compat_v\n"
         f"- 한글 컬럼명에는 반드시 백틱(`) 사용\n"
         f"- 조회 범위: `{scope_key}`='{scope}' 필터 필수\n"
         f"- `년월` 컬럼은 'yyyyMM' 형식 문자열 (ex: '202603')\n"

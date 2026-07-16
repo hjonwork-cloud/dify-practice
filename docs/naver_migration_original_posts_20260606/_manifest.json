@@ -1,0 +1,238 @@
+{
+  "generated_at": "2026-06-06",
+  "source_table": "e:\\git-copilot\\dify-practice\\docs\\naver_title_suggestions_20260606.md",
+  "exclude_keywords": [
+    "[티스토리운영]",
+    "네이버서치어드바이저",
+    "구글서치콘솔",
+    "티스토리 애드센스"
+  ],
+  "included_count": 29,
+  "excluded": [
+    {
+      "post_id": 9,
+      "title": "[티스토리운영] 네이버서치어드바이저#1 - 네이버에 내 티스토리를 올려보자!",
+      "url": "https://alliwantischicken.tistory.com/9"
+    },
+    {
+      "post_id": 10,
+      "title": "[티스토리운영] 네이버서치어드바이저#2 - 네이버에 내 블로그를 띄워보자.",
+      "url": "https://alliwantischicken.tistory.com/10"
+    },
+    {
+      "post_id": 11,
+      "title": "[티스토리운영] 구글서치콘솔#1 - RSS 제출, 사이트맵 간단한 방법으로 제출",
+      "url": "https://alliwantischicken.tistory.com/11"
+    },
+    {
+      "post_id": 22,
+      "title": "[티스토리 애드센스 신청하기] 내 글에 광고를 달아보자. 심사 진행중",
+      "url": "https://alliwantischicken.tistory.com/22"
+    }
+  ],
+  "files": [
+    {
+      "post_id": 2,
+      "old_title": "[CJ × 제주맥주] 괴식의 정점을 찍은 두 기업의 콜라보",
+      "suggested_title": "CJ 제주맥주 콜라보 후기, 맥주 맛 평가 정리",
+      "url": "https://alliwantischicken.tistory.com/2",
+      "file": "02_CJ_제주맥주_콜라보_후기_맥주_맛_평가_정리.md"
+    },
+    {
+      "post_id": 3,
+      "old_title": "[결혼준비] 웨딩밴드, 뭐 어렵지 않더라. - 코이누르 웨딩밴드 후기",
+      "suggested_title": "웨딩밴드 결혼준비, 코이누르 구매 후기 정리",
+      "url": "https://alliwantischicken.tistory.com/3",
+      "file": "03_웨딩밴드_결혼준비_코이누르_구매_후기_정리.md"
+    },
+    {
+      "post_id": 4,
+      "old_title": "[판교맛집] 스포키 - 판교 테크노벨리에서 건강함을 찾다.",
+      "suggested_title": "판교맛집 스포키 후기, 테크노밸리 건강식 추천",
+      "url": "https://alliwantischicken.tistory.com/4",
+      "file": "04_판교맛집_스포키_후기_테크노밸리_건강식_추천.md"
+    },
+    {
+      "post_id": 5,
+      "old_title": "[노량진수산시장] 킹크랩을 시중가 보다 반값에 구입할 수있다고???",
+      "suggested_title": "노량진수산시장 킹크랩 가격, 반값 구매 후기",
+      "url": "https://alliwantischicken.tistory.com/5",
+      "file": "05_노량진수산시장_킹크랩_가격_반값_구매_후기.md"
+    },
+    {
+      "post_id": 6,
+      "old_title": "[창원맛집/진해맛집] 이름은 김해횟집. 후회하지 않는 대구탕 찐맛집",
+      "suggested_title": "창원맛집 진해맛집, 김해횟집 대구탕 후기",
+      "url": "https://alliwantischicken.tistory.com/6",
+      "file": "06_창원맛집_진해맛집_김해횟집_대구탕_후기.md"
+    },
+    {
+      "post_id": 7,
+      "old_title": "[노량진수산시장] 새벽시장에서 3.7KG 킹크랩 구매 후 시식까지(FEAT. 원소주)",
+      "suggested_title": "노량진수산시장 킹크랩 후기, 새벽시장 구매팁",
+      "url": "https://alliwantischicken.tistory.com/7",
+      "file": "07_노량진수산시장_킹크랩_후기_새벽시장_구매팁.md"
+    },
+    {
+      "post_id": 8,
+      "old_title": "[마산24시국밥맛집] 24시남양돼지국밥 - 고속터미널 맛집, 서울 가기 전에 한 그릇 뚝딱.",
+      "suggested_title": "마산 24시 국밥맛집, 남양돼지국밥 후기 정리",
+      "url": "https://alliwantischicken.tistory.com/8",
+      "file": "08_마산_24시_국밥맛집_남양돼지국밥_후기_정리.md"
+    },
+    {
+      "post_id": 12,
+      "old_title": "[마산맛집/갈비맛집] 신태극갈비 - 예약하지 않으면 웨이팅 필수, 마산 갈비맛집",
+      "suggested_title": "마산 갈비맛집 신태극갈비 후기, 예약 팁 정리",
+      "url": "https://alliwantischicken.tistory.com/12",
+      "file": "12_마산_갈비맛집_신태극갈비_후기_예약_팁_정리.md"
+    },
+    {
+      "post_id": 13,
+      "old_title": "[황금향꿀팁] 귤 쉽게 까는 법, 황금향 쉽게 까는 법!",
+      "suggested_title": "황금향 까는 법, 귤 쉽게 까는 생활 꿀팁 정리",
+      "url": "https://alliwantischicken.tistory.com/13",
+      "file": "13_황금향_까는_법_귤_쉽게_까는_생활_꿀팁_정리.md"
+    },
+    {
+      "post_id": 14,
+      "old_title": "[평촌맛집]#1 평촌 특수부위 맛집, 안양장군집.",
+      "suggested_title": "평촌맛집 안양장군집 후기, 특수부위 메뉴 추천",
+      "url": "https://alliwantischicken.tistory.com/14",
+      "file": "14_평촌맛집_안양장군집_후기_특수부위_메뉴_추천.md"
+    },
+    {
+      "post_id": 15,
+      "old_title": "[캠핑용품리뷰] #1프리미엄 티탄 랜턴 - 코베아 티타늄 랜턴 득템 후기!(내돈내산)",
+      "suggested_title": "코베아 티타늄 랜턴 후기, 캠핑용품 추천 정리",
+      "url": "https://alliwantischicken.tistory.com/15",
+      "file": "15_코베아_티타늄_랜턴_후기_캠핑용품_추천_정리.md"
+    },
+    {
+      "post_id": 16,
+      "old_title": "[판교맛집] 베트남 음식점 안안 - 베트남 음식이 정말 이렇다면 베트남을 가보고 싶다.",
+      "suggested_title": "판교맛집 안안 후기, 베트남 음식 메뉴 추천",
+      "url": "https://alliwantischicken.tistory.com/16",
+      "file": "16_판교맛집_안안_후기_베트남_음식_메뉴_추천.md"
+    },
+    {
+      "post_id": 17,
+      "old_title": "[시음기] 라프로익 10년 - 초보자 추천, 호불호 O, 독특한 위스키를 즐기다.",
+      "suggested_title": "라프로익 10년 시음기, 위스키 초보자 추천",
+      "url": "https://alliwantischicken.tistory.com/17",
+      "file": "17_라프로익_10년_시음기_위스키_초보자_추천.md"
+    },
+    {
+      "post_id": 18,
+      "old_title": "[시음기] 삐아프x제주맥주 - 한정판 맥주! 초콜릿 맥주를 드셔보셨나요?",
+      "suggested_title": "삐아프 제주맥주 시음기, 한정판 초콜릿 맥주 후기",
+      "url": "https://alliwantischicken.tistory.com/18",
+      "file": "18_삐아프_제주맥주_시음기_한정판_초콜릿_맥주_후기.md"
+    },
+    {
+      "post_id": 19,
+      "old_title": "[2023 프랜차이즈 박람회 참관후기] 참가 업체 정보! 분위기! 주차 꿀팁!",
+      "suggested_title": "프랜차이즈 박람회 후기, 참가업체와 주차 팁 정리",
+      "url": "https://alliwantischicken.tistory.com/19",
+      "file": "19_프랜차이즈_박람회_후기_참가업체와_주차_팁_정리.md"
+    },
+    {
+      "post_id": 20,
+      "old_title": "[선정릉맛집] 카레에 진심인 오뚜기가 만든 맛집! 롤리폴리 꼬또",
+      "suggested_title": "선정릉맛집 롤리폴리꼬또 후기, 오뚜기 카레 맛집",
+      "url": "https://alliwantischicken.tistory.com/20",
+      "file": "20_선정릉맛집_롤리폴리꼬또_후기_오뚜기_카레_맛집.md"
+    },
+    {
+      "post_id": 21,
+      "old_title": "[연남동 맛집] 굴짬뽕이 괜찮은 식당",
+      "suggested_title": "연남동 맛집 후기, 굴짬뽕 메뉴 추천 포인트",
+      "url": "https://alliwantischicken.tistory.com/21",
+      "file": "21_연남동_맛집_후기_굴짬뽕_메뉴_추천_포인트.md"
+    },
+    {
+      "post_id": 23,
+      "old_title": "[양양 바다캠핑장] 비바코 로마 리빙쉘 텐트와 2박 후기!(Feat. 이승기치킨)",
+      "suggested_title": "양양 바다캠핑장 후기, 비바코 로마 리빙쉘 2박",
+      "url": "https://alliwantischicken.tistory.com/23",
+      "file": "23_양양_바다캠핑장_후기_비바코_로마_리빙쉘_2박.md"
+    },
+    {
+      "post_id": 25,
+      "old_title": "[제로페이] 농할상품권 30프로 싸게 사는법! 구매후기(상품권 3차 발행일은?)",
+      "suggested_title": "제로페이 농할상품권 구매방법, 30% 할인 후기",
+      "url": "https://alliwantischicken.tistory.com/25",
+      "file": "25_제로페이_농할상품권_구매방법_30_할인_후기.md"
+    },
+    {
+      "post_id": 26,
+      "old_title": "[강원도겨울여행] 첫 번째 이야기 - 원주 카센터와 정선 맛집 생생한 후기",
+      "suggested_title": "강원도 겨울여행 코스, 원주 정선 맛집 후기",
+      "url": "https://alliwantischicken.tistory.com/26",
+      "file": "26_강원도_겨울여행_코스_원주_정선_맛집_후기.md"
+    },
+    {
+      "post_id": 27,
+      "old_title": "[강원도겨울여행] 두 번째 이야기 - 하이원리조트 뽕뽑기",
+      "suggested_title": "강원도 겨울여행 2편, 하이원리조트 이용 후기",
+      "url": "https://alliwantischicken.tistory.com/27",
+      "file": "27_강원도_겨울여행_2편_하이원리조트_이용_후기.md"
+    },
+    {
+      "post_id": 28,
+      "old_title": "[강원도겨울여행] 세 번째 이야기 - 평창에서 스키장 말고 가볼만한 곳!",
+      "suggested_title": "평창 겨울여행 코스, 스키장 외 가볼만한 곳",
+      "url": "https://alliwantischicken.tistory.com/28",
+      "file": "28_평창_겨울여행_코스_스키장_외_가볼만한_곳.md"
+    },
+    {
+      "post_id": 29,
+      "old_title": "[2023 벚꽃놀이] 내년에도 벚꽃놀이는 양재천!",
+      "suggested_title": "양재천 벚꽃놀이 후기, 서울 봄꽃 명소 추천",
+      "url": "https://alliwantischicken.tistory.com/29",
+      "file": "29_양재천_벚꽃놀이_후기_서울_봄꽃_명소_추천.md"
+    },
+    {
+      "post_id": 30,
+      "old_title": "[금귤정과 레시피] - 세척부터 건조까지(건조기 X)",
+      "suggested_title": "금귤정과 레시피, 세척 건조 만드는 법 정리",
+      "url": "https://alliwantischicken.tistory.com/30",
+      "file": "30_금귤정과_레시피_세척_건조_만드는_법_정리.md"
+    },
+    {
+      "post_id": 31,
+      "old_title": "[제품후기] 갤럭시Z플립5 풀커버 케이스 추천",
+      "suggested_title": "갤럭시 Z플립5 케이스 추천, 풀커버 실사용 후기",
+      "url": "https://alliwantischicken.tistory.com/31",
+      "file": "31_갤럭시_Z플립5_케이스_추천_풀커버_실사용_후기.md"
+    },
+    {
+      "post_id": 32,
+      "old_title": "[캠핑후기] #1. 센희캠쀼의 첫 캠핑",
+      "suggested_title": "캠핑후기 첫 캠핑 기록, 초보 캠핑 준비물 정리",
+      "url": "https://alliwantischicken.tistory.com/32",
+      "file": "32_캠핑후기_첫_캠핑_기록_초보_캠핑_준비물_정리.md"
+    },
+    {
+      "post_id": 33,
+      "old_title": "[제품후기] 오우드 원목 침대 프레임 혼수침대프레임(이제 그만 뛰어;;)",
+      "suggested_title": "오우드 원목 침대프레임 후기, 혼수 가구 추천",
+      "url": "https://alliwantischicken.tistory.com/33",
+      "file": "33_오우드_원목_침대프레임_후기_혼수_가구_추천.md"
+    },
+    {
+      "post_id": 34,
+      "old_title": "[캠핑후기] #2 헐레벌떡, 노지 찾아 삼만리",
+      "suggested_title": "노지캠핑 후기, 캠핑장소 찾기 실전 팁 정리",
+      "url": "https://alliwantischicken.tistory.com/34",
+      "file": "34_노지캠핑_후기_캠핑장소_찾기_실전_팁_정리.md"
+    },
+    {
+      "post_id": 35,
+      "old_title": "[캠핑후기] #3 캠핑장에서 차박을!? 솔잎향캠핑파크",
+      "suggested_title": "차박 캠핑후기, 솔잎향캠핑파크 이용 팁 정리",
+      "url": "https://alliwantischicken.tistory.com/35",
+      "file": "35_차박_캠핑후기_솔잎향캠핑파크_이용_팁_정리.md"
+    }
+  ]
+}

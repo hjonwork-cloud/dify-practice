@@ -1,0 +1,70 @@
+{% extends 'admin_base.html' %}{% block title %}사용자 관리{% endblock %}{% block content %}
+<div class="page-heading"><div><p class="eyebrow">ACCESS CONTROL</p><h1>사용자 관리</h1><p>사업부 조직원 등록 현황을 확인하고, 신규 입사자 등록·퇴사자 취소를 처리합니다.</p></div><div class="heading-badge">등록 {{ registered_count }} · 조직원 {{ members|length }}</div></div>
+
+{% if request.query_params.get('added') %}<div class="alert success">조직원으로 추가했습니다. 해당 직원이 카카오봇에서 <code>이름 사번</code> 입력으로 등록할 수 있습니다.</div>{% endif %}
+{% if request.query_params.get('canceled') %}<div class="alert success">등록을 취소하고 블랙리스트에 추가했습니다. 재등록이 차단됩니다.</div>{% endif %}
+{% if request.query_params.get('unblocked') %}<div class="alert success">블랙리스트에서 해제했습니다.</div>{% endif %}
+{% if request.query_params.get('team_changed') %}<div class="alert success">소속을 변경했습니다.</div>{% endif %}
+{% if request.query_params.get('error') %}<div class="alert error">{{ request.query_params.get('error') }}</div>{% endif %}
+
+<section class="grid-2">
+  <article class="panel form-panel"><div class="panel-head"><div><p class="eyebrow">ADD MEMBER</p><h2>조직원 추가</h2></div><button type="button" class="btn tiny primary js-toggle-form" data-target="addForm">+ 추가</button></div>
+    <form id="addForm" method="post" action="/admin/users/add" hidden><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <div class="form-row-3"><label>이름<input name="name" required placeholder="홍길동"></label><label>사번<input name="emp_code" required pattern="\d{6,10}" placeholder="20230001"></label><label>소속<select name="team"><option value="">자동 조회</option>{% for t in team_options %}<option value="{{ t }}">{{ t }}</option>{% endfor %}</select></label></div>
+      <button class="btn primary full" type="submit">조직원 추가</button>
+    </form>
+  </article>
+  <article class="panel form-panel"><div class="panel-head"><div><p class="eyebrow">RESIGNATION</p><h2>퇴사자 등록 취소</h2></div><button type="button" class="btn tiny danger js-toggle-form" data-target="cancelForm">등록 취소</button></div>
+    <form id="cancelForm" method="post" action="/admin/users/cancel" class="js-confirm" data-confirm="정말 등록을 취소하고 재등록을 차단하시겠습니까?" hidden><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <div class="form-row"><label>이름<input name="name" placeholder="홍길동"></label><label>사번<input name="emp_code" required pattern="\d{6,10}" placeholder="20230001"></label></div>
+      <label class="hint-label">퇴사자는 등록 해제 후 블랙리스트에 추가되어 재등록이 영구 차단됩니다.</label>
+      <button class="btn danger full" type="submit">등록 취소 · 블랙리스트</button>
+    </form>
+  </article>
+</section>
+
+<section class="panel table-panel"><div class="panel-head"><div><p class="eyebrow">ORGANIZATION</p><h2>외식식재사업부 조직원</h2></div><div class="org-head-actions"><span class="team-batch-info" hidden></span><button type="button" id="teamBatchSave" class="btn tiny primary" hidden>변경내역 저장</button><input class="table-search" data-target="orgTable" placeholder="이름·사번·팀 검색"></div></div>
+{% if members %}
+<div class="table-scroll"><table id="orgTable"><thead><tr><th>이름</th><th>사번</th><th>소속</th><th>상태</th><th>처리</th></tr></thead><tbody>
+{% for m in members %}
+<tr data-search="{{ m.name }} {{ m.emp_code }} {{ m.team }}">
+  <td><b>{{ m.name }}</b></td><td>{{ m.emp_code }}</td>
+  <td>
+    <select class="team-select" data-emp="{{ m.emp_code }}" data-orig="{{ m.team }}" aria-label="{{ m.name }} 소속">
+      {% if m.team and m.team not in team_options %}<option value="{{ m.team }}" selected>{{ m.team }} (현재)</option>{% endif %}
+      {% for t in team_options %}<option value="{{ t }}" {% if m.team == t %}selected{% endif %}>{{ t }}</option>{% endfor %}
+    </select>
+  </td>
+  <td>{% if m.blacklisted %}<span class="status closed">차단</span>{% elif m.registered %}<span class="status published">등록</span>{% else %}<span class="status">미등록</span>{% endif %}</td>
+  <td>
+    {% if m.blacklisted %}
+      <form method="post" action="/admin/users/unblock" class="inline"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="emp_code" value="{{ m.emp_code }}"><button class="btn tiny" type="submit">차단 해제</button></form>
+    {% elif m.registered %}
+      <form method="post" action="/admin/users/cancel" class="inline js-confirm" data-confirm="{{ m.name }}({{ m.emp_code }}) 등록을 취소하고 재등록을 차단할까요?"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="emp_code" value="{{ m.emp_code }}"><input type="hidden" name="name" value="{{ m.name }}"><button class="btn tiny danger" type="submit">등록 취소</button></form>
+    {% else %}
+      <button class="btn tiny" type="button" disabled title="카카오봇에서 본인이 직접 등록합니다">미등록</button>
+    {% endif %}
+  </td>
+</tr>
+{% endfor %}
+</tbody></table></div>
+{% else %}
+<div class="empty"><b>조직원 목록을 불러오지 못했습니다.</b><span>매출 데이터(Databricks) 조회 권한을 확인해주세요. 목록 조회와 무관하게 위 <b>신규 입사자 수기 등록</b>은 사용할 수 있습니다.</span></div>
+{% endif %}
+</section>
+
+<section class="grid-2">
+  <article class="panel table-panel"><div class="panel-head"><div><p class="eyebrow">REGISTERED</p><h2>등록 사용자</h2></div><span class="count-badge">{{ registered_users|length }}명</span></div>
+  <div class="table-scroll"><table><thead><tr><th>이름</th><th>사번</th><th>소속</th><th>역할</th><th>등록일</th></tr></thead><tbody>
+  {% for u in registered_users %}<tr><td><b>{{ u.name or '-' }}</b></td><td>{{ u.emp_code or '-' }}</td><td>{{ u.team or '-' }}</td><td>{% if u.role == 'admin' %}<span class="status reviewing">admin</span>{% else %}user{% endif %}</td><td>{{ (u.registered_at or '-')[:10] }}</td></tr>{% else %}<tr><td colspan="5">등록 사용자가 없습니다.</td></tr>{% endfor %}
+  </tbody></table></div></article>
+
+  <article class="panel table-panel"><div class="panel-head"><div><p class="eyebrow">BLOCKED</p><h2>블랙리스트</h2></div><span class="count-badge">{{ blacklist_rows|length }}명</span></div>
+  <div class="table-scroll"><table><thead><tr><th>이름</th><th>사번</th><th>처리</th></tr></thead><tbody>
+  {% for b in blacklist_rows %}<tr><td>{{ b.name or '-' }}</td><td>{{ b.emp_code }}</td><td><form method="post" action="/admin/users/unblock" class="inline"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="emp_code" value="{{ b.emp_code }}"><button class="btn tiny" type="submit">해제</button></form></td></tr>{% else %}<tr><td colspan="3">차단된 사번이 없습니다.</td></tr>{% endfor %}
+  </tbody></table></div></article>
+</section>
+
+<section class="panel table-panel"><div class="panel-head"><div><p class="eyebrow">WEB CONSOLE</p><h2>관리자 계정</h2></div><span class="count-badge">{{ admins|length }}명</span></div>
+<div class="table-scroll"><table><thead><tr><th>이름</th><th>계정</th><th>역할</th><th>최근 로그인</th></tr></thead><tbody>{% for a in admins %}<tr><td><b>{{ a.display_name }}</b></td><td>{{ a.username }}</td><td><span class="status reviewing">{{ a.role }}</span></td><td>{{ (a.last_login_at or '-')[:16] }}</td></tr>{% endfor %}</tbody></table></div></section>
+{% endblock %}
