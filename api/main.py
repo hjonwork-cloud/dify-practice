@@ -62,7 +62,8 @@ _VOC_GUIDE_MESSAGE = (
     "• 매출 실적 (사업부·팀·브랜드·거래처)\n"
     "• 수익성 / CM 분석\n"
     "• 미출고 현황\n"
-    "• 신규매출 조회\n\n"
+    "• 신규매출 조회\n"
+    "• 고객 여신 / 미수채권 현황\n\n"
     "문의하신 내용은 관리자에게 전달했어요.\n"
     "빠른 시일 내에 답변드릴 수 있도록 준비하겠습니다. 🙏"
 )
@@ -314,12 +315,15 @@ def run_query(sql: str, *, raw: bool = False) -> list[dict]:
 T_MAIN    = "h_hmfo_fsi_dm.gd_rst_ing.sales_custmasters_compat_v"
 T_MISULGO = "h_hmfo_fsi_dm.gd_rst_ing.unshipped_compat_v"
 T_PROFIT  = "h_hmfo.gd_dcube.`00_customers_cm`"          # 수익성
+T_AR      = "h_hmfo_fsi.gd_rst_ing.sap_zfird015_monthly_accounts_receivable_history_rst_ing_f"  # 고객 여신/미수채권
+T_CUSTOMER_MASTER = "h_hmfo_fsi.gd_rst_ing.sap_zsdrxd03_customers_master_rst_ing_d"  # 고객마스터
 
 # 수익성 인텐트 키워드 패턴 (CM/공헌이익/수익성 등 다양한 표현 통합)
 _PROFIT_KW_PAT = r'수익성|[Cc][Mm]\b|공헌이익률?|공헌이익율?'
 
 # 수익성 최신 기간 캐시 (1시간)
 _profit_latest_cache: tuple[float, str] = (0.0, "")
+_profit_latest_ym_cache: tuple[float, str] = (0.0, "")
 
 def _get_profit_latest_label() -> str:
     """T_PROFIT 테이블에서 가장 최근 확정 기간 레이블 동적 조회 (예: '2026년 4월')"""
@@ -338,6 +342,23 @@ def _get_profit_latest_label() -> str:
     except Exception as _e:
         logger.warning(f"[수익성최신기간] 조회 실패: {_e}")
     return "최신 데이터"
+
+
+def _get_profit_latest_ym() -> str:
+    """수익성(CM) 테이블의 최신 확정월(YYYYMM) 반환."""
+    global _profit_latest_ym_cache
+    cached_at, cached_ym = _profit_latest_ym_cache
+    if cached_ym and time.time() - cached_at < 3600:
+        return cached_ym
+    try:
+        rows = _safe_query(f"SELECT MAX(`날짜`) AS mx FROM {T_PROFIT}", raw=True)
+        if rows and rows[0].get("mx"):
+            ym = str(rows[0]["mx"])[:7].replace("-", "")
+            _profit_latest_ym_cache = (time.time(), ym)
+            return ym
+    except Exception as _e:
+        logger.warning(f"[수익성최신월] 조회 실패: {_e}")
+    return time.strftime("%Y%m")
 
 
 _NEW_CUST_DATE = "20251001"
@@ -2165,6 +2186,408 @@ def _extract_month_year(query: str) -> tuple[int, str]:
     return now.tm_mon, f"{cur_year}{now.tm_mon:02d}"
 
 
+def _sql_literal(value: str) -> str:
+    """SQL 문자열 리터럴용 단일따옴표 이스케이프."""
+    return str(value or "").replace("'", "''")
+
+
+def _format_won(value) -> str:
+    """원 단위 숫자 포맷. Databricks decimal 문자열/None 모두 허용."""
+    try:
+        return f"{int(round(float(value or 0))):,}원"
+    except (TypeError, ValueError):
+        return "0원"
+
+
+def _format_days(value) -> str:
+    try:
+        return f"{float(value):,.1f}일" if float(value) % 1 else f"{int(float(value)):,}일"
+    except (TypeError, ValueError):
+        return "-"
+
+
+def _extract_ar_customer_query(query: str) -> tuple[str, str, int, str] | None:
+    """여신/미수채권 질문에서 (고객코드, 고객명키워드, 월, YYYYMM) 추출."""
+    if not re.search(r'여신|미수\s*채권|미수금|미수\s*현황|미수\s*알려', query):
+        return None
+    # 미출고/미출은 기존 미출고 로직으로 보낸다.
+    if re.search(r'미출고|미출\s*고|미출\s*건|미출\s*있어|오늘\s*미출|어제\s*미출', query):
+        return None
+
+    month_num, yearmonth = _extract_month_year(query)
+    code_m = re.search(r'\b(\d{5,10})\b', query)
+    cust_code = code_m.group(1) if code_m else ""
+
+    name = query
+    name = re.sub(r'\d{2,4}년\s*\d{1,2}월|\d{1,2}월', ' ', name)
+    name = re.sub(r'\b\d{5,10}\b', ' ', name)
+    name = re.sub(r'(고객|거래처)?\s*(여신|미수\s*채권|미수채권|미수금|미수\s*현황)\s*(현황|조회|알려줘|알려|확인|볼래|보여줘|해줘)?', ' ', name)
+    name = re.sub(r'(기준|좀|현재|금일|오늘|당월|이번달|이번\s*달|알려줘|알려|조회|확인|현황|해줘|보여줘)', ' ', name)
+    name = re.sub(r'\s+', ' ', name).strip()
+    return cust_code, name, month_num, yearmonth
+
+
+def _fetch_ar_by_customer_code(cust_code: str, yearmonth: str) -> dict | None:
+    """고객코드+년월 기준 여신/미수채권 집계."""
+    code = _sql_literal(cust_code)
+    ym = _sql_literal(yearmonth)
+    rows = _safe_query(f"""
+        SELECT
+            MAX(`고객코드`) AS `고객코드`,
+            MAX(`고객명`) AS `고객명`,
+            MAX(`년월`) AS `년월`,
+            COALESCE(SUM(`전월말잔액`), 0) AS `전월말잔액`,
+            COALESCE(SUM(`당월매출`), 0) AS `당월매출`,
+            COALESCE(SUM(`당월회수`), 0) AS `당월회수`,
+            COALESCE(SUM(`현재잔액`), 0) AS `현재잔액`,
+            COALESCE(SUM(`미수채권합`), 0) AS `미수채권합`,
+            MAX(`회전일`) AS `회전일`,
+            MAX(`담보액`) AS `담보액`,
+            MAX(`기본여신`) AS `기본여신`,
+            MAX(`추가여신`) AS `추가여신`,
+            MAX(`추가여신종료일`) AS `추가여신종료일`,
+            MAX(`주문가능액`) AS `주문가능액`,
+            MAX(`지급조건`) AS `지급조건`,
+            MAX(`영업사원명`) AS `영업사원명`,
+            MAX(`지점명`) AS `지점명`
+        FROM {T_AR}
+        WHERE `고객코드` = '{code}'
+          AND `년월` = '{ym}'
+    """, raw=True)
+    if not rows:
+        return None
+    row = rows[0]
+    if not row.get("고객코드"):
+        return None
+    return row
+
+
+def _search_ar_customer_candidates(name_query: str, yearmonth: str, limit: int = 6) -> list[dict]:
+    """고객명 키워드로 고객 후보 검색. 공백 제거/토큰 AND 검색."""
+    keyword = (name_query or "").strip()
+    if not keyword:
+        return []
+    kw = _sql_literal(keyword)
+    kw_ns = _sql_literal(keyword.replace(" ", ""))
+    tokens = [t for t in re.split(r'\s+', keyword.replace('(', ' ').replace(')', ' ')) if len(t) >= 1]
+    token_cond = " AND ".join(
+        f"REPLACE(`고객명`, ' ', '') LIKE '%{_sql_literal(t.replace(' ', ''))}%'"
+        for t in tokens[:4]
+    )
+    like_cond = f"(`고객명` LIKE '%{kw}%' OR REPLACE(`고객명`, ' ', '') LIKE '%{kw_ns}%')"
+    if token_cond:
+        like_cond = f"({like_cond} OR ({token_cond}))"
+    ym = _sql_literal(yearmonth)
+    rows = _safe_query(f"""
+        SELECT
+            `고객코드`,
+            MAX(`고객명`) AS `고객명`,
+            COALESCE(SUM(`현재잔액`), 0) AS `현재잔액합`,
+            COALESCE(SUM(`당월매출`), 0) AS `당월매출합`,
+            MAX(`영업사원명`) AS `영업사원명`,
+            MAX(`지점명`) AS `지점명`
+        FROM {T_AR}
+        WHERE `년월` = '{ym}'
+          AND {like_cond}
+        GROUP BY `고객코드`
+                ORDER BY `현재잔액합` DESC, `당월매출합` DESC
+        LIMIT {int(limit)}
+    """, raw=True)
+    return rows or []
+
+
+def _build_ar_status_card(row: dict, yearmonth: str) -> str:
+    """고객 여신/미수채권 현황 답변 카드."""
+    y, m = yearmonth[:4], str(int(yearmonth[4:6]))
+    code = str(row.get("고객코드") or "-")
+    name = str(row.get("고객명") or "-")
+    sales_name = str(row.get("영업사원명") or "").strip()
+    team = str(row.get("지점명") or "").strip()
+    extra_end = str(row.get("추가여신종료일") or "").strip()
+    if extra_end in ("", "00000000", "None"):
+        extra_end = "-"
+    elif re.fullmatch(r'\d{8}', extra_end):
+        extra_end = f"{extra_end[:4]}-{extra_end[4:6]}-{extra_end[6:8]}"
+
+    lines = [
+        f"💳 고객 여신/미수채권 현황",
+        f"{y}년 {m}월 기준",
+        "",
+        f"🏢 {code}  {name}",
+    ]
+    if team or sales_name:
+        lines.append(f"담당: {team or '-'} / {sales_name or '-'}")
+    lines.extend([
+        "",
+        "[미수채권]",
+        f"전월말 잔액   {_format_won(row.get('전월말잔액'))}",
+        f"당월매출      {_format_won(row.get('당월매출'))}",
+        f"당월회수      {_format_won(row.get('당월회수'))}",
+        f"현재잔액      {_format_won(row.get('현재잔액'))}",
+        f"미수채권합    {_format_won(row.get('미수채권합'))}",
+        "",
+        f"⏱ 회전일      {_format_days(row.get('회전일'))}",
+        "",
+        "[여신/담보]",
+        f"담보액        {_format_won(row.get('담보액'))}",
+        f"기본여신      {_format_won(row.get('기본여신'))}",
+        f"추가여신      {_format_won(row.get('추가여신'))}",
+        f"주문가능액    {_format_won(row.get('주문가능액'))}",
+        f"추가여신 종료 {extra_end}",
+    ])
+    return "\n".join(lines)
+
+
+def _build_ar_candidate_text(keyword: str, yearmonth: str, candidates: list[dict]) -> str:
+    y, m = yearmonth[:4], str(int(yearmonth[4:6]))
+    lines = [
+        f"'{keyword}'과(와) 유사한 고객이 여러 건 있습니다.",
+        f"{y}년 {m}월 미수채권/여신을 조회할 고객을 선택해주세요.",
+        "",
+    ]
+    for i, c in enumerate(candidates, 1):
+        lines.append(
+            f"{i}. {c.get('고객코드')}  {c.get('고객명')}"
+            f"\n   잔액 {_format_won(c.get('현재잔액합'))} · 담당 {c.get('영업사원명') or '-'}"
+        )
+    return "\n".join(lines)
+
+
+_CUSTOMER_MASTER_COLS = [
+    "고객코드", "고객명", "사업자번호", "대표자", "전화번호", "이동전화번호",
+    "부서명", "지점명", "사원번호", "영업사원명", "VOC담당자",
+    "지급조건", "지급조건명", "가격그룹명", "배치명", "납품센터명",
+    "ZA대표거래처", "ZA대표거래처명", "FC본부", "FC본부명", "ZP본사", "ZP본부명", "ZB본부", "ZB본부명",
+    "사업자주소", "사업자상세주소", "사업장주소", "사업장상세주소", "사업주소", "사업장주소2",
+    "업태", "업종", "E_MAIL", "생성일자", "거래개시일", "거래종료일", "검색어", "LOEVM", "집계수행일자", "update_date",
+]
+_CUSTOMER_MASTER_SELECT = ",\n            ".join(f"`{c}`" for c in _CUSTOMER_MASTER_COLS)
+_CUSTOMER_MASTER_FIELD_LABEL = {
+    "master": "고객마스터",
+    "code": "고객코드",
+    "phone": "전화번호",
+    "address": "주소",
+    "payment": "지급조건",
+    "sales": "담당 영업사원",
+    "za": "ZA대표거래처",
+    "fc": "FC본부",
+    "zp": "ZP본사",
+    "zb": "ZB본부",
+}
+
+
+def _clean_customer_master_value(value) -> str:
+    text = str(value or "").strip()
+    if text in ("None", "null", "NULL", "00000000"):
+        return ""
+    return text
+
+
+def _join_nonempty(*values: str, sep: str = " ") -> str:
+    return sep.join(v for v in (_clean_customer_master_value(x) for x in values) if v)
+
+
+def _format_yyyymmdd(value) -> str:
+    text = _clean_customer_master_value(value)
+    if re.fullmatch(r'\d{8}', text):
+        return f"{text[:4]}-{text[4:6]}-{text[6:8]}"
+    return text
+
+
+def _detect_customer_master_intent(query: str) -> str | None:
+    q = query.strip()
+    if re.search(r'(?:ZC|zc)\s*(?:코드)?|8\s*코드|팔\s*코드|(?:FC|fc)\s*(?:본사|본부|코드)?', q, re.IGNORECASE):
+        return "fc"
+    if re.search(r'(?:ZA|za)\s*(?:대표거래처|본사|코드)?', q, re.IGNORECASE):
+        return "za"
+    if re.search(r'(?:ZP|zp)\s*(?:본사|본부|코드)?', q, re.IGNORECASE):
+        return "zp"
+    if re.search(r'(?:ZB|zb)\s*(?:본부|코드)?', q, re.IGNORECASE):
+        return "zb"
+    if re.search(r'전화|연락처|핸드폰|휴대폰|모바일|이동전화', q):
+        return "phone"
+    if re.search(r'주소|위치|어디', q):
+        return "address"
+    if re.search(r'지급\s*조건|결제\s*조건|수금\s*조건|여신\s*조건', q):
+        return "payment"
+    if re.search(r'영업\s*사원|담당\s*자|담당\s*영업|담당자|사원\s*누구', q):
+        return "sales"
+    if re.search(r'고객\s*코드|거래처\s*코드|코드\s*(?:조회|뭐|알려)', q):
+        return "code"
+    if re.search(r'고객\s*마스터|마스터\s*조회|고객\s*정보|고객정보', q):
+        return "master"
+    return None
+
+
+def _extract_customer_master_query(query: str) -> tuple[str, str, str] | None:
+    """고객마스터 질문에서 (고객코드, 고객명키워드, intent) 추출."""
+    intent = _detect_customer_master_intent(query)
+    if not intent:
+        return None
+    code_m = re.search(r'\b(\d{5,10})\b', query)
+    cust_code = code_m.group(1) if code_m else ""
+    name = query.replace("*", " ")
+    name = re.sub(r'\b\d{5,10}\b', ' ', name)
+    name = re.sub(r'(?:ZA|ZP|ZB|FC|ZC|za|zp|zb|fc|zc)\s*(?:대표거래처|본사|본부|코드)?', ' ', name)
+    name = re.sub(r'8\s*코드|팔\s*코드', ' ', name)
+    name = re.sub(r'(고객|거래처)?\s*(마스터|고객\s*마스터|고객\s*정보|고객정보)\s*(조회|알려줘|알려|확인|뭐야|뭐|해줘|보여줘)?', ' ', name)
+    name = re.sub(r'(고객|거래처)?\s*코드\s*(조회|알려줘|알려|확인|뭐야|뭐|해줘)?', ' ', name)
+    name = re.sub(r'(전화번호|전화|연락처|핸드폰|휴대폰|모바일|이동전화번호|이동전화)', ' ', name)
+    name = re.sub(r'(주소|위치|어디|지급\s*조건|결제\s*조건|수금\s*조건|영업\s*사원|담당\s*자|담당자|누구야|누구|뭐야|뭐|알려줘|알려|조회|확인|해줘|보여줘)', ' ', name)
+    name = re.sub(r'\s+', ' ', name).strip()
+    return cust_code, name, intent
+
+
+def _fetch_customer_master_by_code(cust_code: str) -> dict | None:
+    code = _sql_literal(cust_code)
+    rows = _safe_query(f"""
+        SELECT {_CUSTOMER_MASTER_SELECT}
+        FROM {T_CUSTOMER_MASTER}
+        WHERE `고객코드` = '{code}'
+        ORDER BY CASE WHEN COALESCE(`LOEVM`, '') = '' THEN 0 ELSE 1 END,
+                 `집계수행일자` DESC,
+                 `update_date` DESC
+        LIMIT 1
+    """, raw=True)
+    return rows[0] if rows else None
+
+
+def _search_customer_master_candidates(name_query: str, limit: int = 6) -> list[dict]:
+    keyword = (name_query or "").replace("*", " ").strip()
+    if not keyword:
+        return []
+    kw = _sql_literal(keyword)
+    kw_ns = _sql_literal(re.sub(r'\s+', '', keyword))
+    tokens = [t for t in re.split(r'\s+', re.sub(r'[()]+', ' ', keyword)) if t][:5]
+    sql_tokens = [_sql_literal(re.sub(r'\s+', '', t)) for t in tokens]
+    token_cond = " AND ".join(
+        "(" + " OR ".join([
+            f"REPLACE(`고객명`, ' ', '') LIKE '%{t}%'",
+            f"REPLACE(COALESCE(`검색어`, ''), ' ', '') LIKE '%{t}%'",
+            f"REPLACE(COALESCE(`사업주소`, ''), ' ', '') LIKE '%{t}%'",
+        ]) + ")"
+        for t in sql_tokens
+    )
+    like_cond = (
+        f"(`고객명` LIKE '%{kw}%' OR REPLACE(`고객명`, ' ', '') LIKE '%{kw_ns}%' "
+        f"OR REPLACE(COALESCE(`검색어`, ''), ' ', '') LIKE '%{kw_ns}%')"
+    )
+    if token_cond:
+        like_cond = f"({like_cond} OR ({token_cond}))"
+    rows = _safe_query(f"""
+        SELECT {_CUSTOMER_MASTER_SELECT}
+        FROM {T_CUSTOMER_MASTER}
+        WHERE {like_cond}
+        ORDER BY CASE WHEN COALESCE(`LOEVM`, '') = '' THEN 0 ELSE 1 END,
+                 CASE WHEN REPLACE(`고객명`, ' ', '') = '{kw_ns}' THEN 0 ELSE 1 END,
+                 `집계수행일자` DESC,
+                 `update_date` DESC
+        LIMIT {max(int(limit) * 4, 20)}
+    """, raw=True)
+    seen: set[str] = set()
+    result: list[dict] = []
+    for row in rows or []:
+        code = str(row.get("고객코드") or "")
+        if not code or code in seen:
+            continue
+        seen.add(code)
+        result.append(row)
+        if len(result) >= int(limit):
+            break
+    return result
+
+
+def _build_customer_master_card(row: dict) -> str:
+    code = _clean_customer_master_value(row.get("고객코드")) or "-"
+    name = _clean_customer_master_value(row.get("고객명")) or "-"
+    phone = _clean_customer_master_value(row.get("전화번호")) or "-"
+    mobile = _clean_customer_master_value(row.get("이동전화번호")) or "-"
+    sales = _join_nonempty(row.get("사원번호"), row.get("영업사원명"), sep=" / ") or "-"
+    pay = _join_nonempty(row.get("지급조건"), row.get("지급조건명"), sep=" / ") or "-"
+    addr = _clean_customer_master_value(row.get("사업주소")) or _join_nonempty(row.get("사업자주소"), row.get("사업자상세주소")) or "-"
+    lines = [
+        "🧾 고객마스터 조회",
+        f"{code}  {name}",
+        "",
+        "[기본정보]",
+        f"대표자: {_clean_customer_master_value(row.get('대표자')) or '-'}",
+        f"사업자번호: {_clean_customer_master_value(row.get('사업자번호')) or '-'}",
+        f"전화번호: {phone}",
+        f"이동전화번호: {mobile}",
+        f"주소: {addr}",
+        "",
+        "[담당/거래조건]",
+        f"담당: {_clean_customer_master_value(row.get('부서명')) or '-'} / {sales}",
+        f"지급조건: {pay}",
+        f"가격그룹: {_clean_customer_master_value(row.get('가격그룹명')) or '-'}",
+        f"배치/센터: {_clean_customer_master_value(row.get('배치명')) or '-'} / {_clean_customer_master_value(row.get('납품센터명')) or '-'}",
+        "",
+        "[계층코드]",
+        f"ZA대표거래처: {_join_nonempty(row.get('ZA대표거래처'), row.get('ZA대표거래처명'), sep=' / ') or '-'}",
+        f"FC본부: {_join_nonempty(row.get('FC본부'), row.get('FC본부명'), sep=' / ') or '-'}",
+        f"ZP본사: {_join_nonempty(row.get('ZP본사'), row.get('ZP본부명'), sep=' / ') or '-'}",
+        f"ZB본부: {_join_nonempty(row.get('ZB본부'), row.get('ZB본부명'), sep=' / ') or '-'}",
+        "",
+        f"생성일자: {_format_yyyymmdd(row.get('생성일자')) or '-'}",
+        f"거래개시일: {_format_yyyymmdd(row.get('거래개시일')) or '-'}",
+    ]
+    end_date = _format_yyyymmdd(row.get("거래종료일"))
+    if end_date:
+        lines.append(f"거래종료일: {end_date}")
+    return "\n".join(lines)
+
+
+def _build_customer_master_field_answer(row: dict, intent: str) -> str:
+    code = _clean_customer_master_value(row.get("고객코드")) or "-"
+    name = _clean_customer_master_value(row.get("고객명")) or "-"
+    header = [f"🧾 고객마스터 — {_CUSTOMER_MASTER_FIELD_LABEL.get(intent, '조회')}", f"{code}  {name}", ""]
+    if intent == "code":
+        body = [f"고객코드: {code}"]
+    elif intent == "phone":
+        body = [f"전화번호: {_clean_customer_master_value(row.get('전화번호')) or '-'}", f"이동전화번호: {_clean_customer_master_value(row.get('이동전화번호')) or '-'}"]
+    elif intent == "address":
+        biz_addr = _join_nonempty(row.get("사업자주소"), row.get("사업자상세주소"))
+        site_addr = _join_nonempty(row.get("사업장주소"), row.get("사업장상세주소"))
+        full_addr = _clean_customer_master_value(row.get("사업주소")) or biz_addr or site_addr or _clean_customer_master_value(row.get("사업장주소2"))
+        body = [f"주소: {full_addr or '-'}"]
+        if site_addr and site_addr != full_addr:
+            body.append(f"사업장주소: {site_addr}")
+    elif intent == "payment":
+        body = [f"지급조건: {_join_nonempty(row.get('지급조건'), row.get('지급조건명'), sep=' / ') or '-'}"]
+    elif intent == "sales":
+        body = [f"담당 영업사원: {_join_nonempty(row.get('사원번호'), row.get('영업사원명'), sep=' / ') or '-'}"]
+        voc = _clean_customer_master_value(row.get("VOC담당자"))
+        if voc:
+            body.append(f"VOC담당자: {voc}")
+    elif intent in ("za", "fc", "zp", "zb"):
+        pair = {
+            "za": ("ZA대표거래처", "ZA대표거래처명"),
+            "fc": ("FC본부", "FC본부명"),
+            "zp": ("ZP본사", "ZP본부명"),
+            "zb": ("ZB본부", "ZB본부명"),
+        }[intent]
+        body = [f"{_CUSTOMER_MASTER_FIELD_LABEL[intent]}: {_join_nonempty(row.get(pair[0]), row.get(pair[1]), sep=' / ') or '-'}"]
+    else:
+        return _build_customer_master_card(row)
+    return "\n".join(header + body)
+
+
+def _build_customer_master_candidate_text(keyword: str, candidates: list[dict], intent: str) -> str:
+    label = _CUSTOMER_MASTER_FIELD_LABEL.get(intent, "고객마스터")
+    lines = [
+        f"'{keyword}'과(와) 유사한 고객이 여러 건 있습니다.",
+        f"{label}를 조회할 고객을 선택해주세요.",
+        "",
+    ]
+    for i, c in enumerate(candidates, 1):
+        code = c.get("고객코드") or "-"
+        name = c.get("고객명") or "-"
+        sales = c.get("영업사원명") or "-"
+        team = c.get("부서명") or c.get("지점명") or "-"
+        lines.append(f"{i}. {code}  {name}\n   담당 {team} / {sales}")
+    return "\n".join(lines)
+
+
 def _resolve_org_context(query: str) -> tuple[str, str]:
     """쿼리에서 조직 컨텍스트(target_key, target_name) 추출.
     지점명 > 사업부명 순으로 매칭. 기본값: 사업부명='외식식재사업부'
@@ -2362,10 +2785,16 @@ def _period_label(period: str) -> str:
         else:
             return f"{today.year}년 {today.month-1}월"
     elif period == "올해":
+        _latest = _get_profit_latest_ym()
+        if _latest[:4] == str(today.year):
+            return f"{today.year}년 누계({int(_latest[4:6])}월까지)"
         return f"{today.year}년 누계"
     elif re.match(r'^\d{6}$', period):  # 202603 형식
         return f"{period[:4]}년 {int(period[4:6])}월"
     elif re.match(r'^\d{4}$', period):  # 2026 형식 (연도 누계)
+        _latest = _get_profit_latest_ym()
+        if _latest[:4] == period:
+            return f"{period}년 누계({int(_latest[4:6])}월까지)"
         return f"{period}년 누계"
     elif re.match(r'^\d{4}:\d{2}$', period):  # 2025:04 형식 (전년동기)
         _yy, _mm = period.split(':')
@@ -2404,6 +2833,41 @@ def _fmt_pct(cm, fi) -> str:
     if fi and int(fi) > 0:
         return f"{int(cm)/int(fi)*100:.1f}%"
     return "-"
+
+
+def _profit_scope_cond(branch: str = "") -> str:
+    """등록 소속 기준 CM 조회 범위. 사업부 등록자는 외식식재 전체로 조회."""
+    branch = (branch or "").strip()
+    valid_branches = {"외식1팀", "외식2팀", "외식3팀", "영남지점"}
+    if branch in valid_branches:
+        return f"`지점명` = '{_sql_literal(branch)}'"
+    return "`사업부` = '외식식재사업부'"
+
+
+def _profit_period_from_query(query: str, default_latest: bool = True) -> str:
+    """수익성 질문에서 기간을 추출. 미지정이면 최신 확정월."""
+    if re.search(r'이번달|이번\s*달', query):
+        return "이번달"
+    if re.search(r'지난달|지난\s*달|전달|전월', query):
+        return "지난달"
+    if re.search(r'올해|올해\s*전체|누계', query) and not re.search(r'\d{1,2}월', query):
+        return "올해"
+    _ym6 = re.search(r'\b(20\d{2})(0[1-9]|1[0-2])\b', query)
+    if _ym6:
+        return _ym6.group(0)
+    if re.search(r'(\d{2,4})년\s*(\d{1,2})월까지', query):
+        _m = re.search(r'(\d{2,4})년\s*(\d{1,2})월까지', query)
+        _y = int(_m.group(1))
+        if _y < 100:
+            _y += 2000
+        return f"{_y}:{int(_m.group(2)):02d}"
+    if re.search(r'(\d{2,4})년', query) and not re.search(r'\d{1,2}월', query):
+        _y = int(re.search(r'(\d{2,4})년', query).group(1))
+        return str(_y + 2000 if _y < 100 else _y)
+    if re.search(r'\d{1,2}월', query):
+        _, _ym = _extract_month_year(query)
+        return _ym
+    return _get_profit_latest_ym() if default_latest else _extract_month_year("")[1]
 
 
 def _profit_qr_nav(subject: str, period: str) -> list[dict]:
@@ -2476,6 +2940,8 @@ def _profit_qr_nav(subject: str, period: str) -> list[dict]:
 
 def _fetch_profit_branch(branch: str, period: str) -> str:
     """지점 전체 수익성 요약 (1행 합계) — 백만원 단위, CO기준"""
+    if (branch or "").strip() not in {"외식1팀", "외식2팀", "외식3팀", "영남지점"}:
+        return _fetch_profit_org("외식식재사업부", period, "사업부", "사업부")
     return _fetch_profit_org(branch, period, "지점명", "지점")
 
 
@@ -2521,6 +2987,7 @@ def _fetch_profit_org(org_name: str, period: str, org_column: str, org_label: st
 def _fetch_profit_by_brand(branch: str, period: str, top_n: int = 10) -> str:
     """브랜드별 수익성 (Zc본부명 GROUP BY, 상위 N) — 텍스트 포맷"""
     cond = _profit_period_cond(period)
+    scope_cond = _profit_scope_cond(branch)
     rows = _safe_query(f"""
         SELECT
             `Zc본부명`,
@@ -2529,7 +2996,7 @@ def _fetch_profit_by_brand(branch: str, period: str, top_n: int = 10) -> str:
             SUM(`변동비`)     AS var,
             SUM(`공헌이익`)   AS cm
         FROM {T_PROFIT}
-        WHERE `지점명` = '{branch}'
+                WHERE {scope_cond}
           AND {cond}
           AND `FI매출액` IS NOT NULL
           AND `FI매출액` > 0
@@ -2538,9 +3005,9 @@ def _fetch_profit_by_brand(branch: str, period: str, top_n: int = 10) -> str:
         LIMIT {top_n}
     """, raw=True)
     if not rows:
-        return f"📊 {branch} {_period_label(period)} 브랜드별 수익성 데이터가 없습니다."
+        return f"📊 {branch or '외식식재사업부'} {_period_label(period)} 브랜드별 수익성 데이터가 없습니다.\n※ 현재 CM 데이터는 {_get_profit_latest_ym()} 이 최신 데이터입니다."
     lines = [
-        f"💰 {branch} {_period_label(period)} 브랜드별 수익성 (상위 {top_n})",
+        f"💰 {branch or '외식식재사업부'} {_period_label(period)} 브랜드별 수익성 (상위 {top_n})",
         "",
     ]
     for r in rows:
@@ -2559,14 +3026,16 @@ def _fetch_profit_by_brand(branch: str, period: str, top_n: int = 10) -> str:
 def _fetch_profit_by_customer(branch: str, period: str, top_n: int = 10) -> str:
     """거래처별 수익성 (거래처명 GROUP BY, 상위 N) — 텍스트 포맷"""
     cond = _profit_period_cond(period)
+    scope_cond = _profit_scope_cond(branch)
     rows = _safe_query(f"""
         SELECT
+            MAX(`고객`) AS `고객`,
             `거래처명`,
             SUM(`FI매출액`)   AS fi,
             SUM(`매출총이익`) AS gp,
             SUM(`공헌이익`)   AS cm
         FROM {T_PROFIT}
-        WHERE `지점명` = '{branch}'
+        WHERE {scope_cond}
           AND {cond}
           AND `FI매출액` IS NOT NULL
           AND `FI매출액` > 0
@@ -2575,13 +3044,13 @@ def _fetch_profit_by_customer(branch: str, period: str, top_n: int = 10) -> str:
         LIMIT {top_n}
     """, raw=True)
     if not rows:
-        return f"📊 {branch} {_period_label(period)} 거래처별 수익성 데이터가 없습니다."
+        return f"📊 {branch or '외식식재사업부'} {_period_label(period)} 거래처별 수익성 데이터가 없습니다.\n※ 현재 CM 데이터는 {_get_profit_latest_ym()} 이 최신 데이터입니다."
     lines = [
-        f"💰 {branch} {_period_label(period)} 거래처별 수익성 (상위 {top_n})",
+        f"💰 {branch or '외식식재사업부'} {_period_label(period)} 거래처별 수익성 (상위 {top_n})",
         "",
     ]
     for r in rows:
-        cust = r.get("거래처명") or "-"
+        cust = f"{r.get('고객') or ''} {r.get('거래처명') or '-'}".strip()
         fi  = int(r.get("fi") or 0)
         gp  = int(r.get("gp") or 0)
         cm  = int(r.get("cm") or 0)
@@ -2596,18 +3065,17 @@ def _fetch_profit_by_customer(branch: str, period: str, top_n: int = 10) -> str:
 def _fetch_profit_by_name(keyword: str, period: str, branch: str = "") -> str:
     """브랜드명/거래처명 키워드로 수익성 조회"""
     cond = _profit_period_cond(period)
-    _VALID_BRANCHES = {"외식1팀", "외식2팀", "외식3팀", "영남지점"}
-    if branch in _VALID_BRANCHES:
-        branch_cond = f"AND `지점명` = '{branch}'"
-    else:
-        branch_cond = "AND (`지점명` LIKE '%외식%' OR `지점명` LIKE '%영남%')"
+    scope_cond = _profit_scope_cond(branch)
+    keyword_lit = _sql_literal(keyword)
+    code_cond = f"OR `고객` = '{keyword_lit}'" if re.fullmatch(r'\d{5,10}', str(keyword).strip()) else ""
     rows = _safe_query(f"""
-        SELECT SUM(`FI매출액`) AS fi, SUM(`매출총이익`) AS gp,
+        SELECT MAX(`고객`) AS cust_code, MAX(`거래처명`) AS cust_name,
+               SUM(`FI매출액`) AS fi, SUM(`매출총이익`) AS gp,
                SUM(`총운송비`) AS trans, SUM(`총하역비`) AS unload,
                SUM(`변동비`) AS varfee, SUM(`공헌이익`) AS cm
         FROM {T_PROFIT}
-        WHERE {cond} {branch_cond}
-          AND (`Zc본부명` LIKE '%{keyword}%' OR `거래처명` LIKE '%{keyword}%')
+        WHERE {cond} AND {scope_cond}
+          AND (`Zc본부명` LIKE '%{keyword_lit}%' OR `거래처명` LIKE '%{keyword_lit}%' {code_cond})
     """, raw=True)
     if not rows or rows[0].get("fi") is None:
         return (f"📊 [{keyword}] {_period_label(period)} 수익성 데이터가 없습니다.\n"
@@ -2619,8 +3087,11 @@ def _fetch_profit_by_name(keyword: str, period: str, branch: str = "") -> str:
     unload = int(r.get("unload") or 0)
     var   = int(r.get("varfee") or 0)
     cm    = int(r.get("cm") or 0)
+    display_name = keyword
+    if r.get("cust_code") or r.get("cust_name"):
+        display_name = f"{r.get('cust_code') or ''} {r.get('cust_name') or keyword}".strip()
     return "\n".join([
-        f"💰 [{keyword}] {_period_label(period)} 수익성 분석",
+        f"💰 [{display_name}] {_period_label(period)} CM(공헌이익)",
         "",
         f"📌 매출액(CO): {_fmt_mil(fi)}",
         f"📌 매출총이익: {_fmt_mil(gp)} ({_pct(gp, fi)})",
@@ -3743,8 +4214,10 @@ def _http_post_json(url: str, data: dict,
 # ─── 메인 메뉴 QuickReplies ────────────────────────────────────
 _MAIN_MENU_QR = [
     {"label": "📊 매출 실적",    "action": "message", "messageText": "매출 실적 메뉴"},
-    {"label": "💰 수익성 분석",  "action": "message", "messageText": "수익성 분석 메뉴"},
+    {"label": "💰 CM(공헌이익)", "action": "message", "messageText": "수익성 분석 메뉴"},
     {"label": "📦 미출고 현황",  "action": "message", "messageText": "미출고 현황"},
+    {"label": "💳 미수채권",     "action": "message", "messageText": "미수채권"},
+    {"label": "🧾 고객마스터",   "action": "message", "messageText": "고객마스터"},
     {"label": "💬 도움말",       "action": "message", "messageText": "도움말"},
 ]
 _UNSHIPPED_FOLLOW_QR = [
@@ -4177,6 +4650,9 @@ _user_last_sales: dict[str, dict] = {}  # user_id → {target_key, target_name, 
 _user_last_reason: dict[str, str] = {}  # user_id → 전년대비 섹션 텍스트 (2번째 버블용)
 _user_pending_confirm: dict[str, dict] = {}    # user_id → {exact_name, month_num, yearmonth, level_label}
 _user_pending_candidates: dict[str, dict] = {} # user_id → {이름 → level_label}
+_user_pending_ar_input: dict[str, dict] = {}   # user_id → 미수채권 고객코드/고객명 입력 대기
+_user_pending_customer_master_input: dict[str, dict] = {}  # user_id → 고객마스터 고객코드/고객명 입력 대기
+_user_pending_profit_period: dict[str, dict] = {}  # user_id → 특정연월 입력 대기 {dim, ts}
 
 _PERSONAL_DETAIL_PATTERN = re.compile(
     r'개인형\s*(세부|내역|상세|세부내역|디테일|목록)',
@@ -4187,6 +4663,15 @@ _SALES_REASON_PATTERN = re.compile(
     r'(증가|감소)?\s*(사유|이유|원인|왜\s+|주요\s*브랜드|브랜드\s*내역)',
     re.IGNORECASE,
 )
+
+
+def _clear_user_pending_context(user_id: str):
+    """메뉴/인사/취소 등 최우선 명령 시 이전 후보/입력 대기 상태 제거."""
+    _user_pending_candidates.pop(user_id, None)
+    _user_pending_confirm.pop(user_id, None)
+    _user_pending_ar_input.pop(user_id, None)
+    _user_pending_customer_master_input.pop(user_id, None)
+    _user_pending_profit_period.pop(user_id, None)
 
 # 사업부/지점 월별 전체매출 직접 처리 패턴 (Dify 바이패스)
 # 예: "외식식재사업부 3월 매출액", "외식1팀 3월 전체매출"
@@ -4210,6 +4695,63 @@ _BRAND_SALES_PATTERN = re.compile(
 _SALES_CTX_RE = re.compile(
     r'<<<SALES_CTX:([^|]+)\|([^|]+)\|(\d{6})>>>',
 )
+
+_AR_INPUT_GUIDE_MESSAGE = (
+    "💳 미수채권 조회\n\n"
+    "고객코드나 고객명을 입력해주세요.\n\n"
+    "입력 예시\n"
+    "• 170621\n"
+    "• (직)생활맥주(강남역점)\n\n"
+    "★ '생활맥주 강남'만 입력해도\n"
+    "찾으시는 고객명을 후보로 찾아드려요.\n\n"
+    "※ 연월을 따로 입력하지 않으면 당월 기준으로 조회합니다."
+)
+
+_CUSTOMER_MASTER_GUIDE_MESSAGE = (
+    "🧾 고객마스터 조회\n\n"
+    "고객코드나 고객명을 입력해주세요.\n\n"
+    "입력 예시\n"
+    "• 100595\n"
+    "• (직)생활맥주(강남역점)\n"
+    "• 생활맥주 강남\n\n"
+    "추가 질문 예시\n"
+    "• 100595 전화번호\n"
+    "• 100595 ZA코드\n"
+    "• 100595 담당자 누구?\n\n"
+    "★ '생활맥주 강남'만 입력해도\n"
+    "찾으시는 고객명을 후보로 찾아드려요."
+)
+
+
+def _profit_month_input_message(dim_label: str) -> str:
+    latest = _get_profit_latest_ym()
+    return (
+        f"📆 {dim_label} CM(공헌이익) 특정연월 조회\n\n"
+        "조회할 연월을 6자리로 입력해주세요.\n\n"
+        "입력 형식\n"
+        "• 202605\n\n"
+        f"※ CM 데이터는 현재 {latest} 이 최신 데이터입니다."
+    )
+
+
+def _profit_period_qr(dim: str) -> dict:
+    return {"label": "📆 특정연월", "action": "message", "messageText": f"{dim} 수익성 특정연월"}
+
+
+def _ar_input_qr() -> list[dict]:
+    return [
+        {"label": "예시: 170621", "action": "message", "messageText": "170621"},
+        {"label": "예시: 생활맥주 강남", "action": "message", "messageText": "생활맥주 강남"},
+        {"label": "🏠 메인 메뉴", "action": "message", "messageText": "메뉴"},
+    ]
+
+
+def _customer_master_input_qr() -> list[dict]:
+    return [
+        {"label": "예시: 100595", "action": "message", "messageText": "100595"},
+        {"label": "예시: 생활맥주 강남", "action": "message", "messageText": "생활맥주 강남"},
+        {"label": "🏠 메인 메뉴", "action": "message", "messageText": "메뉴"},
+    ]
 
 
 def _build_personal_detail(sp_compact: str) -> str:
@@ -4285,6 +4827,111 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
     """
     t0 = time.time()
     logger.info(f"[콜백] 시작: user={user_id}, query={query[:80]}")
+
+    # ─── 고객마스터 조회 (Dify 바이패스) ─────────────────────────────
+    _cm_req = _extract_customer_master_query(query)
+    if _cm_req:
+        _cm_code, _cm_name, _cm_intent = _cm_req
+        logger.info(f"[콜백] 고객마스터: code={_cm_code}, name={_cm_name}, intent={_cm_intent}")
+        try:
+            if _cm_code:
+                _cm_row = _fetch_customer_master_by_code(_cm_code)
+                if _cm_row:
+                    _cm_text = _build_customer_master_card(_cm_row) if _cm_intent == "master" else _build_customer_master_field_answer(_cm_row, _cm_intent)
+                    _send_kakao_callback_qr(callback_url, _cm_text, _MAIN_MENU_QR, "고객마스터")
+                else:
+                    _send_kakao_callback(callback_url, f"⚠️ {_cm_code} 고객코드를 고객마스터에서 찾을 수 없습니다.", "고객마스터")
+                return
+
+            if not _cm_name or len(_cm_name) < 2:
+                _send_kakao_callback(
+                    callback_url,
+                    "고객명 또는 고객코드를 함께 입력해주세요.\n예) 생활맥주 강남 전화번호\n예) 100595 고객마스터 조회",
+                    "고객마스터",
+                )
+                return
+
+            _cm_candidates = _search_customer_master_candidates(_cm_name)
+            if not _cm_candidates:
+                _send_kakao_callback(callback_url, f"'{_cm_name}' 관련 고객을 고객마스터에서 찾을 수 없습니다.\n고객명을 조금 더 정확히 입력하거나 고객코드로 조회해주세요.", "고객마스터")
+                return
+            if len(_cm_candidates) == 1:
+                _cm_text = _build_customer_master_card(_cm_candidates[0]) if _cm_intent == "master" else _build_customer_master_field_answer(_cm_candidates[0], _cm_intent)
+                _send_kakao_callback_qr(callback_url, _cm_text, _MAIN_MENU_QR, "고객마스터")
+                return
+
+            _qr = []
+            _intent_word = _CUSTOMER_MASTER_FIELD_LABEL.get(_cm_intent, "고객마스터")
+            for _idx, _c in enumerate(_cm_candidates[:6], 1):
+                _code = str(_c.get("고객코드") or "")
+                _qr.append({"label": f"{_idx}. {_code} 선택", "action": "message", "messageText": f"{_code} {_intent_word}"})
+            _qr.append({"label": "🏠 메인 메뉴", "action": "message", "messageText": "메뉴"})
+            _send_kakao_callback_qr(callback_url, _build_customer_master_candidate_text(_cm_name, _cm_candidates[:6], _cm_intent), _qr, "고객마스터")
+        except Exception as _cm_e:
+            logger.error(f"[콜백] 고객마스터 조회 오류: {_cm_e}")
+            _send_kakao_callback(callback_url, "⚠️ 고객마스터 조회 중 오류가 발생했습니다.", "고객마스터")
+        return
+
+    # ─── 고객 여신/미수채권 현황 (Dify 바이패스) ─────────────────────
+    _ar_direct_m = re.match(r'^(?:고객미수확정\s+)?(\d{6})\s+(\d{5,10})\s*(?:미수채권조회)?$', query.strip())
+    if _ar_direct_m:
+        _ar_ym, _ar_code = _ar_direct_m.group(1), _ar_direct_m.group(2)
+        logger.info(f"[콜백] 고객미수확정: code={_ar_code}, ym={_ar_ym}")
+        try:
+            _ar_row = _fetch_ar_by_customer_code(_ar_code, _ar_ym)
+            if _ar_row:
+                _send_kakao_callback_qr(callback_url, _build_ar_status_card(_ar_row, _ar_ym), _MAIN_MENU_QR, "여신미수")
+            else:
+                _send_kakao_callback(callback_url, f"⚠️ {_ar_code} 고객의 {_ar_ym[:4]}년 {int(_ar_ym[4:6])}월 미수채권 데이터를 찾을 수 없습니다.", "여신미수")
+        except Exception as _ar_e:
+            logger.error(f"[콜백] 고객미수확정 오류: {_ar_e}")
+            _send_kakao_callback(callback_url, "⚠️ 여신/미수채권 조회 중 오류가 발생했습니다.", "여신미수")
+        return
+
+    _ar_req = _extract_ar_customer_query(query)
+    if _ar_req:
+        _ar_code, _ar_name, _ar_mo, _ar_ym = _ar_req
+        logger.info(f"[콜백] 여신/미수채권: code={_ar_code}, name={_ar_name}, ym={_ar_ym}")
+        try:
+            if _ar_code:
+                _ar_row = _fetch_ar_by_customer_code(_ar_code, _ar_ym)
+                if _ar_row:
+                    _send_kakao_callback_qr(callback_url, _build_ar_status_card(_ar_row, _ar_ym), _MAIN_MENU_QR, "여신미수")
+                else:
+                    _send_kakao_callback(callback_url, f"⚠️ {_ar_code} 고객의 {_ar_mo}월 미수채권 데이터를 찾을 수 없습니다.", "여신미수")
+                return
+
+            if not _ar_name or len(_ar_name) < 2:
+                _send_kakao_callback(
+                    callback_url,
+                    "고객명 또는 고객코드를 함께 입력해주세요.\n예) 생활맥주 강남역점 4월 미수채권\n예) 170621 4월 미수금",
+                    "여신미수",
+                )
+                return
+
+            _ar_candidates = _search_ar_customer_candidates(_ar_name, _ar_ym)
+            if not _ar_candidates:
+                _send_kakao_callback(callback_url, f"'{_ar_name}' 관련 고객을 찾을 수 없습니다.\n고객명을 조금 더 정확히 입력하거나 고객코드로 조회해주세요.", "여신미수")
+                return
+            if len(_ar_candidates) == 1:
+                _ar_row = _fetch_ar_by_customer_code(str(_ar_candidates[0].get("고객코드", "")), _ar_ym)
+                if _ar_row:
+                    _send_kakao_callback_qr(callback_url, _build_ar_status_card(_ar_row, _ar_ym), _MAIN_MENU_QR, "여신미수")
+                else:
+                    _send_kakao_callback(callback_url, "⚠️ 선택 고객의 미수채권 데이터를 찾을 수 없습니다.", "여신미수")
+                return
+
+            _qr = []
+            for _idx, _c in enumerate(_ar_candidates[:6], 1):
+                _code = str(_c.get("고객코드") or "")
+                _label = f"{_idx}. {_code} 선택"
+                _qr.append({"label": _label, "action": "message", "messageText": f"{_ar_ym} {_code} 미수채권조회"})
+            _qr.append({"label": "🏠 메인 메뉴", "action": "message", "messageText": "메뉴"})
+            _send_kakao_callback_qr(callback_url, _build_ar_candidate_text(_ar_name, _ar_ym, _ar_candidates[:6]), _qr, "여신미수")
+        except Exception as _ar_e:
+            logger.error(f"[콜백] 여신/미수채권 조회 오류: {_ar_e}")
+            _send_kakao_callback(callback_url, "⚠️ 여신/미수채권 조회 중 오류가 발생했습니다.", "여신미수")
+        return
 
     # ─── 세일즈 액션 제안 (예: "샐러디 액션 제안해줘") ─────────────────
     _action_m = re.search(r'(.{2,15}?)\s*액션\s*제안', query)
@@ -4545,6 +5192,52 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
             _send_kakao_callback(callback_url, "⚠️ 사업부 수익성 조회 중 오류가 발생했습니다.", "사업부수익성")
         return
 
+    # ─── 기간선택 QR 기반 CM 조회 (지점/브랜드별/거래처별) ─────────────
+    _profit_m = re.match(
+        r'^(지점|브랜드별|거래처별)\s*수익성\s*(이번달|지난달|올해|올해\s*전체|20\d{2}(?:0[1-9]|1[0-2]))$',
+        query.strip()
+    )
+    if _profit_m:
+        _pdim    = _profit_m.group(1)
+        _pperiod = _profit_m.group(2).replace(" ", "")
+        if _pperiod == "올해전체":
+            _pperiod = "올해"
+        _pu = _load_users().get(user_id, {})
+        _pbranch = _pu.get("team", "")
+        logger.info(f"[콜백] 수익성: dim={_pdim}, period={_pperiod}, branch={_pbranch}")
+        try:
+            if _pdim == "지점":
+                text = _fetch_profit_branch(_pbranch, _pperiod)
+            elif _pdim == "브랜드별":
+                text = _fetch_profit_by_brand(_pbranch, _pperiod)
+            else:
+                text = _fetch_profit_by_customer(_pbranch, _pperiod)
+            _profit_follow_qr = [{"label": "🏠 메인 메뉴", "action": "message", "messageText": "메뉴"}]
+            _send_kakao_callback_qr(callback_url, _to_kakao_text(text + _PROFIT_NAME_GUIDE), _profit_follow_qr, "수익성")
+        except Exception as e:
+            logger.error(f"[콜백] 수익성 오류: {e}")
+            _send_kakao_callback(callback_url, "⚠️ 수익성 조회 중 오류가 발생했습니다.", "수익성")
+        return
+
+    # ─── 단일 거래처코드 CM(공헌이익) 조회 ─────────────────────
+    # 예: "5월 170621 수익성 알려줘", "170621 202605 CM"
+    _cust_profit_code_m = re.search(r'\b(\d{5,10})\b', query)
+    if (_cust_profit_code_m and re.search(_PROFIT_KW_PAT, query, re.IGNORECASE)
+            and not re.match(r'^(지점|브랜드별|거래처별)\s*수익성', query.strip())):
+        _cp_code = _cust_profit_code_m.group(1)
+        _cp_period = _profit_period_from_query(query)
+        logger.info(f"[콜백] 거래처코드CM: code={_cp_code}, period={_cp_period}")
+        try:
+            _cp_user = _load_users().get(user_id, {})
+            _cp_branch = _cp_user.get("team", "")
+            _cp_text = _fetch_profit_by_name(_cp_code, _cp_period, _cp_branch)
+            _cp_qr = _profit_qr_nav(_cp_code, _cp_period)
+            _send_kakao_callback_qr(callback_url, _to_kakao_text(_cp_text), _cp_qr, "거래처코드CM")
+        except Exception as e:
+            logger.error(f"[콜백] 거래처코드CM 오류: {e}")
+            _send_kakao_callback(callback_url, "⚠️ 거래처 CM 조회 중 오류가 발생했습니다.", "거래처코드CM")
+        return
+
     # ─── 특정 브랜드/거래처명 수익성 (월 없는 경우 → 최신 월 기본값) ─────
     _PROFIT_TEAMS_SET = {"외식1팀", "외식2팀", "외식3팀", "영남지점"}
 
@@ -4552,6 +5245,8 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
     _no_month_profit_m = None
     if (re.search(_PROFIT_KW_PAT, query, re.IGNORECASE)
             and not re.search(r'\d{1,2}월|이번달|지난달', query)
+            and not re.search(r'\b20\d{2}(?:0[1-9]|1[0-2])\b', query)
+            and not re.match(r'^(지점|브랜드별|거래처별)\s*수익성', query.strip())
             and not any(t in query for t in _PROFIT_TEAMS_SET)):
         _no_month_profit_m = re.search(_PROFIT_KW_PAT, query, re.IGNORECASE)  # 수익성 키워드 존재 확인용
     if _no_month_profit_m:
@@ -4648,53 +5343,6 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                 logger.error(f"[콜백] 이름수익성 오류: {e}")
                 _send_kakao_callback(callback_url, "⚠️ 수익성 조회 중 오류가 발생했습니다.", "이름수익성")
             return
-
-    # ─── 고객 수익성 분석 (Dify 바이패스) ─────────────────────
-    _profit_m = re.match(
-        r'^(지점|브랜드별|거래처별)\s*수익성\s*(이번달|지난달|올해)$',
-        query.strip()
-    )
-    if _profit_m:
-        _pdim    = _profit_m.group(1)   # 지점|브랜드별|거래처별
-        _pperiod = _profit_m.group(2)   # 이번달|지난달|올해
-        _pu   = _load_users().get(user_id, {})
-        _pbranch = _pu.get("team", "")
-        if not _pbranch:
-            _send_kakao_callback(callback_url, "⚠️ 지점 정보가 등록되지 않았습니다. 관리자에게 문의해주세요.", "수익성")
-            return
-        logger.info(f"[콜백] 수익성: dim={_pdim}, period={_pperiod}, branch={_pbranch}")
-        try:
-            if _pdim == "지점":
-                text = _fetch_profit_branch(_pbranch, _pperiod)
-            elif _pdim == "브랜드별":
-                text = _fetch_profit_by_brand(_pbranch, _pperiod)
-            else:
-                text = _fetch_profit_by_customer(_pbranch, _pperiod)
-            _profit_follow_qr = [
-                {"label": "� 메인 메뉴", "action": "message", "messageText": "메뉴"},
-            ]
-            _send_kakao_callback_qr(callback_url, _to_kakao_text(text + _PROFIT_NAME_GUIDE), _profit_follow_qr, "수익성")
-        except Exception as e:
-            logger.error(f"[콜백] 수익성 오류: {e}")
-            _send_kakao_callback(callback_url, "⚠️ 수익성 조회 중 오류가 발생했습니다.", "수익성")
-        return
-
-    # ─── 범용상품 수익성 (Dify 바이패스) ─────────────────────
-    # 공헌이익/CM 키워드는 위에서 고객CM으로 이미 처리됨 → 가로채기 방지
-    if (re.search(r'마진|이익률|수익성|GP율?|원가율', query, re.IGNORECASE)
-            and not re.search(r'[Cc][Mm]\b|공헌이익', query, re.IGNORECASE)):
-        month_num, yearmonth = _extract_month_year(query)
-        target_key, target_name = _resolve_org_context(query)
-        logger.info(f"[콜백] 범용마진: target={target_name}, ym={yearmonth}")
-        try:
-            data = _fetch_generic_margin(target_key, target_name, yearmonth)
-            text = _build_generic_margin_markdown(data, target_name, yearmonth)
-            _user_last_sales[user_id] = {"target_key": target_key, "target_name": target_name, "yearmonth": yearmonth}
-            _send_kakao_callback(callback_url, _to_kakao_text(text), "범용마진")
-        except Exception as e:
-            logger.error(f"[콜백] 범용마진 오류: {e}")
-            _send_kakao_callback(callback_url, "⚠️ 범용상품 수익성 조회 중 오류가 발생했습니다.", "범용마진")
-        return
 
     # ─── 판매구역/지역별 매출 (Dify 바이패스) ─────────────────────
     region_ranking_m = re.search(
@@ -6297,6 +6945,15 @@ async def kakao_skill(request: Request, background_tasks: BackgroundTasks):
                      {"label": "🏠 메인 메뉴", "action": "message", "messageText": "메뉴"}]
                 )
 
+        # ── 3-0-pre) 최우선 메뉴/인사/취소 명령은 기존 pending 상태를 해제 ──
+        _utt_interrupt = utterance.strip()
+        if re.match(
+            r'^(메뉴|메인메뉴|메인\s*메뉴|main|menu|홈|처음으로|도움말|ㅎㅇ|하이|안녕|취소|그만|수익성\s*분석\s*메뉴|매출\s*실적\s*메뉴|브랜드\s*매출\s*메뉴|미출고\s*현황|미수채권|고객\s*마스터|고객마스터|지점\s*수익성\s*기간선택|브랜드별\s*수익성\s*기간선택|거래처별\s*수익성\s*기간선택)[\s!~]*$',
+            _utt_interrupt,
+            re.IGNORECASE,
+        ):
+            _clear_user_pending_context(user_id)
+
         # ── 3-0) 메뉴 키워드 → 메인 메뉴 즉시 표시 ──
         if re.match(r'^(메뉴|메인메뉴|메인\s*메뉴|메인|main|menu|홈|처음으로|도움말)[\s!~]*$', utterance.strip(), re.IGNORECASE):
             _reg_info_tmp = _load_users().get(user_id, {})
@@ -6402,7 +7059,7 @@ async def kakao_skill(request: Request, background_tasks: BackgroundTasks):
         # ── 3-0j) 수익성 분석 메뉴 ──
         if utterance.strip() == "수익성 분석 메뉴":
             return _kakao_quickreply(
-                "💰 수익성 분석 — 어떤 기준으로 조회할까요?",
+                "💰 CM(공헌이익) — 어떤 기준으로 조회할까요?",
                 [
                     {"label": "🏢 지점 전체",    "action": "message", "messageText": "지점 수익성 기간선택"},
                     {"label": "🏷️ 브랜드별",    "action": "message", "messageText": "브랜드별 수익성 기간선택"},
@@ -6419,7 +7076,8 @@ async def kakao_skill(request: Request, background_tasks: BackgroundTasks):
                     {"label": "📅 이번 달",   "action": "message", "messageText": "지점 수익성 이번달"},
                     {"label": "📅 지난 달",   "action": "message", "messageText": "지점 수익성 지난달"},
                     {"label": "📅 올해 전체", "action": "message", "messageText": "지점 수익성 올해"},
-                    {"label": "← 수익성 메뉴","action": "message", "messageText": "수익성 분석 메뉴"},
+                    _profit_period_qr("지점"),
+                    {"label": "← CM 메뉴", "action": "message", "messageText": "수익성 분석 메뉴"},
                 ],
             )
 
@@ -6431,7 +7089,8 @@ async def kakao_skill(request: Request, background_tasks: BackgroundTasks):
                     {"label": "📅 이번 달",   "action": "message", "messageText": "브랜드별 수익성 이번달"},
                     {"label": "📅 지난 달",   "action": "message", "messageText": "브랜드별 수익성 지난달"},
                     {"label": "📅 올해 전체", "action": "message", "messageText": "브랜드별 수익성 올해"},
-                    {"label": "← 수익성 메뉴","action": "message", "messageText": "수익성 분석 메뉴"},
+                    _profit_period_qr("브랜드별"),
+                    {"label": "← CM 메뉴", "action": "message", "messageText": "수익성 분석 메뉴"},
                 ],
             )
 
@@ -6443,11 +7102,34 @@ async def kakao_skill(request: Request, background_tasks: BackgroundTasks):
                     {"label": "📅 이번 달",   "action": "message", "messageText": "거래처별 수익성 이번달"},
                     {"label": "📅 지난 달",   "action": "message", "messageText": "거래처별 수익성 지난달"},
                     {"label": "📅 올해 전체", "action": "message", "messageText": "거래처별 수익성 올해"},
-                    {"label": "← 수익성 메뉴","action": "message", "messageText": "수익성 분석 메뉴"},
+                    _profit_period_qr("거래처별"),
+                    {"label": "← CM 메뉴", "action": "message", "messageText": "수익성 분석 메뉴"},
                 ],
             )
 
-        # ── 3-0c) 미출고 현황 버튼 클릭 ──        if utterance.strip() == "미출고 현황":
+        # ── 3-0j-4) CM 특정연월 입력 안내 ──
+        _profit_month_pick_m = re.match(r'^(지점|브랜드별|거래처별)\s*수익성\s*특정연월$', utterance.strip())
+        if _profit_month_pick_m:
+            _dim = _profit_month_pick_m.group(1)
+            _user_pending_profit_period[user_id] = {"dim": _dim, "ts": time.time()}
+            return _kakao_quickreply(
+                _profit_month_input_message(_dim),
+                [{"label": f"예시 {_get_profit_latest_ym()}", "action": "message", "messageText": _get_profit_latest_ym()},
+                 {"label": "← CM 메뉴", "action": "message", "messageText": "수익성 분석 메뉴"}],
+            )
+
+        # ── 3-0k) 미수채권 메뉴 버튼 클릭 ──
+        if re.match(r'^(미수채권|미수채권\s*조회|미수금|여신\s*현황|여신)$', utterance.strip()):
+            _user_pending_ar_input[user_id] = {"ts": time.time()}
+            return _kakao_quickreply(_AR_INPUT_GUIDE_MESSAGE, _ar_input_qr())
+
+        # ── 3-0k-1) 고객마스터 메뉴 버튼 클릭 ──
+        if re.match(r'^(고객\s*마스터|고객마스터|고객\s*마스터\s*조회|마스터\s*조회)$', utterance.strip()):
+            _user_pending_customer_master_input[user_id] = {"ts": time.time()}
+            return _kakao_quickreply(_CUSTOMER_MASTER_GUIDE_MESSAGE, _customer_master_input_qr())
+
+        # ── 3-0c) 미출고 현황 버튼 클릭 ──
+        if utterance.strip() == "미출고 현황":
             return _kakao_quickreply(
                 "📦 미출고 현황 — 어떤 기준으로 조회할까요?",
                 [
@@ -6463,6 +7145,80 @@ async def kakao_skill(request: Request, background_tasks: BackgroundTasks):
         _reg_info = _reg_users.get(user_id, {})
         _reg_name = _reg_info.get("name", "")
         _reg_team = _reg_info.get("team", "")
+
+        # ── 3-0x) CM 특정연월 pending: 202605 입력 → 해당 수익성 조회로 연결 ──
+        if user_id in _user_pending_profit_period:
+            _pending_profit = _user_pending_profit_period.get(user_id, {})
+            _profit_wait_started = float(_pending_profit.get("ts", 0) or 0)
+            if _profit_wait_started and (time.time() - _profit_wait_started) > 600:
+                _user_pending_profit_period.pop(user_id, None)
+                return _kakao_quickreply("특정연월 입력 시간이 만료되었습니다. 다시 CM 메뉴에서 선택해주세요.", _MAIN_MENU_QR)
+            _month_input = utterance.strip()
+            if re.fullmatch(r'20\d{2}(0[1-9]|1[0-2])', _month_input):
+                _dim = _pending_profit.get("dim", "지점")
+                _user_pending_profit_period.pop(user_id, None)
+                _profit_query = f"{_dim} 수익성 {_month_input}"
+                logger.info(f"[CM특정연월] '{_month_input}' → '{_profit_query}'")
+                if callback_url:
+                    background_tasks.add_task(_call_dify_and_callback, _profit_query, user_id, callback_url)
+                    return {"version": "2.0", "useCallback": True}
+                return _kakao_quickreply("CM 조회는 콜백 환경에서 처리됩니다.", _MAIN_MENU_QR)
+            if re.match(r'^(취소|그만|아니오|아니|ㄴ)[\s!~]*$', _month_input):
+                _user_pending_profit_period.pop(user_id, None)
+                return _kakao_quickreply("특정연월 입력을 취소했습니다.", _MAIN_MENU_QR)
+            return _kakao_quickreply(
+                "연월은 6자리로 입력해주세요.\n예) 202605\n\n"
+                f"※ CM 데이터는 현재 {_get_profit_latest_ym()} 이 최신 데이터입니다.",
+                [{"label": "← CM 메뉴", "action": "message", "messageText": "수익성 분석 메뉴"}],
+            )
+
+        # ── 3-0y) 미수채권 메뉴 이후: 고객코드/고객명만 입력해도 미수채권 조회로 연결 ──
+        if user_id in _user_pending_ar_input:
+            _pending_ar = _user_pending_ar_input.get(user_id, {})
+            _ar_wait_started = float(_pending_ar.get("ts", 0) or 0)
+            if _ar_wait_started and (time.time() - _ar_wait_started) > 600:
+                _user_pending_ar_input.pop(user_id, None)
+            else:
+                _ar_input = utterance.strip()
+                if re.match(r'^(취소|그만|아니오|아니|ㄴ)[\s!~]*$', _ar_input):
+                    _user_pending_ar_input.pop(user_id, None)
+                    return _kakao_quickreply("미수채권 조회를 취소했습니다.", _MAIN_MENU_QR)
+                _user_pending_ar_input.pop(user_id, None)
+                _ar_lookup_query = f"{_ar_input} 미수채권조회"
+                logger.info(f"[미수채권입력] '{_ar_input}' → '{_ar_lookup_query}'")
+                if callback_url:
+                    background_tasks.add_task(
+                        _call_dify_and_callback, _ar_lookup_query, user_id, callback_url
+                    )
+                    return {"version": "2.0", "useCallback": True}
+                return _kakao_quickreply(
+                    "미수채권 조회는 콜백 환경에서 처리됩니다.\n고객코드 또는 고객명과 함께 '미수채권'을 입력해주세요.",
+                    _MAIN_MENU_QR,
+                )
+
+        # ── 3-0y-1) 고객마스터 메뉴 이후: 고객코드/고객명만 입력해도 고객마스터 조회로 연결 ──
+        if user_id in _user_pending_customer_master_input:
+            _pending_cm = _user_pending_customer_master_input.get(user_id, {})
+            _cm_wait_started = float(_pending_cm.get("ts", 0) or 0)
+            if _cm_wait_started and (time.time() - _cm_wait_started) > 600:
+                _user_pending_customer_master_input.pop(user_id, None)
+            else:
+                _cm_input = utterance.strip()
+                if re.match(r'^(취소|그만|아니오|아니|ㄴ)[\s!~]*$', _cm_input):
+                    _user_pending_customer_master_input.pop(user_id, None)
+                    return _kakao_quickreply("고객마스터 조회를 취소했습니다.", _MAIN_MENU_QR)
+                _user_pending_customer_master_input.pop(user_id, None)
+                _cm_lookup_query = f"{_cm_input} 고객마스터 조회"
+                logger.info(f"[고객마스터입력] '{_cm_input}' → '{_cm_lookup_query}'")
+                if callback_url:
+                    background_tasks.add_task(
+                        _call_dify_and_callback, _cm_lookup_query, user_id, callback_url
+                    )
+                    return {"version": "2.0", "useCallback": True}
+                return _kakao_quickreply(
+                    "고객마스터 조회는 콜백 환경에서 처리됩니다.\n고객코드 또는 고객명과 함께 '고객마스터'를 입력해주세요.",
+                    _MAIN_MENU_QR,
+                )
 
         # ── 3-0z) 퍼지 확인 인터셉터 (예/아니오 + 다수후보 직접조회) ──
         # A) 다수 후보: 버튼에서 후보명 직접 선택
