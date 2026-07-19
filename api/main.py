@@ -6025,6 +6025,11 @@ async def kakao_skill(request: Request, background_tasks: BackgroundTasks):
         body = await request.json()
         user_req = body.get("userRequest", {})
         utterance = user_req.get("utterance", "").strip()
+        # 동의어 정규화: '금일' → '오늘' (한자어 표현을 오늘로 통일해 라우팅)
+        if "금일" in utterance:
+            _orig_utt = utterance
+            utterance = utterance.replace("금일", "오늘")
+            logger.info(f"[정규화] '금일'→'오늘': '{_orig_utt}' → '{utterance}'")
         callback_url = user_req.get("callbackUrl", "")
         user_id = user_req.get("user", {}).get("id", "kakao-unknown")
 

@@ -186,43 +186,255 @@ def _fetch_org_members() -> list[dict]:
         return _ORG_CACHE["rows"]
 
 
-def _load_usage_stats() -> dict:
-    """토큰 사용량 로그를 사용자별·일별로 집계한다."""
+TEAM_ALL_LABEL = "외식식재사업부"  # 전체 조회를 뜻하는 가상 항목
+
+
+def _build_user_team_map() -> dict:
+    """kakao_user_id -> {name, team, emp_code}. 팀 오버라이드 반영."""
+    import main
+    registered = main._load_users()
+    overrides = main._load_team_overrides()
+    result: dict = {}
+    for uid, info in registered.items():
+        emp = str(info.get("emp_code", "")).strip()
+        team_raw = overrides.get(emp, info.get("team", "")) if emp else info.get("team", "")
+        result[uid] = {
+            "name": (info.get("name") or uid or "").strip(),
+            "team": (team_raw or "").strip(),
+            "emp_code": emp,
+        }
+    return result
+
+
+def _resolve_usage_range(range_type: str, year: str, month: str, date_from: str, date_to: str) -> tuple[str, str]:
+    """필터 파라미터 → (시작일, 종료일) 문자열(YYYY-MM-DD). ('' 이면 미제한)."""
+    import datetime as _dt
+    today = _dt.date.today()
+
+    def _fmt(d: _dt.date) -> str:
+        return d.strftime("%Y-%m-%d")
+
+    def _fallback():
+        s = today - _dt.timedelta(days=89)
+        return _fmt(s), _fmt(today)
+
+    if range_type == "all":
+        return "", ""
+    if range_type == "year":
+        try:
+            y = int(year)
+            return _fmt(_dt.date(y, 1, 1)), _fmt(_dt.date(y, 12, 31))
+        except (ValueError, TypeError):
+            return _fallback()
+    if range_type == "month":
+        try:
+            y_s, m_s = str(month).split("-", 1)
+            y, m = int(y_s), int(m_s)
+            s = _dt.date(y, m, 1)
+            e = _dt.date(y + (1 if m == 12 else 0), 1 if m == 12 else m + 1, 1) - _dt.timedelta(days=1)
+            return _fmt(s), _fmt(e)
+        except (ValueError, TypeError):
+            return _fallback()
+    if range_type == "custom":
+        try:
+            s = _dt.date.fromisoformat(date_from)
+            e = _dt.date.fromisoformat(date_to)
+            if e < s:
+                s, e = e, s
+            return _fmt(s), _fmt(e)
+        except (ValueError, TypeError):
+            return _fallback()
+    if range_type == "ytd":
+        return _fmt(_dt.date(today.year, 1, 1)), _fmt(today)
+    if range_type == "30d":
+        return _fmt(today - _dt.timedelta(days=29)), _fmt(today)
+    # 기본: 최근 90일
+    return _fmt(today - _dt.timedelta(days=89)), _fmt(today)
+
+
+def _month_range(start: str, end: str) -> list[str]:
+    """[start_YYYYMMDD, end_YYYYMMDD] 사이의 YYYY-MM 리스트 (오름차순, 최대 24개)."""
+    import datetime as _dt
+    try:
+        s = _dt.date.fromisoformat(start).replace(day=1)
+        e = _dt.date.fromisoformat(end).replace(day=1)
+    except (ValueError, TypeError):
+        return []
+    months: list[str] = []
+    cur = s
+    while cur <= e and len(months) < 24:
+        months.append(f"{cur.year:04d}-{cur.month:02d}")
+        cur = _dt.date(cur.year + (1 if cur.month == 12 else 0), 1 if cur.month == 12 else cur.month + 1, 1)
+    return months
+
+
+def _load_usage_stats(
+    team: str = "",
+    user_id: str = "",
+    range_type: str = "90d",
+    year: str = "",
+    month: str = "",
+    date_from: str = "",
+    date_to: str = "",
+) -> dict:
+    """토큰 사용량 로그를 팀/사용자/기간 필터를 반영해 집계한다."""
     from collections import defaultdict
     import main
+
+    empty_filters = {
+        "team": team or TEAM_ALL_LABEL,
+        "user": user_id,
+        "range_type": range_type,
+        "year": year,
+        "month": month,
+        "date_from": date_from,
+        "date_to": date_to,
+    }
+    team_options = [TEAM_ALL_LABEL] + list(main.TEAM_OPTIONS)
+
     path = getattr(main, "_USAGE_FILE", "")
-    empty = {"users": [], "days": [], "total_calls": 0, "total_tokens": 0, "llm_calls": 0}
+    empty = {
+        "users": [], "days": [], "months": [],
+        "total_calls": 0, "total_tokens": 0, "llm_calls": 0, "active_users": 0,
+        "team_options": team_options, "user_options": [], "year_options": [],
+        "filters": empty_filters,
+        "range_start": "", "range_end": "",
+        "max_month_tokens": 0, "max_month_calls": 0,
+    }
     if not path or not os.path.exists(path):
         return empty
     try:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return empty
-    logs = data.get("logs", [])
-    users: dict = defaultdict(lambda: {"name": "", "calls": 0, "tokens": 0, "llm": 0, "last": ""})
-    days: dict = defaultdict(lambda: {"calls": 0, "tokens": 0})
-    total_calls = total_tokens = llm_calls = 0
+
+    logs = data.get("logs", []) or []
+    user_meta = _build_user_team_map()
+
+    # 로그에서 사용자별 최신 이름을 보강 (등록 정보에 없는 사용자 대응)
     for entry in logs:
-        uid = entry.get("user_id", "")
-        row = users[uid]
-        row["name"] = entry.get("user_name", uid) or uid
+        uid = entry.get("user_id", "") or ""
+        if not uid:
+            continue
+        if uid not in user_meta:
+            user_meta[uid] = {"name": (entry.get("user_name") or uid).strip(), "team": "", "emp_code": ""}
+
+    # 옵션 리스트
+    year_options = sorted({e.get("date", "")[:4] for e in logs if e.get("date", "")[:4].isdigit()}, reverse=True)
+
+    # 기간 결정
+    range_start, range_end = _resolve_usage_range(range_type, year, month, date_from, date_to)
+
+    # 팀 필터 정규화
+    team_norm = (team or "").strip()
+    if not team_norm or team_norm == TEAM_ALL_LABEL:
+        team_filter: str | None = None
+    else:
+        team_filter = team_norm
+
+    # 사용자 필터
+    user_filter = (user_id or "").strip() or None
+
+    # 필터 적용 및 집계
+    users_agg: dict = defaultdict(lambda: {"name": "", "team": "", "calls": 0, "tokens": 0, "llm": 0, "last": ""})
+    days_agg: dict = defaultdict(lambda: {"calls": 0, "tokens": 0})
+    months_agg: dict = defaultdict(lambda: {"calls": 0, "tokens": 0})
+    total_calls = total_tokens = llm_calls = 0
+
+    for entry in logs:
+        uid = entry.get("user_id", "") or ""
+        meta = user_meta.get(uid, {"name": (entry.get("user_name") or uid or "").strip(), "team": "", "emp_code": ""})
+        entry_team = meta.get("team") or ""
+        if team_filter is not None and entry_team != team_filter:
+            continue
+        if user_filter is not None and uid != user_filter:
+            continue
+        day = entry.get("date", "") or ""
+        if range_start and (not day or day < range_start):
+            continue
+        if range_end and (not day or day > range_end):
+            continue
+
+        row = users_agg[uid]
+        row["name"] = meta.get("name") or (entry.get("user_name") or uid)
+        row["team"] = entry_team
         row["calls"] += 1
         tokens = int(entry.get("total_tokens", 0) or 0)
         row["tokens"] += tokens
         if entry.get("dify"):
             row["llm"] += 1
             llm_calls += 1
-        ts = entry.get("ts", "")
+        ts = entry.get("ts", "") or ""
         if ts > row["last"]:
             row["last"] = ts
-        day = entry.get("date", "")
-        days[day]["calls"] += 1
-        days[day]["tokens"] += tokens
+
+        days_agg[day]["calls"] += 1
+        days_agg[day]["tokens"] += tokens
+
+        if len(day) >= 7:
+            ym = day[:7]
+            months_agg[ym]["calls"] += 1
+            months_agg[ym]["tokens"] += tokens
+
         total_calls += 1
         total_tokens += tokens
-    user_rows = sorted(users.values(), key=lambda x: x["calls"], reverse=True)
-    day_rows = [{"date": d, **days[d]} for d in sorted(days.keys()) if d][-14:]
-    return {"users": user_rows, "days": day_rows, "total_calls": total_calls, "total_tokens": total_tokens, "llm_calls": llm_calls}
+
+    user_rows = sorted(users_agg.values(), key=lambda x: x["tokens"], reverse=True)
+    day_rows = [{"date": d, **days_agg[d]} for d in sorted(days_agg.keys()) if d][-14:]
+
+    # 월별 차트: 기간 내 모든 월을 연속 표시(빈 월은 0)
+    if range_start and range_end:
+        month_keys = _month_range(range_start, range_end)
+    else:
+        month_keys = sorted(months_agg.keys())
+        month_keys = month_keys[-24:]  # all이면 최근 24개월까지만
+    month_rows = [
+        {"ym": k, "calls": months_agg.get(k, {}).get("calls", 0), "tokens": months_agg.get(k, {}).get("tokens", 0)}
+        for k in month_keys
+    ]
+    max_month_tokens = max((r["tokens"] for r in month_rows), default=0)
+    max_month_calls = max((r["calls"] for r in month_rows), default=0)
+
+    # 사용자 옵션: 팀 필터가 걸린 경우 그 팀 소속만 (없으면 전체)
+    user_options_map: dict = {}
+    for uid, meta in user_meta.items():
+        # 로그에 한 번이라도 나온 사용자만 옵션에 노출 (선택했는데 결과가 없는 상황 최소화)
+        # 단, 팀 필터가 없다면 전 사용자 노출을 위해 조건 완화 대신 그대로 유지
+        user_options_map[uid] = meta
+    user_options: list = []
+    for uid, meta in user_options_map.items():
+        if team_filter and (meta.get("team") or "") != team_filter:
+            continue
+        user_options.append({
+            "id": uid,
+            "name": meta.get("name") or uid,
+            "team": meta.get("team") or "",
+            "emp_code": meta.get("emp_code") or "",
+        })
+    user_options.sort(key=lambda x: (x["team"], x["name"]))
+
+    filters = {
+        "team": team_norm or TEAM_ALL_LABEL,
+        "user": user_filter or "",
+        "range_type": range_type or "90d",
+        "year": year,
+        "month": month,
+        "date_from": date_from,
+        "date_to": date_to,
+    }
+
+    return {
+        "users": user_rows, "days": day_rows, "months": month_rows,
+        "total_calls": total_calls, "total_tokens": total_tokens, "llm_calls": llm_calls,
+        "active_users": len(users_agg),
+        "team_options": team_options,
+        "user_options": user_options,
+        "year_options": year_options,
+        "filters": filters,
+        "range_start": range_start, "range_end": range_end,
+        "max_month_tokens": max_month_tokens,
+        "max_month_calls": max_month_calls,
+    }
 
 
 @router.get("/login", response_class=HTMLResponse)
@@ -516,9 +728,22 @@ async def users_set_team(request: Request):
 
 
 @router.get("/usage", response_class=HTMLResponse)
-async def usage(request: Request):
+async def usage(
+    request: Request,
+    team: str = "",
+    user: str = "",
+    range_type: str = "90d",
+    year: str = "",
+    month: str = "",
+    date_from: str = "",
+    date_to: str = "",
+):
     _require_admin(request)
-    return _render(request, "admin_usage.html", **_load_usage_stats())
+    stats = _load_usage_stats(
+        team=team, user_id=user, range_type=range_type,
+        year=year, month=month, date_from=date_from, date_to=date_to,
+    )
+    return _render(request, "admin_usage.html", **stats)
 
 
 @router.get("/audit", response_class=HTMLResponse)

@@ -1,18 +1,106 @@
 {% extends 'admin_base.html' %}{% block title %}토큰 사용량{% endblock %}{% block content %}
-<div class="page-heading"><div><p class="eyebrow">USAGE ANALYTICS</p><h1>토큰 사용량</h1><p>사용자별 조회 횟수와 LLM 토큰 사용량입니다.</p></div></div>
+<div class="page-heading"><div><p class="eyebrow">USAGE ANALYTICS</p><h1>토큰 사용량</h1><p>필터로 조회 대상을 좁혀 조회 수·토큰·활동 사용자를 확인하세요.</p></div>
+  {% if range_start or range_end %}<span class="heading-badge">{{ range_start or '전체' }} ~ {{ range_end or '오늘' }}</span>{% endif %}
+</div>
+
+<form class="usage-filter" method="get" action="/admin/usage" id="usageFilter">
+  <div class="usage-filter-row">
+    <label>팀<select name="team">
+      {% for t in team_options %}<option value="{{ t }}" {% if filters.team == t %}selected{% endif %}>{{ t }}</option>{% endfor %}
+    </select></label>
+    <label>영업사원<select name="user">
+      <option value="">전체</option>
+      {% for u in user_options %}<option value="{{ u.id }}" {% if filters.user == u.id %}selected{% endif %}>{{ u.name }}{% if u.team %} · {{ u.team }}{% endif %}</option>{% endfor %}
+    </select></label>
+    <label>기간<select name="range_type" id="rangeType">
+      <option value="30d"    {% if filters.range_type == '30d' %}selected{% endif %}>최근 30일</option>
+      <option value="90d"    {% if filters.range_type == '90d' %}selected{% endif %}>최근 90일</option>
+      <option value="ytd"    {% if filters.range_type == 'ytd' %}selected{% endif %}>올해</option>
+      <option value="year"   {% if filters.range_type == 'year' %}selected{% endif %}>연도 선택</option>
+      <option value="month"  {% if filters.range_type == 'month' %}selected{% endif %}>월 선택</option>
+      <option value="custom" {% if filters.range_type == 'custom' %}selected{% endif %}>기간 직접 지정</option>
+      <option value="all"    {% if filters.range_type == 'all' %}selected{% endif %}>전체</option>
+    </select></label>
+    <div class="usage-filter-extra" data-show="year"{% if filters.range_type != 'year' %} hidden{% endif %}>
+      <label>연도<select name="year">
+        {% if not year_options %}<option value="">-</option>{% endif %}
+        {% for y in year_options %}<option value="{{ y }}" {% if filters.year == y %}selected{% endif %}>{{ y }}</option>{% endfor %}
+      </select></label>
+    </div>
+    <div class="usage-filter-extra" data-show="month"{% if filters.range_type != 'month' %} hidden{% endif %}>
+      <label>월(YYYY-MM)<input type="month" name="month" value="{{ filters.month }}"></label>
+    </div>
+    <div class="usage-filter-extra" data-show="custom"{% if filters.range_type != 'custom' %} hidden{% endif %}>
+      <label>시작일<input type="date" name="date_from" value="{{ filters.date_from }}"></label>
+      <label>종료일<input type="date" name="date_to" value="{{ filters.date_to }}"></label>
+    </div>
+    <div class="usage-filter-actions">
+      <button class="btn primary" type="submit">조회</button>
+      <a class="btn ghost" href="/admin/usage">초기화</a>
+    </div>
+  </div>
+</form>
+
 <section class="metric-grid usage-metrics">
-  <article class="metric-card blue"><span class="metric-icon">◐</span><p>전체 조회</p><strong>{{ '{:,}'.format(total_calls) }}</strong><span class="muted">누적 요청 수</span></article>
+  <article class="metric-card blue"><span class="metric-icon">◐</span><p>전체 조회</p><strong>{{ '{:,}'.format(total_calls) }}</strong><span class="muted">필터 기준 요청 수</span></article>
   <article class="metric-card yellow"><span class="metric-icon">✦</span><p>LLM 호출</p><strong>{{ '{:,}'.format(llm_calls) }}</strong><span class="muted">Dify 응답 생성</span></article>
   <article class="metric-card navy"><span class="metric-icon">↗</span><p>총 토큰</p><strong>{{ '{:,}'.format(total_tokens) }}</strong><span class="muted">prompt + completion</span></article>
+  <article class="metric-card green"><span class="metric-icon">◇</span><p>활동 사용자</p><strong>{{ '{:,}'.format(active_users) }}</strong><span class="muted">기간 내 이용자 수</span></article>
 </section>
-<section class="dashboard-grid">
+
+<article class="panel usage-chart-panel">
+  <div class="panel-head"><div><p class="eyebrow">MONTHLY TREND</p><h2>월별 토큰 · 조회수</h2><p class="muted" style="margin:6px 0 0">파란 막대=토큰, 노란 막대=조회 수 (각각 자체 최대값 기준 스케일)</p></div>
+    <div class="usage-legend"><span><i class="dot-tok"></i>토큰</span><span><i class="dot-cal"></i>조회 수</span></div>
+  </div>
+  {% if months %}
+  <div class="usage-chart" role="img" aria-label="월별 토큰 및 조회 수 막대그래프">
+    {% for m in months %}
+    {% set tok_pct = (m.tokens / max_month_tokens * 100) if max_month_tokens else 0 %}
+    {% set cal_pct = (m.calls  / max_month_calls  * 100) if max_month_calls  else 0 %}
+    <div class="usage-col" title="{{ m.ym }} · 토큰 {{ '{:,}'.format(m.tokens) }} · 조회 {{ '{:,}'.format(m.calls) }}회">
+      <div class="usage-bars">
+        <div class="usage-bar tokens" style="height:{{ tok_pct|round(1) }}%"><span>{{ '{:,}'.format(m.tokens) }}</span></div>
+        <div class="usage-bar calls"  style="height:{{ cal_pct|round(1) }}%"><span>{{ m.calls }}</span></div>
+      </div>
+      <div class="usage-xlabel">{{ m.ym[2:] }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty"><b>표시할 월별 데이터가 없습니다.</b><span>필터 조건을 확인해주세요.</span></div>
+  {% endif %}
+</article>
+
+<section class="dashboard-grid" style="margin-top:22px">
   <article class="panel table-panel"><div class="panel-head"><div><p class="eyebrow">BY USER</p><h2>사용자별 사용량</h2></div><input class="table-search" data-target="usageTable" placeholder="이름 검색"></div>
-  <div class="table-scroll"><table id="usageTable"><thead><tr><th>사용자</th><th>조회</th><th>LLM</th><th>토큰</th><th>최근</th></tr></thead><tbody>
-  {% for u in users %}<tr data-search="{{ u.name }}"><td><b>{{ u.name }}</b></td><td>{{ u.calls }}회</td><td>{{ u.llm }}회</td><td>{{ '{:,}'.format(u.tokens) }}</td><td><small>{{ (u.last or '-')[:16] }}</small></td></tr>{% else %}<tr><td colspan="5"><div class="empty"><b>기록된 사용량이 없습니다.</b><span>사용자가 챗봇을 이용하면 이곳에 집계됩니다.</span></div></td></tr>{% endfor %}
+  <div class="table-scroll"><table id="usageTable"><thead><tr><th>사용자</th><th>소속</th><th>조회</th><th>LLM</th><th>토큰</th><th>최근</th></tr></thead><tbody>
+  {% for u in users %}<tr data-search="{{ u.name }} {{ u.team }}"><td><b>{{ u.name }}</b></td><td><small>{{ u.team or '-' }}</small></td><td>{{ u.calls }}회</td><td>{{ u.llm }}회</td><td>{{ '{:,}'.format(u.tokens) }}</td><td><small>{{ (u.last or '-')[:16] }}</small></td></tr>{% else %}<tr><td colspan="6"><div class="empty"><b>필터 조건에 해당하는 데이터가 없습니다.</b><span>기간이나 팀을 조정해보세요.</span></div></td></tr>{% endfor %}
   </tbody></table></div></article>
-  <article class="panel table-panel"><div class="panel-head"><div><p class="eyebrow">DAILY</p><h2>최근 일별 조회</h2></div></div>
+  <article class="panel table-panel"><div class="panel-head"><div><p class="eyebrow">DAILY</p><h2>최근 일별 조회 (최대 14일)</h2></div></div>
   <div class="table-scroll"><table><thead><tr><th>날짜</th><th>조회</th><th>토큰</th></tr></thead><tbody>
   {% for d in days %}<tr><td>{{ d.date }}</td><td>{{ d.calls }}회</td><td>{{ '{:,}'.format(d.tokens) }}</td></tr>{% else %}<tr><td colspan="3">데이터가 없습니다.</td></tr>{% endfor %}
   </tbody></table></div></article>
 </section>
+
+<script>
+(function(){
+  var form = document.getElementById('usageFilter');
+  if (!form) return;
+  var typeSel = document.getElementById('rangeType');
+  var extras = form.querySelectorAll('.usage-filter-extra');
+  function syncExtras(){
+    var v = typeSel.value;
+    extras.forEach(function(el){ el.hidden = (el.dataset.show !== v); });
+  }
+  typeSel.addEventListener('change', syncExtras);
+  // 팀 변경 시 즉시 재조회 (사용자 옵션이 팀 소속으로 재구성되도록)
+  var teamSel = form.querySelector('select[name="team"]');
+  if (teamSel) teamSel.addEventListener('change', function(){
+    var userSel = form.querySelector('select[name="user"]');
+    if (userSel) userSel.value = '';
+    form.submit();
+  });
+  syncExtras();
+})();
+</script>
 {% endblock %}
