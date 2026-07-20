@@ -1,0 +1,29 @@
+{% extends 'admin_base.html' %}{% block title %}포털 활동내역{% endblock %}{% block content %}
+<div class="page-heading"><div><p class="eyebrow">PORTAL ACTIVITY</p><h1>포털 활동내역</h1><p>영업 액션 포털 로그인, DM 발송 테스트, 제안 활동을 확인합니다.</p></div><a class="btn ghost" href="/portal" target="_blank">포털 열기</a></div>
+
+<section class="metric-grid usage-metrics">
+  <article class="metric-card blue"><span class="metric-icon">↗</span><p>로그인 로그</p><strong>{{ login_logs|length }}</strong><span class="muted">최근 {{ login_logs|length }}건</span></article>
+  <article class="metric-card green"><span class="metric-icon">✦</span><p>DM 테스트</p><strong>{{ dm_logs|length }}</strong><span class="muted">실제 발송 아님</span></article>
+  <article class="metric-card navy"><span class="metric-icon">◇</span><p>액션 활동</p><strong>{{ action_logs|length }}</strong><span class="muted">제안/발송 이벤트</span></article>
+</section>
+
+<section class="grid-2">
+  <article class="panel table-panel"><div class="panel-head"><div><p class="eyebrow">LOGIN</p><h2>포털 로그인 내역</h2></div></div>
+    <div class="table-scroll"><table><thead><tr><th>시각</th><th>사번/이름</th><th>소속</th><th>결과</th><th>IP</th></tr></thead><tbody>
+      {% for r in login_logs %}<tr><td><small>{{ r.created_at }}</small></td><td><b>{{ r.emp_code }}</b><small>{{ r.emp_name or '-' }}</small></td><td>{{ r.team or '-' }}</td><td><span class="status {% if r.success %}published{% else %}closed{% endif %}">{{ '성공' if r.success else '실패' }}</span><small>{{ r.reason or '' }}</small></td><td><small>{{ r.ip or '-' }}</small></td></tr>{% else %}<tr><td colspan="5"><div class="empty"><b>로그인 로그가 없습니다.</b></div></td></tr>{% endfor %}
+    </tbody></table></div>
+  </article>
+
+  <article class="panel table-panel"><div class="panel-head"><div><p class="eyebrow">DM TEST</p><h2>DM 발송 테스트 내역</h2></div></div>
+    <div class="table-scroll"><table><thead><tr><th>시각</th><th>발송자</th><th>브랜드/고객</th><th>추천상품</th><th>상태</th></tr></thead><tbody>
+      {% for r in dm_logs %}<tr><td><small>{{ r.created_at }}</small></td><td><b>{{ r.emp_name }}</b><small>{{ r.emp_code }}</small></td><td><b>{{ r.brand_name }}</b><small>{{ r.customer_code }} · {{ r.customer_name }}</small></td><td><small>{{ r.product_names or '-' }}</small></td><td><span class="status new">{{ r.status }}</span></td></tr>{% else %}<tr><td colspan="5"><div class="empty"><b>DM 테스트 로그가 없습니다.</b></div></td></tr>{% endfor %}
+    </tbody></table></div>
+  </article>
+</section>
+
+<article class="panel table-panel" style="margin-top:22px"><div class="panel-head"><div><p class="eyebrow">ACTION</p><h2>액션 제안 활동</h2></div></div>
+  <div class="table-scroll"><table><thead><tr><th>시각</th><th>사용자</th><th>브랜드</th><th>고객</th><th>액션</th><th>상세</th></tr></thead><tbody>
+    {% for r in action_logs %}<tr><td><small>{{ r.created_at }}</small></td><td>{{ r.emp_name }}<small>{{ r.emp_code }}</small></td><td>{{ r.brand_name or '-' }}</td><td>{{ r.customer_name or '-' }}<small>{{ r.customer_code or '' }}</small></td><td><span class="status reviewing">{{ r.action }}</span></td><td><small>{{ r.detail or '-' }}</small></td></tr>{% else %}<tr><td colspan="6"><div class="empty"><b>액션 활동 로그가 없습니다.</b></div></td></tr>{% endfor %}
+  </tbody></table></div>
+</article>
+{% endblock %}

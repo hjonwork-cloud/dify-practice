@@ -17,6 +17,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 import admin_db
+import portal_db
 
 router = APIRouter(prefix="/admin", tags=["admin-console"])
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
@@ -744,6 +745,18 @@ async def usage(
         year=year, month=month, date_from=date_from, date_to=date_to,
     )
     return _render(request, "admin_usage.html", **stats)
+
+
+@router.get("/portal-logs", response_class=HTMLResponse)
+async def portal_logs(request: Request):
+    _require_admin(request)
+    return _render(
+        request,
+        "admin_portal_logs.html",
+        login_logs=portal_db.list_login_logs(200),
+        dm_logs=portal_db.list_dm_logs(200),
+        action_logs=portal_db.list_action_logs(200),
+    )
 
 
 @router.get("/audit", response_class=HTMLResponse)

@@ -21,9 +21,10 @@
       <a class="nav-link {% if '/admin/faq' in request.url.path %}active{% endif %}" href="/admin/faq"><span>✦</span>FAQ 관리</a>
       {% if admin.role == 'system_admin' %}<a class="nav-link {% if '/admin/users' in request.url.path %}active{% endif %}" href="/admin/users"><span>♙</span>사용자 관리</a>{% endif %}
       <a class="nav-link {% if '/admin/usage' in request.url.path %}active{% endif %}" href="/admin/usage"><span>◐</span>토큰 사용량</a>
+      <a class="nav-link {% if '/admin/portal-logs' in request.url.path %}active{% endif %}" href="/admin/portal-logs"><span>↗</span>포털 활동내역</a>
       <a class="nav-link {% if '/admin/audit' in request.url.path %}active{% endif %}" href="/admin/audit"><span>◷</span>감사 이력</a>
-      <span class="nav-section">COMING SOON</span>
-      <span class="nav-link disabled"><span>↗</span>액션 제안 관리</span>
+      <span class="nav-section">SALES PORTAL</span>
+      <a class="nav-link" href="/portal/login?fresh=1" target="_blank"><span>✦</span>영업 액션 포털</a>
     </nav>
     <div class="sidebar-foot"><span class="live-dot"></span>관리자 운영 환경</div>
   </aside>

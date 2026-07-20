@@ -49,6 +49,8 @@ from action_router import router as _action_router
 app.include_router(_action_router)
 from admin_router import router as _admin_router
 app.include_router(_admin_router)
+from portal_router import router as _portal_router
+app.include_router(_portal_router)
 import admin_db  # VOC 접수 / 공개 FAQ 자동응답
 
 # 직접 처리 규칙과 공개 FAQ로 답하지 못한 질문의 처리 방식.
@@ -4152,7 +4154,16 @@ def _format_dify_rows(rows: list[dict], query: str = "") -> str:
             v = rows[0][c]
             if v is None:
                 v = "-"
-            parts.append(f"{c}: {v}")
+            display_col = str(c).replace("억원", "백만원")
+            if "백만원" in display_col or "억" in str(c):
+                try:
+                    v = _format_value(float(v))
+                except Exception:
+                    pass
+                unit = "백만원" if "백만원" not in display_col else ""
+            else:
+                unit = ""
+            parts.append(f"{display_col}: {v}{unit}")
         return "📊 " + " / ".join(parts)
 
     # ── 다중 행: 번호 매기기 리스트 ──
@@ -4177,8 +4188,12 @@ def _format_dify_rows(rows: list[dict], query: str = "") -> str:
                 v = "-"
             # 컬럼명에서 단위 힌트 추출 (억, 원, % 등)
             unit = ""
-            vc_lower = str(vc)
-            if "억" in vc_lower:
+            vc_lower = str(vc).replace("억원", "백만원")
+            if "백만원" in vc_lower or "억" in vc_lower:
+                try:
+                    v = _format_value(float(v))
+                except Exception:
+                    pass
                 unit = "백만원"
             elif "원" in vc_lower and "억" not in vc_lower:
                 unit = "원"
@@ -6499,7 +6514,7 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
         f"  ※ 단, '최초매출일/처음매출/언제부터' 질문은 전 기간 조회 → 년월/년도 필터 없이 MIN(`대금청구일`) 또는 MIN(`년월`) 사용\n"
         f"  예) 거래처명 LIKE '%키워드%' GROUP BY 거래처명 → MIN(`대금청구일`) AS 최초매출일\n"
         f"- 브랜드별 매출: `ZC본부명` GROUP BY\n"
-        f"- 매출액 단위: ROUND(SUM(`매출액`)/1000000, 2) AS 매출_억원\n"
+        f"- 매출액 단위: ROUND(SUM(`매출액`)/1000000, 2) AS 매출_백만원\n"
         f"- 브랜드명 검색: `ZC본부명` LIKE '%키워드%'\n"
         f"- '월별 추이' 질문: `년월` GROUP BY로 월별 합계 (브랜드 GROUP BY 하지 말 것)\n"
         f"- 거래처 단위: `ZA거래처명` (거래처 수 = COUNT(DISTINCT `ZA거래처명`))\n"
@@ -6567,6 +6582,7 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
             generated_sql = _auto_backtick_korean(generated_sql)
             # 매출액 단위 보정: /100000000 → /1000000
             generated_sql = generated_sql.replace('/100000000', '/1000000')
+            generated_sql = generated_sql.replace('매출_억원', '매출_백만원').replace('매출액_억원', '매출액_백만원').replace('_억원`', '_백만원`')
             # 년도 필터 누락 보정: WHERE에 년월/년도 필터가 없으면 추가
             # ※ 단, '최초/처음/언제부터/전체기간' 질문은 전 기간 조회가 필요하므로 주입 안 함
             _NO_YEAR_INJECT = re.search(

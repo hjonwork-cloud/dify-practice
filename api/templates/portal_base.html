@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}영업 액션 포털{% endblock %} | 동원홈푸드</title>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net">
+  <link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" rel="stylesheet">
+  <link href="/static/admin.css?v={{ asset_v }}" rel="stylesheet">
+</head>
+<body class="portal-body">
+<div class="portal-shell">
+  <aside class="portal-sidebar">
+    <a class="portal-brand" href="/portal" aria-label="영업 액션 포털 홈">
+      <img src="/static/dongwon-homefood-logo.png" alt="동원홈푸드">
+      <span><strong>영업 액션 포털</strong><small>ACTION SUGGESTION</small></span>
+    </a>
+    <nav class="portal-nav">
+      <a class="{% if request.url.path == '/portal' or request.url.path == '/portal/' %}active{% endif %}" href="/portal">대시보드</a>
+      <a class="{% if '/portal/brand-report' in request.url.path %}active{% endif %}" href="/portal/brand-report">브랜드 리포트</a>
+      <span>고객 프로모션 제안</span>
+    </nav>
+    <div class="portal-user-card">
+      <span class="portal-avatar">{{ user.name[:1] if user else 'U' }}</span>
+      <div><b>{{ user.name if user else '' }}</b><small>{{ user.emp_code if user else '' }} · {{ user.team if user else '' }}</small></div>
+    </div>
+  </aside>
+  <main class="portal-main">
+    <header class="portal-topbar">
+      <button class="menu-toggle" onclick="document.body.classList.toggle('menu-open')">☰</button>
+      <div><b>Promotion Intelligence</b><small>범용/전용 구성비 기반 액션 제안 테스트</small></div>
+      <form action="/portal/logout" method="post"><button class="portal-logout" type="submit">로그아웃</button></form>
+    </header>
+    <section class="portal-content">{% block content %}{% endblock %}</section>
+  </main>
+</div>
+<script src="/static/admin.js?v={{ asset_v }}"></script>
+</body>
+</html>
