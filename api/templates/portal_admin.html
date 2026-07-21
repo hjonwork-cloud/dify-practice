@@ -1,0 +1,60 @@
+{% extends 'portal_base.html' %}{% block title %}관리자 기능{% endblock %}{% block content %}
+<div class="portal-heading">
+  <div>
+    <p class="eyebrow">ADMIN OVERVIEW</p>
+    <h1>전체 대시보드</h1>
+    <p>외식식재사업부 전체 기준 · {{ data.latest_ym or '-' }} 현월 · 최신 대금청구일 {{ data.latest_bill_date or '-' }}</p>
+  </div>
+</div>
+
+<section class="portal-metric-grid">
+  <article><span>전체 매출액</span><strong>{{ '{:,}'.format(data.sales_m) }}백만</strong><small>외식식재사업부 현월</small></article>
+  <article><span>브랜드 수</span><strong>{{ data.brand_count }}</strong><small>매출 발생 브랜드</small></article>
+  <article><span>고객 수</span><strong>{{ data.customer_count }}</strong><small>거래처 기준</small></article>
+  <article><span>공헌이익률</span><strong>{{ data.cm_rate }}%</strong><small>CM 최신 적재월 {{ data.profit_ym or '-' }}</small></article>
+  <article><span>미수채권</span><strong>{{ '{:,}'.format(data.ar_balance_m) }}백만</strong><small>현재잔액 합계</small></article>
+</section>
+
+<section class="portal-metric-grid compact">
+  <article><span>전체 제안가능 범용상품 매출액</span><strong>{{ '{:,}'.format(data.solution.proposal_possible_sales_m) }}백만</strong><small>{{ data.prev_ym }} 브랜드별 기준 적용</small></article>
+  <article><span>전체 범용상품 매출이익률</span><strong>{{ data.solution.generic_gp_rate }}%</strong><small>제안가능 매출 가중 평균</small></article>
+  <article><span>기대 이익 증가액</span><strong>{{ '{:,}'.format(data.solution.expected_profit_increase_m) }}백만</strong><small>제안가능 매출 × GP율</small></article>
+  <article><span>전체 제안 대상</span><strong>{{ data.solution.target_count }}</strong><small>브랜드 기준 미만 거래처 수</small></article>
+</section>
+
+<article class="portal-panel">
+  <div class="portal-panel-head">
+    <div>
+      <p class="eyebrow">GENERIC PRODUCT PROPOSAL</p>
+      <h2>전체 범용상품 제안 솔루션</h2>
+      <p>각 브랜드의 현재 범용상품 비중을 기본 제안 기준으로 설정합니다. 슬라이더 조정 후 기준 적용을 누르면 전체 KPI가 재계산됩니다.</p>
+    </div>
+  </div>
+  <form method="get" action="/portal/admin" class="admin-solution-form">
+    <div class="admin-solution-table">
+      <div class="admin-solution-row head">
+        <b>브랜드</b><b>현재 범용비중</b><b>제안 기준</b><b>제안가능 매출액</b><b>GP율</b><b>기대 이익 증가액</b>
+      </div>
+      {% for b in data.solution.brands %}
+      <div class="admin-solution-row">
+        <div><b>{{ b.brand_name }}</b><small>{{ b.customer_count }}개 거래처 · 제안대상 {{ b.targets }}개</small></div>
+        <strong>{{ b.brand_avg }}%</strong>
+        <label class="admin-threshold">
+          <span><output id="out_{{ b.key }}">{{ b.threshold }}</output>%</span>
+          <input type="range" name="threshold__{{ b.key }}" min="0" max="50" step="0.1" value="{{ b.threshold }}" oninput="document.getElementById('out_{{ b.key }}').value=this.value">
+        </label>
+        <strong>{{ '{:,}'.format(b.proposal_possible_sales_m) }}백만</strong>
+        <strong>{{ b.generic_gp_rate }}%</strong>
+        <strong>{{ '{:,}'.format(b.expected_profit_increase_m) }}백만</strong>
+      </div>
+      {% else %}
+      <div class="empty"><b>브랜드별 제안 데이터를 찾을 수 없습니다.</b><span>{{ data.prev_ym or '-' }} 데이터를 확인해주세요.</span></div>
+      {% endfor %}
+    </div>
+    <div class="threshold-actions admin-actions">
+      <button class="btn portal-primary" type="submit">브랜드별 기준 적용</button>
+      <span>가맹점별 사용률과 DM 후보는 표시하지 않고 브랜드 단위 요약만 제공합니다.</span>
+    </div>
+  </form>
+</article>
+{% endblock %}

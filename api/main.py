@@ -22,6 +22,7 @@ import urllib.error
 import json as json_mod
 import threading
 import queue as _queue_mod
+import access_control
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -3644,7 +3645,7 @@ def custom_query(req: QueryRequest):
 
 
 # ─── 사용자 인증/등록 ────────────────────────────────────────
-AUTH_DEPT = "외식식재사업부"  # 허용 사업부
+AUTH_DEPT = access_control.AUTH_DEPT  # 허용 사업부
 _USERS_FILE     = r"E:\data\chatbot\_registered_users.json"
 _WHITELIST_FILE = r"E:\data\chatbot\_admin_whitelist.json"
 _BLACKLIST_FILE = r"E:\data\chatbot\_admin_blacklist.json"
@@ -3767,6 +3768,12 @@ def _get_registered_name(user_id: str) -> str | None:
     return entry.get("name") if entry else None
 
 
+def _get_registered_emp_code(user_id: str) -> str | None:
+    users = _load_users()
+    entry = users.get(user_id)
+    return str(entry.get("emp_code") or "").strip() if entry else None
+
+
 def _get_user_role(user_id: str) -> str:
     """사용자 역할 반환. 'admin' 또는 'user'"""
     users = _load_users()
@@ -3862,6 +3869,17 @@ def _verify_employee(name: str, emp_code: str) -> dict | None:
         logger.warning(f"[인증] 블랙리스트 차단: emp_code={emp_code}")
         return None
 
+    # 2026-08-03 전체 오픈 전에는 베타테스터/관리자만 챗봇 등록 및 이용 허용
+    if not access_control.beta_access_allowed(emp_code):
+        logger.warning(f"[인증] 베타 접근 차단: emp_code={emp_code}")
+        return None
+
+    if access_control.is_admin_emp(emp_code):
+        compact_input = re.sub(r"\s+", "", name)
+        compact_admin = re.sub(r"\s+", "", access_control.ADMIN_EMP_NAME)
+        if compact_input in compact_admin or compact_admin in compact_input:
+            return {"영업사원명": access_control.ADMIN_EMP_NAME, "영업사원": emp_code, "지점명": access_control.ADMIN_TEAM}
+
     # 관리자 화이트리스트 확인 (JSON 단일 소스, DB 조회 불필요)
     result = None
     _dyn_wl = _load_whitelist()
@@ -3905,6 +3923,8 @@ def _register_user(user_id: str, name: str, emp_code: str, db_info: dict) -> str
             "team": db_info.get("지점명", ""),
             "registered_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         }
+        if access_control.is_admin_emp(emp_code):
+            users[user_id]["role"] = "admin"
         _save_users(users)
     display_name = db_info.get("영업사원명", name)
     team = db_info.get("지점명", "")
@@ -6758,6 +6778,11 @@ async def kakao_skill(request: Request, background_tasks: BackgroundTasks):
         if not _is_registered(user_id):
             logger.info(f"[인증] 미등록 사용자 차단: {user_id[:12]}")
             return _kakao_simple(_REGISTER_GUIDE)
+
+        emp_code_for_access = _get_registered_emp_code(user_id) or ""
+        if not access_control.beta_access_allowed(emp_code_for_access):
+            logger.info(f"[인증] 베타 기간 비대상 사용자 차단: emp_code={emp_code_for_access}")
+            return _kakao_simple(access_control.beta_denied_message("AI 영업지원 챗봇"))
 
         # ── 3) 등록된 사용자 → 정상 처리 ──
         _log_query_call(user_id, utterance)

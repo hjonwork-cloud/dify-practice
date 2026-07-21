@@ -1,10 +1,10 @@
-{% extends 'portal_base.html' %}{% block title %}브랜드 리포트{% endblock %}{% block content %}
+{% extends 'portal_base.html' %}{% block title %}범용상품 제안 솔루션{% endblock %}{% block content %}
 {% if sent %}<div class="alert success">DM 발송 테스트 로그가 저장되었습니다. 실제 발송은 하지 않았습니다.</div>{% endif %}
 {% if not report.brand %}
-<div class="portal-heading"><div><p class="eyebrow">BRAND REPORT</p><h1>브랜드 데이터 없음</h1><p>20230720 담당 브랜드 데이터를 찾을 수 없습니다.</p></div></div>
+<div class="portal-heading"><div><p class="eyebrow">PROPOSAL SOLUTION</p><h1>브랜드 데이터 없음</h1><p>로그인 계정의 담당 브랜드 데이터를 찾을 수 없습니다.</p></div></div>
 {% else %}
 <div class="portal-heading">
-  <div><p class="eyebrow">BRAND REPORT</p><h1>{{ report.brand.brand_name }}</h1><p>브랜드 전체 매출은 최근 3개월, 가맹점별 상품 구성비는 전월({{ report.prev_ym }}) 기준입니다.</p></div>
+  <div><p class="eyebrow">GENERIC PRODUCT PROPOSAL</p><h1>{{ report.brand.brand_name }}</h1><p>범용상품 제안 솔루션입니다. 브랜드 전체 매출은 최근 3개월, 가맹점별 상품 구성비는 전월({{ report.prev_ym }}) 기준입니다.</p></div>
   <form method="get" action="/portal/brand-report" class="portal-brand-picker">
     <select name="brand" onchange="this.form.submit()">
       {% for b in report.brands %}<option value="{{ b.brand_name }}" {% if b.brand_name == report.brand.brand_name %}selected{% endif %}>{{ b.brand_name }}</option>{% endfor %}

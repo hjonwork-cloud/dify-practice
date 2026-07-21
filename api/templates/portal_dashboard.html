@@ -1,13 +1,15 @@
 {% extends 'portal_base.html' %}{% block title %}내 대시보드{% endblock %}{% block content %}
 <div class="portal-heading">
-  <div><p class="eyebrow">MY DASHBOARD</p><h1>내 담당 영업 현황</h1><p>{{ data.latest_ym or '-' }} 현월 기준 · 최신 대금청구일 {{ data.latest_bill_date or '-' }} · 20230720 / 이 충규 데이터만 표시합니다.</p></div>
-  <a class="btn portal-primary" href="/portal/brand-report">브랜드 리포트 보기</a>
+  <div><p class="eyebrow">MY DASHBOARD</p><h1>내 담당 영업 현황</h1><p>{{ data.latest_ym or '-' }} 현월 기준 · 최신 대금청구일 {{ data.latest_bill_date or '-' }} · 로그인 계정 권한 기준으로 표시합니다.</p></div>
+  <a class="btn portal-primary" href="/portal/brand-report">범용상품 제안 솔루션 보기</a>
 </div>
 
 <section class="portal-metric-grid">
   <article><span>매출액</span><strong>{{ '{:,}'.format(data.sales_m) }}백만</strong><small>현월 담당 전체 매출</small></article>
-  <article><span>담당 브랜드</span><strong>{{ data.brand_count }}</strong><small>매출 발생 브랜드</small></article>
-  <article><span>담당 고객</span><strong>{{ data.customer_count }}</strong><small>거래처 기준</small></article>
+  <article><span>담당 브랜드</span><strong>{{ data.brand_count }}</strong><small>가맹 ZC코드 기준</small></article>
+  <article><span>가맹점</span><strong>{{ '{:,}'.format(data.franchise_count) }}</strong><small>ZC코드 8로 시작하는 거래처</small></article>
+  <article><span>일반외식업장</span><strong>{{ '{:,}'.format(data.general_count) }}</strong><small>ZC코드 외 거래처</small></article>
+  <article><span>총 거래처 수</span><strong>{{ '{:,}'.format(data.customer_count) }}</strong><small>담당 전체 거래처</small></article>
   <article><span>공헌이익률</span><strong>{{ data.cm_rate }}%</strong><small>CM 최신 적재월 {{ data.profit_ym or '-' }}</small></article>
   <article><span>미수채권</span><strong>{{ '{:,}'.format(data.ar_balance_m) }}백만</strong><small>현재잔액 합계</small></article>
 </section>
@@ -22,13 +24,13 @@
         <strong>{{ '{:,}'.format(b.sales_m) }}백만</strong>
       </a>
       {% else %}
-      <div class="empty"><b>담당 브랜드 데이터가 없습니다.</b><span>매출 테이블의 20230720 데이터를 확인해주세요.</span></div>
+      <div class="empty"><b>담당 브랜드 데이터가 없습니다.</b><span>로그인 계정의 담당 매출 데이터를 확인해주세요.</span></div>
       {% endfor %}
     </div>
   </article>
   <aside class="portal-panel accent">
     <p class="eyebrow">MVP FEATURE</p>
-    <h2>범용상품 구성비 솔루션</h2>
+    <h2>범용상품 제안 솔루션</h2>
     <p>전용상품은 <b>자재그룹명 = FC전용상품</b>, 자재그룹명이 있는 나머지 상품은 범용상품으로 분류합니다. 브랜드 평균보다 낮은 가맹점을 찾고, 타 가맹점 대비 미사용 범용상품을 DM 후보로 제안합니다.</p>
     <a class="btn portal-light" href="/portal/brand-report">바로 점검</a>
   </aside>

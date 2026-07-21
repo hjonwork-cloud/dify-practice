@@ -16,6 +16,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
+import access_control
 import portal_db
 
 router = APIRouter(prefix="/portal", tags=["sales-portal"])
@@ -29,9 +30,7 @@ _jinja_env = Environment(
 _SESSION_COOKIE = "dongwon_portal_session"
 _SESSION_MAX_AGE = 60 * 60 * 10
 _SESSION_SECRET = os.getenv("PORTAL_SESSION_SECRET", "dongwon-portal-dev-secret-change-me")
-_ALLOWED_EMP_CODE = "20230720"
-_ALLOWED_EMP_NAME = "이 충규"
-_ALLOWED_TEAM = "외식3팀"
+_DEFAULT_EMP_CODE = "20230720"
 
 _cache: dict[str, tuple[float, object]] = {}
 _CACHE_TTL = 300
@@ -84,9 +83,9 @@ async def _read_form(request: Request) -> dict[str, str]:
 
 def _current_user(request: Request) -> dict | None:
     emp_code = _read_session(request.cookies.get(_SESSION_COOKIE))
-    if emp_code != _ALLOWED_EMP_CODE:
+    if not emp_code:
         return None
-    return {"emp_code": _ALLOWED_EMP_CODE, "name": _ALLOWED_EMP_NAME, "team": _ALLOWED_TEAM}
+    return _portal_user(emp_code)
 
 
 def _require_user(request: Request) -> dict:
@@ -94,6 +93,102 @@ def _require_user(request: Request) -> dict:
     if not user:
         raise HTTPException(status_code=401, detail="포털 로그인이 필요합니다.")
     return user
+
+
+def _employee_whitelist() -> dict[str, dict]:
+    cached = _cache_get("employee_whitelist")
+    if cached is not None:
+        return cached
+    import main
+    import datetime as _dt
+    _today = _dt.date.today()
+    _months = []
+    _y, _m = _today.year, _today.month
+    for _ in range(3):
+        _months.append(f"{_y:04d}{_m:02d}")
+        _m -= 1
+        if _m == 0:
+            _m = 12
+            _y -= 1
+    _month_in = ", ".join(f"'{ym}'" for ym in _months)
+    rows: list[dict] = []
+    try:
+        rows = _q(f"""
+            SELECT `영업사원` AS emp_code,
+                   MAX(`영업사원명`) AS emp_name,
+                   MAX(`부서명`) AS dept_name,
+                   MAX(`지점명`) AS branch_name,
+                   COUNT(DISTINCT `거래처`) AS customer_count
+            FROM {main.T_MAIN}
+            WHERE `사업부명` = {_sql(access_control.AUTH_DEPT)}
+              AND `영업사원` IS NOT NULL
+              AND TRIM(CAST(`영업사원` AS STRING)) <> ''
+              AND `년월` IN ({_month_in})
+            GROUP BY `영업사원`
+            ORDER BY dept_name, emp_name
+        """)
+    except Exception:
+        rows = []
+    out: dict[str, dict] = {}
+    for r in rows:
+        code = str(r.get("emp_code") or "").strip()
+        if not code:
+            continue
+        out[code] = {
+            "emp_code": code,
+            "name": str(r.get("emp_name") or code).strip(),
+            "team": str(r.get("dept_name") or r.get("branch_name") or "").strip(),
+            "customer_count": int(r.get("customer_count") or 0),
+            "role": "user",
+        }
+    blacklist: set[str] = set()
+    try:
+        blacklist = {str(x).strip() for x in main._load_blacklist()}
+    except Exception:
+        blacklist = set()
+    try:
+        for code, info in main._load_whitelist().items():
+            if str(code).strip() in blacklist:
+                continue
+            out.setdefault(str(code), {
+                "emp_code": str(code),
+                "name": info.get("name", str(code)),
+                "team": info.get("team", ""),
+                "customer_count": 0,
+                "role": "user",
+            })
+    except Exception:
+        pass
+    for code in blacklist:
+        out.pop(code, None)
+    out[access_control.ADMIN_EMP_CODE] = {
+        "emp_code": access_control.ADMIN_EMP_CODE,
+        "name": access_control.ADMIN_EMP_NAME,
+        "team": access_control.ADMIN_TEAM,
+        "customer_count": 0,
+        "role": "admin",
+    }
+    return _cache_set("employee_whitelist", out)
+
+
+def _portal_user(emp_code: str) -> dict | None:
+    code = str(emp_code or "").strip()
+    if not code:
+        return None
+    allowed = _employee_whitelist()
+    if code not in allowed and not access_control.is_admin_emp(code):
+        return None
+    if not access_control.beta_access_allowed(code):
+        return None
+    info = allowed.get(code) or {}
+    role = "admin" if access_control.is_admin_emp(code) else str(info.get("role") or "user")
+    return {
+        "emp_code": code,
+        "name": info.get("name") or (access_control.ADMIN_EMP_NAME if role == "admin" else code),
+        "team": info.get("team") or (access_control.ADMIN_TEAM if role == "admin" else ""),
+        "role": role,
+        "is_admin": role == "admin",
+    }
 
 
 def _render(request: Request, name: str, **context) -> HTMLResponse:
@@ -186,7 +281,7 @@ def _in_months(months: list[str]) -> str:
     return ", ".join(f"'{m}'" for m in months)
 
 
-def _latest_ym(emp_code: str = _ALLOWED_EMP_CODE) -> str:
+def _latest_ym(emp_code: str = _DEFAULT_EMP_CODE) -> str:
     cached = _cache_get(f"latest:{emp_code}")
     if cached:
         return str(cached)
@@ -201,7 +296,7 @@ def _latest_ym(emp_code: str = _ALLOWED_EMP_CODE) -> str:
     return _cache_set(f"latest:{emp_code}", ym)
 
 
-def _latest_bill_date(emp_code: str = _ALLOWED_EMP_CODE, ym: str = "") -> str:
+def _latest_bill_date(emp_code: str = _DEFAULT_EMP_CODE, ym: str = "") -> str:
     cached = _cache_get(f"billdate:{emp_code}:{ym}")
     if cached:
         return str(cached)
@@ -217,7 +312,7 @@ def _latest_bill_date(emp_code: str = _ALLOWED_EMP_CODE, ym: str = "") -> str:
     return _cache_set(f"billdate:{emp_code}:{ym}", bill_date)
 
 
-def _profit_latest_ym(emp_code: str = _ALLOWED_EMP_CODE) -> str:
+def _profit_latest_ym(emp_code: str = _DEFAULT_EMP_CODE) -> str:
     cached = _cache_get(f"profit_latest:{emp_code}")
     if cached:
         return str(cached)
@@ -236,7 +331,7 @@ def _profit_latest_ym(emp_code: str = _ALLOWED_EMP_CODE) -> str:
     return _cache_set(f"profit_latest:{emp_code}", ym)
 
 
-def _brand_rows(emp_code: str = _ALLOWED_EMP_CODE) -> list[dict]:
+def _brand_rows(emp_code: str = _DEFAULT_EMP_CODE) -> list[dict]:
     cached = _cache_get(f"brands:{emp_code}")
     if cached is not None:
         return cached
@@ -309,7 +404,7 @@ def _brand_rows(emp_code: str = _ALLOWED_EMP_CODE) -> list[dict]:
     return _cache_set(f"brands:{emp_code}", out)
 
 
-def portal_dashboard(emp_code: str = _ALLOWED_EMP_CODE) -> dict:
+def portal_dashboard(emp_code: str = _DEFAULT_EMP_CODE) -> dict:
     cached = _cache_get(f"dashboard:{emp_code}")
     if cached is not None:
         return cached
@@ -320,12 +415,28 @@ def portal_dashboard(emp_code: str = _ALLOWED_EMP_CODE) -> dict:
     latest_bill_date = _latest_bill_date(emp_code, latest) if latest else ""
     if latest:
         rows = _q(f"""
-            SELECT SUM(`매출액`) AS sales,
-                   COUNT(DISTINCT `거래처`) AS customers,
-                   COUNT(DISTINCT `ZC본부명`) AS brands
-            FROM {main.T_MAIN}
-            WHERE `영업사원` = {_sql(emp_code)}
-              AND `년월` = {_sql(latest)}
+            WITH base AS (
+                SELECT `ZC본부`, `거래처`, `매출액`
+                FROM {main.T_MAIN}
+                WHERE `영업사원` = {_sql(emp_code)}
+                  AND `년월` = {_sql(latest)}
+            )
+            SELECT
+                SUM(`매출액`) AS sales,
+                COUNT(DISTINCT CASE
+                    WHEN `ZC본부` IS NOT NULL
+                     AND LEFT(TRIM(LEADING '0' FROM TRIM(CAST(`ZC본부` AS STRING))), 1) = '8'
+                    THEN `ZC본부` ELSE NULL END) AS brand_count,
+                COUNT(DISTINCT CASE
+                    WHEN `ZC본부` IS NOT NULL
+                     AND LEFT(TRIM(LEADING '0' FROM TRIM(CAST(`ZC본부` AS STRING))), 1) = '8'
+                    THEN `거래처` ELSE NULL END) AS franchise_count,
+                COUNT(DISTINCT CASE
+                    WHEN `ZC본부` IS NULL
+                      OR LEFT(TRIM(LEADING '0' FROM TRIM(CAST(`ZC본부` AS STRING))), 1) <> '8'
+                    THEN `거래처` ELSE NULL END) AS general_count,
+                COUNT(DISTINCT `거래처`) AS total_count
+            FROM base
         """)
         summary = rows[0] if rows else {}
     profit_ym = _profit_latest_ym(emp_code)
@@ -363,8 +474,10 @@ def portal_dashboard(emp_code: str = _ALLOWED_EMP_CODE) -> dict:
         "profit_ym": profit_ym,
         "period_months": [latest] if latest else [],
         "sales_m": _money_m(summary.get("sales")),
-        "customer_count": int(summary.get("customers") or 0),
-        "brand_count": int(summary.get("brands") or 0),
+        "brand_count": int(summary.get("brand_count") or 0),
+        "franchise_count": int(summary.get("franchise_count") or 0),
+        "general_count": int(summary.get("general_count") or 0),
+        "customer_count": int(summary.get("total_count") or 0),
         "cm_rate": cm_rate,
         "ar_balance_m": ar_balance,
         "brands": brands,
@@ -372,7 +485,7 @@ def portal_dashboard(emp_code: str = _ALLOWED_EMP_CODE) -> dict:
     return _cache_set(f"dashboard:{emp_code}", data)
 
 
-def _pick_brand(brand_name: str | None, emp_code: str = _ALLOWED_EMP_CODE) -> dict | None:
+def _pick_brand(brand_name: str | None, emp_code: str = _DEFAULT_EMP_CODE) -> dict | None:
     brands = _brand_rows(emp_code)
     if not brands:
         return None
@@ -386,13 +499,13 @@ def _pick_brand(brand_name: str | None, emp_code: str = _ALLOWED_EMP_CODE) -> di
     return brands[0]
 
 
-def _recommend_products(brand_name: str, customer_code: str, months: list[str]) -> list[dict]:
+def _recommend_products(brand_name: str, customer_code: str, months: list[str], emp_code: str = _DEFAULT_EMP_CODE) -> list[dict]:
     import main
     rows = _q(f"""
         WITH target_products AS (
             SELECT DISTINCT `자재`
             FROM {main.T_MAIN}
-            WHERE `영업사원` = {_sql(_ALLOWED_EMP_CODE)}
+            WHERE `영업사원` = {_sql(emp_code)}
               AND `ZC본부명` = {_sql(brand_name)}
               AND `거래처` = {_sql(customer_code)}
               AND `년월` IN ({_in_months(months)})
@@ -464,7 +577,7 @@ def _page_items(items: list[dict], page: int, per_page: int = 10) -> tuple[list[
 
 def brand_report(
     brand_name: str | None = None,
-    emp_code: str = _ALLOWED_EMP_CODE,
+    emp_code: str = _DEFAULT_EMP_CODE,
     threshold_pct: float | None = None,
     customer_page: int = 1,
     target_page: int = 1,
@@ -604,11 +717,213 @@ def brand_report(
     }
 
 
+def _division_latest_ym() -> str:
+    cached = _cache_get("division_latest")
+    if cached:
+        return str(cached)
+    import main
+    rows = _q(f"""
+        SELECT MAX(`년월`) AS ym
+        FROM {main.T_MAIN}
+        WHERE `사업부명` = {_sql(access_control.AUTH_DEPT)}
+          AND `매출액` IS NOT NULL
+    """)
+    ym = str((rows[0] or {}).get("ym") or "") if rows else ""
+    return _cache_set("division_latest", ym)
+
+
+def _division_bill_date(ym: str) -> str:
+    cached = _cache_get(f"division_bill:{ym}")
+    if cached:
+        return str(cached)
+    import main
+    rows = _q(f"""
+        SELECT MAX(`대금청구일`) AS bill_date
+        FROM {main.T_MAIN}
+        WHERE `사업부명` = {_sql(access_control.AUTH_DEPT)}
+          AND `년월` = {_sql(ym)}
+    """) if ym else []
+    bill_date = str((rows[0] or {}).get("bill_date") or "") if rows else ""
+    return _cache_set(f"division_bill:{ym}", bill_date)
+
+
+def portal_admin_overview(thresholds: dict[str, float] | None = None) -> dict:
+    import main
+    latest = _division_latest_ym()
+    prev_ym = _month_shift(latest, -1) if latest else ""
+    summary = {}
+    if latest:
+        rows = _q(f"""
+            SELECT SUM(`매출액`) AS sales,
+                   COUNT(DISTINCT `거래처`) AS customers,
+                   COUNT(DISTINCT `ZC본부명`) AS brands,
+                   COUNT(DISTINCT `영업사원`) AS employees
+            FROM {main.T_MAIN}
+            WHERE `사업부명` = {_sql(access_control.AUTH_DEPT)}
+              AND `년월` = {_sql(latest)}
+        """)
+        summary = rows[0] if rows else {}
+    cm_rate = 0.0
+    profit_ym = ""
+    try:
+        rows = _q(f"""
+            WITH div_customers AS (
+                SELECT DISTINCT `거래처`
+                FROM {main.T_MAIN}
+                WHERE `사업부명` = {_sql(access_control.AUTH_DEPT)}
+            )
+            SELECT MAX(DATE_FORMAT(p.`날짜`, 'yyyyMM')) AS ym
+            FROM {main.T_PROFIT} p
+            INNER JOIN div_customers c ON TRIM(LEADING '0' FROM CAST(p.`고객` AS STRING)) = TRIM(LEADING '0' FROM CAST(c.`거래처` AS STRING))
+        """)
+        profit_ym = str((rows[0] or {}).get("ym") or "") if rows else ""
+        if profit_ym:
+            rows = _q(f"""
+                WITH div_customers AS (
+                    SELECT DISTINCT `거래처`
+                    FROM {main.T_MAIN}
+                    WHERE `사업부명` = {_sql(access_control.AUTH_DEPT)}
+                )
+                SELECT CASE WHEN SUM(p.`FI매출액`) = 0 THEN 0
+                            ELSE SUM(p.`공헌이익`) / SUM(p.`FI매출액`) END AS cm_rate
+                FROM {main.T_PROFIT} p
+                INNER JOIN div_customers c ON TRIM(LEADING '0' FROM CAST(p.`고객` AS STRING)) = TRIM(LEADING '0' FROM CAST(c.`거래처` AS STRING))
+                WHERE DATE_FORMAT(p.`날짜`, 'yyyyMM') = {_sql(profit_ym)}
+            """)
+            cm_rate = _pct((rows[0] or {}).get("cm_rate")) if rows else 0.0
+    except Exception:
+        cm_rate = 0.0
+    ar_balance = 0
+    try:
+        rows = _q(f"""
+                        WITH div_sales AS (
+                                SELECT DISTINCT `영업사원`
+                                FROM {main.T_MAIN}
+                                WHERE `사업부명` = {_sql(access_control.AUTH_DEPT)}
+                                    AND `년월` = {_sql(latest)}
+                        )
+                        SELECT SUM(a.`현재잔액`) AS balance
+                        FROM {main.T_AR} a
+                        INNER JOIN div_sales s ON a.`영업사원` = s.`영업사원`
+                        WHERE a.`년월` = {_sql(latest)}
+        """)
+        ar_balance = _won_m((rows[0] or {}).get("balance")) if rows else 0
+    except Exception:
+        ar_balance = 0
+    solution = admin_proposal_solution(prev_ym, thresholds or {})
+    return {
+        "latest_ym": latest,
+        "prev_ym": prev_ym,
+        "latest_bill_date": _division_bill_date(latest),
+        "profit_ym": profit_ym,
+        "sales_m": _money_m(summary.get("sales")),
+        "customer_count": int(summary.get("customers") or 0),
+        "brand_count": int(summary.get("brands") or 0),
+        "employee_count": int(summary.get("employees") or 0),
+        "cm_rate": cm_rate,
+        "ar_balance_m": ar_balance,
+        "solution": solution,
+    }
+
+
+def admin_proposal_solution(prev_ym: str, thresholds: dict[str, float]) -> dict:
+    if not prev_ym:
+        return {"brands": [], "proposal_possible_sales_m": 0, "generic_gp_rate": 0, "expected_profit_increase_m": 0}
+    import main
+    rows = _q(f"""
+        SELECT COALESCE(`ZC본부`, '') AS brand_code,
+               COALESCE(`ZC본부명`, '미분류') AS brand_name,
+               `거래처` AS customer_code,
+               MAX(`거래처명`) AS customer_name,
+               SUM(`매출액`) AS sales,
+               SUM(CASE WHEN COALESCE(`자재그룹명`, '') = 'FC전용상품' THEN `매출액` ELSE 0 END) AS dedicated_sales,
+               SUM(CASE WHEN `자재그룹명` IS NOT NULL AND COALESCE(`자재그룹명`, '') <> 'FC전용상품' THEN `매출액` ELSE 0 END) AS generic_sales,
+               SUM(CASE WHEN `자재그룹명` IS NOT NULL THEN `매출액` ELSE 0 END) AS classified_sales,
+               SUM(CASE WHEN `자재그룹명` IS NOT NULL AND COALESCE(`자재그룹명`, '') <> 'FC전용상품' THEN COALESCE(`매출원가`, 0) ELSE 0 END) AS generic_cost
+        FROM {main.T_MAIN}
+        WHERE `사업부명` = {_sql(access_control.AUTH_DEPT)}
+          AND `년월` = {_sql(prev_ym)}
+          AND COALESCE(`ZC본부명`, '') <> ''
+        GROUP BY COALESCE(`ZC본부`, ''), COALESCE(`ZC본부명`, '미분류'), `거래처`
+        HAVING SUM(`매출액`) > 0
+    """)
+    grouped: dict[str, dict] = {}
+    for r in rows:
+        code = str(r.get("brand_code") or "")
+        name = str(r.get("brand_name") or "미분류")
+        key = hashlib.md5(f"{code}|{name}".encode("utf-8")).hexdigest()[:12]
+        g = grouped.setdefault(key, {
+            "key": key,
+            "brand_code": code,
+            "brand_name": name,
+            "sales": 0.0,
+            "classified_sales": 0.0,
+            "generic_sales": 0.0,
+            "generic_cost": 0.0,
+            "customer_count": 0,
+            "targets": 0,
+            "proposal_possible_sales": 0.0,
+        })
+        sales = float(r.get("sales") or 0)
+        generic = float(r.get("generic_sales") or 0)
+        classified = float(r.get("classified_sales") or 0)
+        cost = float(r.get("generic_cost") or 0)
+        g["sales"] += sales
+        g["classified_sales"] += classified
+        g["generic_sales"] += generic
+        g["generic_cost"] += cost
+        g["customer_count"] += 1
+    # 2-pass: threshold default = each brand current generic ratio.
+    for g in grouped.values():
+        avg_pct = _pct((g["generic_sales"] / g["classified_sales"]) if g["classified_sales"] else 0)
+        g["brand_avg"] = avg_pct
+        g["threshold"] = round(max(0.0, min(50.0, float(thresholds.get(g["key"], avg_pct)))), 1)
+    for r in rows:
+        code = str(r.get("brand_code") or "")
+        name = str(r.get("brand_name") or "미분류")
+        key = hashlib.md5(f"{code}|{name}".encode("utf-8")).hexdigest()[:12]
+        g = grouped[key]
+        classified = float(r.get("classified_sales") or 0)
+        generic = float(r.get("generic_sales") or 0)
+        ratio_pct = _pct((generic / classified) if classified else 0)
+        threshold = float(g["threshold"] or 0)
+        target_ratio = min(0.999, max(0.0, threshold / 100.0))
+        if classified > 0 and target_ratio > 0 and ratio_pct < threshold:
+            needed = max(0.0, (target_ratio * classified - generic) / (1.0 - target_ratio))
+            g["proposal_possible_sales"] += needed
+            g["targets"] += 1
+    brands = []
+    total_proposal = 0.0
+    total_expected_profit = 0.0
+    for g in grouped.values():
+        gp_rate = ((g["generic_sales"] - g["generic_cost"]) / g["generic_sales"]) if g["generic_sales"] else 0.0
+        expected = g["proposal_possible_sales"] * gp_rate
+        total_proposal += g["proposal_possible_sales"]
+        total_expected_profit += expected
+        brands.append({
+            **g,
+            "sales_m": _money_m(g["sales"]),
+            "generic_sales_m": _money_m(g["generic_sales"]),
+            "proposal_possible_sales_m": _money_m(g["proposal_possible_sales"]),
+            "generic_gp_rate": _pct(gp_rate),
+            "expected_profit_increase_m": _money_m(expected),
+        })
+    brands.sort(key=lambda x: x.get("proposal_possible_sales", 0), reverse=True)
+    total_gp = (total_expected_profit / total_proposal) if total_proposal else 0.0
+    return {
+        "brands": brands,
+        "proposal_possible_sales_m": _money_m(total_proposal),
+        "generic_gp_rate": _pct(total_gp),
+        "expected_profit_increase_m": _money_m(total_expected_profit),
+        "target_count": sum(int(b.get("targets") or 0) for b in brands),
+    }
+
+
 @router.get("", response_class=HTMLResponse)
 @router.get("/", response_class=HTMLResponse)
 async def portal_home(request: Request):
-    _require_user(request)
-    return _render(request, "portal_dashboard.html", data=portal_dashboard())
+    user = _require_user(request)
+    return _render(request, "portal_dashboard.html", data=portal_dashboard(user["emp_code"]))
 
 
 @router.get("/login", response_class=HTMLResponse)
@@ -628,14 +943,18 @@ async def login(request: Request):
     emp_code = form.get("emp_code", "").strip()
     ip = request.client.host if request.client else ""
     ua = request.headers.get("user-agent", "")[:300]
-    if emp_code != _ALLOWED_EMP_CODE:
-        portal_db.record_login(emp_code, "", "", ip, ua, False, "not_allowed_test_user")
-        return _redirect_msg("/portal/login", error="현재 테스트는 20230720 / 이 충규 데이터만 이용 가능합니다.")
-    portal_db.record_login(_ALLOWED_EMP_CODE, _ALLOWED_EMP_NAME, _ALLOWED_TEAM, ip, ua, True, "")
+    user = _portal_user(emp_code)
+    if not user:
+        reason = "beta_not_allowed" if emp_code in _employee_whitelist() and access_control.beta_gate_active() else "not_in_sales_whitelist"
+        portal_db.record_login(emp_code, "", "", ip, ua, False, reason)
+        if reason == "beta_not_allowed":
+            return _redirect_msg("/portal/login", error=access_control.beta_denied_message("세일즈 액션 플랫폼"))
+        return _redirect_msg("/portal/login", error="외식식재사업부 화이트리스트에 등록된 사번만 이용 가능합니다.")
+    portal_db.record_login(user["emp_code"], user["name"], user["team"], ip, ua, True, "")
     response = _redirect("/portal")
     response.set_cookie(
         _SESSION_COOKIE,
-        _make_session(_ALLOWED_EMP_CODE),
+        _make_session(user["emp_code"]),
         max_age=_SESSION_MAX_AGE,
         httponly=True,
         samesite="lax",
@@ -660,15 +979,31 @@ async def brand_report_page(
     target_page: int = 1,
     sent: str = "",
 ):
-    _require_user(request)
-    report = brand_report(brand or None, threshold_pct=threshold, customer_page=customer_page, target_page=target_page)
+    user = _require_user(request)
+    report = brand_report(brand or None, emp_code=user["emp_code"], threshold_pct=threshold, customer_page=customer_page, target_page=target_page)
     return _render(request, "portal_brand_report.html", report=report, sent=sent)
+
+
+@router.get("/admin", response_class=HTMLResponse)
+async def portal_admin_page(request: Request):
+    user = _require_user(request)
+    if not user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
+    thresholds: dict[str, float] = {}
+    for key, value in request.query_params.multi_items():
+        if key.startswith("threshold__"):
+            try:
+                thresholds[key.replace("threshold__", "", 1)] = float(value)
+            except (TypeError, ValueError):
+                continue
+    data = portal_admin_overview(thresholds)
+    return _render(request, "portal_admin.html", data=data)
 
 
 @router.get("/target-detail")
 async def target_detail(request: Request, brand: str = "", customer_code: str = ""):
-    _require_user(request)
-    report = brand_report(brand or None)
+    user = _require_user(request)
+    report = brand_report(brand or None, emp_code=user["emp_code"])
     if not report.get("brand"):
         raise HTTPException(status_code=404, detail="brand_not_found")
     code = str(customer_code or "").strip()
@@ -676,7 +1011,7 @@ async def target_detail(request: Request, brand: str = "", customer_code: str = 
     if not customer:
         raise HTTPException(status_code=404, detail="customer_not_found")
     bname = str((report.get("brand") or {}).get("brand_name") or brand)
-    products = _recommend_products(bname, code, report.get("period_months") or [])
+    products = _recommend_products(bname, code, report.get("period_months") or [], user["emp_code"])
     return JSONResponse(_json_safe({
         "customer_code": code,
         "customer_name": customer.get("customer_name") or "",
