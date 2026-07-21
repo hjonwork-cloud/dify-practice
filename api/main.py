@@ -3646,11 +3646,12 @@ def custom_query(req: QueryRequest):
 
 # ─── 사용자 인증/등록 ────────────────────────────────────────
 AUTH_DEPT = access_control.AUTH_DEPT  # 허용 사업부
-_USERS_FILE     = r"E:\data\chatbot\_registered_users.json"
-_WHITELIST_FILE = r"E:\data\chatbot\_admin_whitelist.json"
-_BLACKLIST_FILE = r"E:\data\chatbot\_admin_blacklist.json"
-_TEAM_OVERRIDE_FILE = r"E:\data\chatbot\_admin_team_overrides.json"
-_USAGE_FILE     = r"E:\data\chatbot\_token_usage.json"
+_DATA_DIR       = os.getenv("DATA_DIR", r"E:\data\chatbot")
+_USERS_FILE     = os.getenv("USERS_FILE",     os.path.join(_DATA_DIR, "_registered_users.json"))
+_WHITELIST_FILE = os.getenv("WHITELIST_FILE", os.path.join(_DATA_DIR, "_admin_whitelist.json"))
+_BLACKLIST_FILE = os.getenv("BLACKLIST_FILE", os.path.join(_DATA_DIR, "_admin_blacklist.json"))
+_TEAM_OVERRIDE_FILE = os.getenv("TEAM_OVERRIDE_FILE", os.path.join(_DATA_DIR, "_admin_team_overrides.json"))
+_USAGE_FILE     = os.getenv("USAGE_FILE",     os.path.join(_DATA_DIR, "_token_usage.json"))
 _users_lock = threading.Lock()
 _usage_lock = threading.Lock()
 
@@ -3670,7 +3671,7 @@ _SEED_WHITELIST: dict[str, dict] = {
 _SEED_BLACKLIST: list[str] = [
     "20065629",  # 엄철용
 ]
-_SEED_MARKER_FILE = r"E:\data\chatbot\_seed_done.json"
+_SEED_MARKER_FILE = os.getenv("SEED_MARKER_FILE", os.path.join(_DATA_DIR, "_seed_done.json"))
 
 
 def _load_users() -> dict:
