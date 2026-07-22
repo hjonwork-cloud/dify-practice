@@ -645,6 +645,12 @@ async def users_add(request: Request):
         wl = main._load_whitelist()
         wl[emp] = {"name": name, "team": team, "added_at": time.strftime("%Y-%m-%d %H:%M:%S")}
         main._save_whitelist(wl)
+        # 베타 게이트 통과를 위해 _beta_testers.json 에도 추가
+        import access_control as _ac
+        bt = _ac.load_beta_testers()
+        if emp not in bt:
+            bt[emp] = {"name": name, "team": team}
+            _ac._write_json(_ac.BETA_TESTERS_FILE, bt)
     admin_db.record_audit(admin["admin_id"], "user_whitelisted", "chatbot_user", emp, None, {"name": name, "team": team})
     return _redirect_msg("/admin/users", added="1")
 
@@ -674,6 +680,12 @@ async def users_cancel(request: Request):
         if emp not in bl:
             bl.append(emp)
             main._save_blacklist(bl)
+        # 베타테스터 파일에서도 제거
+        import access_control as _ac
+        bt = _ac.load_beta_testers()
+        if emp in bt:
+            bt.pop(emp)
+            _ac._write_json(_ac.BETA_TESTERS_FILE, bt)
     admin_db.record_audit(admin["admin_id"], "user_cancelled", "chatbot_user", emp, None, {"name": name})
     return _redirect_msg("/admin/users", canceled="1")
 
@@ -720,6 +732,12 @@ async def users_set_team(request: Request):
         if emp in wl:
             wl[emp]["team"] = team
             main._save_whitelist(wl)
+        # 베타테스터 파일 소속도 갱신
+        import access_control as _ac
+        bt = _ac.load_beta_testers()
+        if emp in bt:
+            bt[emp]["team"] = team
+            _ac._write_json(_ac.BETA_TESTERS_FILE, bt)
         # 이미 카톡 등록된 사용자라면 등록 정보 소속도 갱신
         users_all = main._load_users()
         changed = False
