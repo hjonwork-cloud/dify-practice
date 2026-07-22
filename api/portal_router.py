@@ -34,6 +34,26 @@ _SESSION_MAX_AGE = 60 * 60 * 10
 _SESSION_SECRET = os.getenv("PORTAL_SESSION_SECRET", "dongwon-portal-dev-secret-change-me")
 _DEFAULT_EMP_CODE = "20230720"
 
+# ── 팀 리더: 자신의 팀 전체 데이터 조회 가능 ──────────────────────────
+_TEAM_LEADERS: dict[str, str] = {
+    "20115003": "외식1팀",   # 손상웅
+    "20065782": "외식3팀",   # 권봉주
+    "20145012": "외식2팀",   # 현승철
+    "20135653": "영남지점",  # 김동영
+}
+
+def _is_team_leader(emp_code: str) -> bool:
+    return emp_code in _TEAM_LEADERS
+
+def _leader_team(emp_code: str) -> str:
+    return _TEAM_LEADERS.get(emp_code, "")
+
+def _scope_cond(emp_code: str) -> str:
+    """팀 리더: 지점명 기준 팀 전체, 일반: 영업사원 개인"""
+    if emp_code in _TEAM_LEADERS:
+        return f"`지점명` = {_sql(_TEAM_LEADERS[emp_code])}"
+    return f"`영업사원` = {_sql(emp_code)}"
+
 _cache: dict[str, tuple[float, object]] = {}
 _CACHE_TTL = 600  # 10분 캐시 (기존 5분 → 성능 개선)
 
@@ -291,7 +311,7 @@ def _latest_ym(emp_code: str = _DEFAULT_EMP_CODE) -> str:
     rows = _q(f"""
         SELECT MAX(`년월`) AS ym
         FROM {main.T_MAIN}
-        WHERE `영업사원` = {_sql(emp_code)}
+        WHERE {_scope_cond(emp_code)}
           AND `매출액` IS NOT NULL
     """)
     ym = str((rows[0] or {}).get("ym") or "") if rows else ""
@@ -307,7 +327,7 @@ def _latest_bill_date(emp_code: str = _DEFAULT_EMP_CODE, ym: str = "") -> str:
     rows = _q(f"""
         SELECT MAX(`대금청구일`) AS bill_date
         FROM {main.T_MAIN}
-        WHERE `영업사원` = {_sql(emp_code)}
+        WHERE {_scope_cond(emp_code)}
           {where_ym}
     """)
     bill_date = str((rows[0] or {}).get("bill_date") or "") if rows else ""
@@ -323,7 +343,7 @@ def _profit_latest_ym(emp_code: str = _DEFAULT_EMP_CODE) -> str:
         WITH my_customers AS (
             SELECT DISTINCT `거래처`
             FROM {main.T_MAIN}
-            WHERE `영업사원` = {_sql(emp_code)}
+            WHERE {_scope_cond(emp_code)}
         )
         SELECT MAX(DATE_FORMAT(p.`날짜`, 'yyyyMM')) AS ym
         FROM {main.T_PROFIT} p
@@ -331,6 +351,36 @@ def _profit_latest_ym(emp_code: str = _DEFAULT_EMP_CODE) -> str:
     """)
     ym = str((rows[0] or {}).get("ym") or "") if rows else ""
     return _cache_set(f"profit_latest:{emp_code}", ym)
+
+
+def _brand_cm_map(emp_code: str, profit_ym: str) -> dict[str, float]:
+    """ZC본부코드 → CM% 맵. 대시보드 브랜드 섹션 CM% 표기용."""
+    if not profit_ym:
+        return {}
+    cached = _cache_get(f"brand_cm:{emp_code}:{profit_ym}")
+    if cached is not None:
+        return cached
+    import main
+    try:
+        rows = _q(f"""
+            WITH scope_custs AS (
+                SELECT DISTINCT `ZC본부`, `거래처`
+                FROM {main.T_MAIN}
+                WHERE {_scope_cond(emp_code)}
+            )
+            SELECT
+                sc.`ZC본부` AS brand_code,
+                CASE WHEN SUM(p.`FI매출액`) = 0 THEN 0
+                     ELSE SUM(p.`공헌이익`) / SUM(p.`FI매출액`) END AS cm_rate
+            FROM {main.T_PROFIT} p
+            INNER JOIN scope_custs sc ON TRIM(LEADING '0' FROM CAST(p.`고객` AS STRING)) = TRIM(LEADING '0' FROM CAST(sc.`거래처` AS STRING))
+            WHERE DATE_FORMAT(p.`날짜`, 'yyyyMM') = {_sql(profit_ym)}
+            GROUP BY sc.`ZC본부`
+        """)
+        result = {str(r.get("brand_code") or ""): _pct(r.get("cm_rate")) for r in rows}
+    except Exception:
+        result = {}
+    return _cache_set(f"brand_cm:{emp_code}:{profit_ym}", result)
 
 
 def _brand_rows(emp_code: str = _DEFAULT_EMP_CODE) -> list[dict]:
@@ -341,12 +391,13 @@ def _brand_rows(emp_code: str = _DEFAULT_EMP_CODE) -> list[dict]:
     latest = _latest_ym(emp_code)
     if not latest:
         return []
+    scope = _scope_cond(emp_code)
     rows = _q(f"""
         WITH my_brands AS (
             SELECT DISTINCT COALESCE(`ZC본부`, '') AS brand_code,
                             COALESCE(`ZC본부명`, '미분류') AS brand_name
             FROM {main.T_MAIN}
-            WHERE `영업사원` = {_sql(emp_code)}
+            WHERE {scope}
               AND `년월` = {_sql(latest)}
               AND COALESCE(`ZC본부명`, '') <> ''
         ),
@@ -355,7 +406,7 @@ def _brand_rows(emp_code: str = _DEFAULT_EMP_CODE) -> list[dict]:
                 COALESCE(`ZC본부`, '') AS brand_code,
                 COALESCE(`ZC본부명`, '미분류') AS brand_name,
                 SUM(`매출액`) AS sales,
-                COUNT(DISTINCT `거래처`) AS customer_count,
+                COUNT(DISTINCT `ZC본부`) AS customer_count,
                 SUM(CASE WHEN COALESCE(`자재그룹명`, '') = 'FC전용상품' THEN `매출액` ELSE 0 END) AS dedicated_sales,
                 SUM(CASE WHEN `자재그룹명` IS NOT NULL AND COALESCE(`자재그룹명`, '') <> 'FC전용상품' THEN `매출액` ELSE 0 END) AS generic_sales,
                 SUM(CASE WHEN `자재그룹명` IS NOT NULL THEN `매출액` ELSE 0 END) AS classified_sales
@@ -369,9 +420,9 @@ def _brand_rows(emp_code: str = _DEFAULT_EMP_CODE) -> list[dict]:
                 COALESCE(`ZC본부`, '') AS brand_code,
                 COALESCE(`ZC본부명`, '미분류') AS brand_name,
                 SUM(`매출액`) AS my_sales,
-                COUNT(DISTINCT `거래처`) AS my_customer_count
+                COUNT(DISTINCT `ZC본부`) AS my_customer_count
             FROM {main.T_MAIN}
-            WHERE `영업사원` = {_sql(emp_code)}
+            WHERE {scope}
               AND `년월` = {_sql(latest)}
               AND COALESCE(`ZC본부명`, '') <> ''
             GROUP BY COALESCE(`ZC본부`, ''), COALESCE(`ZC본부명`, '미분류')
@@ -402,8 +453,10 @@ def _brand_rows(emp_code: str = _DEFAULT_EMP_CODE) -> list[dict]:
             "sales_m": _money_m(sales),
             "my_sales_m": _money_m(r.get("my_sales")),
             "generic_ratio": _pct((float(r.get("generic_sales") or 0) / classified) if classified else 0),
+            "cm_rate": None,  # portal_dashboard에서 채움
         })
     return _cache_set(f"brands:{emp_code}", out)
+
 
 
 def portal_dashboard(emp_code: str = _DEFAULT_EMP_CODE) -> dict:
@@ -411,9 +464,12 @@ def portal_dashboard(emp_code: str = _DEFAULT_EMP_CODE) -> dict:
     if cached is not None:
         return cached
     import main
+    is_leader = _is_team_leader(emp_code)
+    team_name = _leader_team(emp_code)
+    scope = _scope_cond(emp_code)
 
-    # ── Phase 1: 서로 독립적인 쿼리 3개 병렬 실행 ──────────────────
-    with ThreadPoolExecutor(max_workers=3) as ex:
+    # ── Phase 1: 독립 쿼리 4개 병렬 실행 ──────────────────────────
+    with ThreadPoolExecutor(max_workers=4) as ex:
         f_latest  = ex.submit(_latest_ym, emp_code)
         f_brands  = ex.submit(_brand_rows, emp_code)
         f_profit  = ex.submit(_profit_latest_ym, emp_code)
@@ -421,7 +477,7 @@ def portal_dashboard(emp_code: str = _DEFAULT_EMP_CODE) -> dict:
     brands     = f_brands.result()
     profit_ym  = f_profit.result()
 
-    # ── Phase 2: latest/profit_ym 확정 후 나머지 4개 병렬 실행 ──────
+    # ── Phase 2: latest/profit_ym 확정 후 나머지 4개 + CM맵 병렬 실행 ──
     def _q_summary():
         if not latest:
             return {}
@@ -429,7 +485,7 @@ def portal_dashboard(emp_code: str = _DEFAULT_EMP_CODE) -> dict:
             WITH base AS (
                 SELECT `ZC본부`, `거래처`, `매출액`
                 FROM {main.T_MAIN}
-                WHERE `영업사원` = {_sql(emp_code)}
+                WHERE {scope}
                   AND `년월` = {_sql(latest)}
             )
             SELECT
@@ -462,7 +518,7 @@ def portal_dashboard(emp_code: str = _DEFAULT_EMP_CODE) -> dict:
                 WITH my_customers AS (
                     SELECT DISTINCT `거래처`
                     FROM {main.T_MAIN}
-                    WHERE `영업사원` = {_sql(emp_code)}
+                    WHERE {scope}
                 )
                 SELECT CASE WHEN SUM(p.`FI매출액`) = 0 THEN 0
                             ELSE SUM(p.`공헌이익`) / SUM(p.`FI매출액`) END AS cm_rate
@@ -478,25 +534,45 @@ def portal_dashboard(emp_code: str = _DEFAULT_EMP_CODE) -> dict:
         if not latest:
             return 0
         try:
-            rows = _q(f"""
-                SELECT SUM(`현재잔액`) AS balance
-                FROM {main.T_AR}
-                WHERE `영업사원` = {_sql(emp_code)}
-                  AND `년월` = {_sql(latest)}
-            """)
+            if is_leader:
+                rows = _q(f"""
+                    WITH team_emps AS (
+                        SELECT DISTINCT `영업사원`
+                        FROM {main.T_MAIN}
+                        WHERE {scope} AND `년월` = {_sql(latest)}
+                    )
+                    SELECT SUM(a.`현재잔액`) AS balance
+                    FROM {main.T_AR} a
+                    INNER JOIN team_emps t ON a.`영업사원` = t.`영업사원`
+                    WHERE a.`년월` = {_sql(latest)}
+                """)
+            else:
+                rows = _q(f"""
+                    SELECT SUM(`현재잔액`) AS balance
+                    FROM {main.T_AR}
+                    WHERE `영업사원` = {_sql(emp_code)}
+                      AND `년월` = {_sql(latest)}
+                """)
             return _won_m((rows[0] or {}).get("balance")) if rows else 0
         except Exception:
             return 0
 
-    with ThreadPoolExecutor(max_workers=4) as ex:
+    with ThreadPoolExecutor(max_workers=5) as ex:
         f_summary   = ex.submit(_q_summary)
         f_bill_date = ex.submit(_q_bill_date)
         f_cm        = ex.submit(_q_cm)
         f_ar        = ex.submit(_q_ar)
+        f_cm_map    = ex.submit(_brand_cm_map, emp_code, profit_ym)
     summary          = f_summary.result()
     latest_bill_date = f_bill_date.result()
     cm_rate          = f_cm.result()
     ar_balance       = f_ar.result()
+    cm_map           = f_cm_map.result()
+
+    # 브랜드 목록에 CM% 머지
+    brands_with_cm = []
+    for b in brands:
+        brands_with_cm.append({**b, "cm_rate": cm_map.get(str(b.get("brand_code") or ""), None)})
 
     data = {
         "latest_ym": latest,
@@ -510,7 +586,9 @@ def portal_dashboard(emp_code: str = _DEFAULT_EMP_CODE) -> dict:
         "customer_count": int(summary.get("total_count") or 0),
         "cm_rate": cm_rate,
         "ar_balance_m": ar_balance,
-        "brands": brands,
+        "brands": brands_with_cm,
+        "is_leader": is_leader,
+        "team_name": team_name,
     }
     return _cache_set(f"dashboard:{emp_code}", data)
 
@@ -654,7 +732,7 @@ def brand_report(
                     ELSE SUM(CASE WHEN `자재그룹명` IS NOT NULL AND COALESCE(`자재그룹명`, '') <> 'FC전용상품' THEN `매출액` ELSE 0 END)
                         / SUM(CASE WHEN `자재그룹명` IS NOT NULL THEN `매출액` ELSE 0 END) END AS brand_avg,
                SUM(`매출액`) AS sales,
-               COUNT(DISTINCT `거래처`) AS customer_count
+               COUNT(DISTINCT `ZC본부`) AS customer_count
         FROM {main.T_MAIN}
         WHERE `ZC본부명` = {_sql(bname)}
                     AND `년월` = {_sql(prev_ym)}
@@ -673,9 +751,11 @@ def brand_report(
           AND COALESCE(`자재그룹명`, '') <> 'FC전용상품'
     """)
     generic_gp_rate = _pct((gp_rows[0] or {}).get("generic_gp_rate")) if gp_rows else 0
+    # ZC본부명 기준 집계: 개별 거래처 대신 ZC본부 단위로 집계
+    scope = _scope_cond(emp_code)
     rows = _q(f"""
-        SELECT `거래처` AS customer_code,
-               MAX(`거래처명`) AS customer_name,
+        SELECT COALESCE(`ZC본부`, '') AS customer_code,
+               MAX(COALESCE(`ZC본부명`, '')) AS customer_name,
                SUM(`매출액`) AS sales,
                SUM(CASE WHEN COALESCE(`자재그룹명`, '') = 'FC전용상품' THEN `매출액` ELSE 0 END) AS dedicated_sales,
                SUM(CASE WHEN `자재그룹명` IS NOT NULL AND COALESCE(`자재그룹명`, '') <> 'FC전용상품' THEN `매출액` ELSE 0 END) AS generic_sales,
@@ -683,10 +763,10 @@ def brand_report(
                     ELSE SUM(CASE WHEN `자재그룹명` IS NOT NULL AND COALESCE(`자재그룹명`, '') <> 'FC전용상품' THEN `매출액` ELSE 0 END)
                          / SUM(CASE WHEN `자재그룹명` IS NOT NULL THEN `매출액` ELSE 0 END) END AS generic_ratio
         FROM {main.T_MAIN}
-        WHERE `영업사원` = {_sql(emp_code)}
+        WHERE {scope}
           AND `ZC본부명` = {_sql(bname)}
-                    AND `년월` = {_sql(prev_ym)}
-        GROUP BY `거래처`
+          AND `년월` = {_sql(prev_ym)}
+        GROUP BY `ZC본부`, `ZC본부명`
         HAVING SUM(`매출액`) > 0
         ORDER BY sales DESC
     """)
@@ -744,6 +824,8 @@ def brand_report(
         "proposal_possible_sales_m": proposal_possible_sales_m,
         "generic_gp_rate": generic_gp_rate,
         "expected_profit_increase_m": expected_profit_increase_m,
+        "is_leader": _is_team_leader(emp_code),
+        "team_name": _leader_team(emp_code),
     }
 
 
@@ -1098,20 +1180,8 @@ async def target_detail(request: Request, brand: str = "", customer_code: str = 
 async def dm_log(request: Request):
     user = _require_user(request)
     form = await _read_form(request)
-    portal_db.record_dm_log(
-        emp_code=user["emp_code"],
-        emp_name=user["name"],
-        team=user["team"],
-        brand_code=form.get("brand_code", ""),
-        brand_name=form.get("brand_name", ""),
-        customer_code=form.get("customer_code", ""),
-        customer_name=form.get("customer_name", ""),
-        action_type="generic_product_mix_solution",
-        product_names=form.get("product_names", ""),
-        message=form.get("message", ""),
-        status="test_logged",
-    )
-    return _redirect_msg("/portal/brand-report", brand=form.get("brand_name", ""), sent="1")
+    # DM 발송 기능 준비 중 - 로그 저장 제거
+    return _redirect_msg("/portal/brand-report", brand=form.get("brand_name", ""))
 
 
 # ── 서버 시작 시 백그라운드 캐시 워밍업 ──────────────────────────────

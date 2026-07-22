@@ -1,5 +1,20 @@
 {% extends 'portal_base.html' %}{% block title %}범용상품 제안 솔루션{% endblock %}{% block content %}
-{% if sent %}<div class="alert success">DM 발송 테스트 로그가 저장되었습니다. 실제 발송은 하지 않았습니다.</div>{% endif %}
+<div id="portal-loading" class="portal-loading-overlay" hidden>
+  <div class="portal-loading-box">
+    <div class="portal-spinner"></div>
+    <p><b>거래처를 분석하고 있습니다</b></p>
+    <small>브랜드별 범용상품 비중과 제안 대상을 계산 중입니다.<br>잠시만 기다려 주세요.</small>
+  </div>
+</div>
+<style>
+.portal-loading-overlay{position:fixed;inset:0;background:rgba(255,255,255,.92);z-index:9999;display:flex;align-items:center;justify-content:center;}
+.portal-loading-overlay[hidden]{display:none!important;}
+.portal-loading-box{text-align:center;padding:2rem;}
+.portal-spinner{width:48px;height:48px;border:5px solid #e5e7eb;border-top-color:#16a34a;border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 1.5rem;}
+@keyframes spin{to{transform:rotate(360deg);}}
+.portal-loading-box p{font-size:1.1rem;color:#111;margin:.5rem 0;}
+.portal-loading-box small{color:#6b7280;line-height:1.6;}
+</style>
 {% if not report.brand %}
 <div class="portal-heading"><div><p class="eyebrow">PROPOSAL SOLUTION</p><h1>브랜드 데이터 없음</h1><p>로그인 계정의 담당 브랜드 데이터를 찾을 수 없습니다.</p></div></div>
 {% else %}
@@ -166,7 +181,7 @@
     label.appendChild(text('DM 제안 문구'));
     const textarea = document.createElement('textarea'); textarea.name = 'message'; textarea.rows = 10; textarea.value = data.dm_message || '';
     label.appendChild(textarea); form.appendChild(label);
-    const btn = document.createElement('button'); btn.className = 'btn portal-primary full'; btn.type = 'submit'; btn.textContent = 'DM 발송 테스트 로그 저장';
+    const btn = document.createElement('button'); btn.className = 'btn portal-primary full'; btn.type = 'submit'; btn.textContent = '💬 DM 발송';
     form.appendChild(btn); body.appendChild(form);
   }
 
@@ -198,6 +213,9 @@
 
   const customerPager = setupPager('.js-customer-row', 'customers', 'customerRange');
   const targetPager = setupPager('.js-target-row', 'targets', 'targetRange');
+  // 로딩 오버레이 숨김 (DOM 완료)
+  const lo = document.getElementById('portal-loading');
+  if (lo) lo.hidden = true;
   const sortDirections = {sales: 'desc', ratio: 'desc'};
   document.querySelectorAll('[data-target-sort]').forEach((button) => {
     button.addEventListener('click', () => {
