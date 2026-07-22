@@ -197,19 +197,32 @@ def _portal_user(emp_code: str) -> dict | None:
     code = str(emp_code or "").strip()
     if not code:
         return None
-    allowed = _employee_whitelist()
-    if code not in allowed and not access_control.is_admin_emp(code):
-        return None
+    # 베타테스터 명단에 있으면 Databricks 화이트리스트 체크 우회
+    beta_testers = access_control.load_beta_testers()
+    in_beta = code in beta_testers
     if not access_control.beta_access_allowed(code):
         return None
+    allowed = _employee_whitelist()
+    if code not in allowed and not access_control.is_admin_emp(code) and not in_beta:
+        return None
+    # 정보 우선순위: Databricks 실적 데이터 > 베타테스터 파일 > 팀 리더 상수
     info = allowed.get(code) or {}
+    if not info and in_beta:
+        binfo = beta_testers[code]
+        info = {"name": binfo.get("name", code), "team": binfo.get("team", ""), "role": binfo.get("role", "user")}
+    if not info.get("team") and _is_team_leader(code):
+        info["team"] = _leader_team(code)
     role = "admin" if access_control.is_admin_emp(code) else str(info.get("role") or "user")
+    if role == "admin":
+        role = "user"  # admin role은 is_admin 플래그로만 처리
+    if access_control.is_admin_emp(code):
+        role = "admin"
     return {
         "emp_code": code,
-        "name": info.get("name") or (access_control.ADMIN_EMP_NAME if role == "admin" else code),
-        "team": info.get("team") or (access_control.ADMIN_TEAM if role == "admin" else ""),
+        "name": info.get("name") or (access_control.ADMIN_EMP_NAME if access_control.is_admin_emp(code) else code),
+        "team": info.get("team") or (access_control.ADMIN_TEAM if access_control.is_admin_emp(code) else ""),
         "role": role,
-        "is_admin": role == "admin",
+        "is_admin": access_control.is_admin_emp(code),
     }
 
 
@@ -1100,7 +1113,12 @@ async def login(request: Request):
     ua = request.headers.get("user-agent", "")[:300]
     user = _portal_user(emp_code)
     if not user:
-        reason = "beta_not_allowed" if emp_code in _employee_whitelist() and access_control.beta_gate_active() else "not_in_sales_whitelist"
+        in_beta = emp_code in access_control.load_beta_testers()
+        in_wl = emp_code in _employee_whitelist()
+        if (in_beta or in_wl) and access_control.beta_gate_active():
+            reason = "beta_not_allowed"
+        else:
+            reason = "not_in_sales_whitelist"
         portal_db.record_login(emp_code, "", "", ip, ua, False, reason)
         if reason == "beta_not_allowed":
             return _redirect_msg("/portal/login", error=access_control.beta_denied_message("세일즈 액션 플랫폼"))
