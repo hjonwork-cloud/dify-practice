@@ -38,7 +38,7 @@ def _asset_version() -> str:
         return str(int(max(mtimes)))
     except OSError:
         return "1"
-_USERS_FILE = Path(os.getenv("CHATBOT_DATA_DIR", r"E:\data\chatbot")) / "_registered_users.json"
+_USERS_FILE = Path(os.getenv("CHATBOT_DATA_DIR", os.getenv("DATA_DIR", r"E:\data\chatbot"))) / "_registered_users.json"
 _SESSION_COOKIE = "dongwon_admin_session"
 _CSRF_COOKIE = "dongwon_admin_csrf"
 _SESSION_MAX_AGE = 60 * 60 * 8

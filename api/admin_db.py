@@ -12,7 +12,7 @@ import unicodedata
 from contextlib import contextmanager
 from pathlib import Path
 
-DATA_DIR = Path(os.getenv("CHATBOT_DATA_DIR", r"E:\data\chatbot"))
+DATA_DIR = Path(os.getenv("CHATBOT_DATA_DIR", os.getenv("DATA_DIR", r"E:\data\chatbot")))
 DB_PATH = DATA_DIR / "admin_console.db"
 _db_lock = threading.Lock()
 
