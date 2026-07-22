@@ -764,11 +764,11 @@ def brand_report(
           AND COALESCE(`자재그룹명`, '') <> 'FC전용상품'
     """)
     generic_gp_rate = _pct((gp_rows[0] or {}).get("generic_gp_rate")) if gp_rows else 0
-    # ZC본부명 기준 집계: 개별 거래처 대신 ZC본부 단위로 집계
+    # 거래처(고객코드) 기준 집계: 개별 가맹점 단위로 집계
     scope = _scope_cond(emp_code)
     rows = _q(f"""
-        SELECT COALESCE(`ZC본부`, '') AS customer_code,
-               MAX(COALESCE(`ZC본부명`, '')) AS customer_name,
+        SELECT COALESCE(`거래처`, '') AS customer_code,
+               MAX(COALESCE(`거래처명`, '')) AS customer_name,
                SUM(`매출액`) AS sales,
                SUM(CASE WHEN COALESCE(`자재그룹명`, '') = 'FC전용상품' THEN `매출액` ELSE 0 END) AS dedicated_sales,
                SUM(CASE WHEN `자재그룹명` IS NOT NULL AND COALESCE(`자재그룹명`, '') <> 'FC전용상품' THEN `매출액` ELSE 0 END) AS generic_sales,
@@ -779,7 +779,7 @@ def brand_report(
         WHERE {scope}
           AND `ZC본부명` = {_sql(bname)}
           AND `년월` = {_sql(prev_ym)}
-        GROUP BY `ZC본부`, `ZC본부명`
+        GROUP BY `거래처`, `거래처명`
         HAVING SUM(`매출액`) > 0
         ORDER BY sales DESC
     """)
