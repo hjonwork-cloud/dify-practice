@@ -269,6 +269,11 @@ def _cache_set(key: str, value):
     return value
 
 
+def _cache_clear_all():
+    """인메모리 캐시 전체 초기화 (대시보드 테이블 refresh 후 호출)"""
+    _cache.clear()
+
+
 def _sql(value: str) -> str:
     import main
     return "'" + main._sql_literal(str(value or "")) + "'"
@@ -1106,11 +1111,43 @@ async def portal_home(request: Request):
 
 @router.get("/dashboard-data")
 async def dashboard_data_api(request: Request):
-    """대시보드 데이터를 JSON으로 반환 (AJAX 전용)"""
-    from fastapi.responses import JSONResponse
+    """대시보드 데이터를 JSON으로 반환 (AJAX 전용).
+
+    1순위: portal_refresh.py 가 사전 계산한 요약 테이블 (< 1초)
+    2순위: 실시간 Databricks 쿼리 fallback (30~60초)
+    """
     user = _require_user(request)
-    data = portal_dashboard(user["emp_code"])
+    emp_code = user["emp_code"]
+
+    # ── 1순위: 사전 계산 요약 테이블 ──────────────────────────────────
+    try:
+        import portal_refresh
+        precomputed = portal_refresh.read_dashboard_from_table(emp_code)
+        if precomputed:
+            return JSONResponse(content=precomputed)
+    except Exception as _e:
+        pass  # 테이블 미존재 등 → fallback
+
+    # ── 2순위: 실시간 쿼리 (초기 구동 or refresh 전) ───────────────────
+    data = portal_dashboard(emp_code)
     return JSONResponse(content=data)
+
+
+@router.post("/admin/refresh-dashboard")
+async def admin_refresh_dashboard(request: Request):
+    """대시보드 요약 테이블 강제 재계산 (관리자 전용).
+    Databricks Job 대신 수동으로 refresh 할 때 사용.
+    """
+    user = _require_user(request)
+    if not user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
+
+    import asyncio
+    import portal_refresh
+
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(None, lambda: portal_refresh.run_refresh(force=True))
+    return JSONResponse(content=result)
 
 
 @router.get("/login", response_class=HTMLResponse)

@@ -66,6 +66,20 @@
 (function(){
   function fmt(n){return Number(n||0).toLocaleString('ko-KR');}
 
+  // ── 범용상품 로딩 오버레이: API 응답 여부와 무관하게 즉시 바인딩 ──
+  function bindLoadingOverlay(){
+    document.querySelectorAll('a[href^="/portal/brand-report"], .portal-brand-row').forEach(function(el){
+      if(el.dataset.lobound) return;
+      el.dataset.lobound = '1';
+      el.addEventListener('click',function(){
+        var lo=document.getElementById('dash-loading');
+        if(lo) lo.hidden=false;
+      });
+    });
+  }
+  // 정적 "범용상품 제안 솔루션 보기" 버튼은 페이지 로드 즉시 바인딩
+  bindLoadingOverlay();
+
   function renderBrand(b){
     var enc = encodeURIComponent(b.brand_name||'');
     var cm  = b.cm_rate != null ? ' · CM '+b.cm_rate+'%' : '';
@@ -77,37 +91,62 @@
   }
 
   function applyData(d){
-    document.getElementById('dash-eyebrow').textContent = d.is_leader ? 'TEAM DASHBOARD' : 'MY DASHBOARD';
-    document.getElementById('dash-title').textContent   = d.is_leader ? (d.team_name+' 현황') : '내 담당 영업 현황';
-    document.getElementById('dash-subtitle').textContent
-      = (d.latest_ym||'-')+' 현월 기준 · 최신 대금청구일 '+(d.latest_bill_date||'-')+' · 로그인 계정 권한 기준으로 표시합니다.';
-    document.getElementById('m-sales').textContent        = fmt(d.sales_m)+'백만';
-    document.getElementById('m-brand-count').textContent  = d.brand_count;
-    document.getElementById('m-franchise').textContent    = fmt(d.franchise_count);
-    document.getElementById('m-general').textContent      = fmt(d.general_count);
-    document.getElementById('m-customers').textContent    = fmt(d.customer_count);
-    document.getElementById('m-cm').textContent           = d.cm_rate+'%';
-    document.getElementById('m-cm-label').textContent     = 'CM 최신 적재월 '+(d.profit_ym||'-');
-    document.getElementById('m-ar').textContent           = fmt(d.ar_balance_m)+'백만';
-    var bl = document.getElementById('brand-list');
-    if(d.brands && d.brands.length){
-      bl.innerHTML = d.brands.map(renderBrand).join('');
+    // ── 타이틀: is_leader 여부로 결정 ──
+    var eyebrow = document.getElementById('dash-eyebrow');
+    var title   = document.getElementById('dash-title');
+    if(d.is_leader && d.team_name){
+      if(eyebrow) eyebrow.textContent = 'TEAM DASHBOARD';
+      if(title)   title.textContent   = d.team_name+' 현황';
     } else {
-      bl.innerHTML = '<div class="empty"><b>담당 브랜드 데이터가 없습니다.</b><span>로그인 계정의 담당 매출 데이터를 확인해주세요.</span></div>';
+      if(eyebrow) eyebrow.textContent = 'MY DASHBOARD';
+      if(title)   title.textContent   = '내 담당 영업 현황';
     }
-    document.querySelectorAll('a[href^="/portal/brand-report"], .portal-brand-row').forEach(function(el){
-      el.addEventListener('click',function(){
-        var lo=document.getElementById('dash-loading');
-        if(lo)lo.hidden=false;
-      });
-    });
+    var sub = document.getElementById('dash-subtitle');
+    if(sub) sub.textContent = (d.latest_ym||'-')+' 현월 기준 · 최신 대금청구일 '+(d.latest_bill_date||'-')+' · 로그인 계정 권한 기준으로 표시합니다.';
+
+    // ── 지표 카드 ──
+    var m = function(id,v){var el=document.getElementById(id);if(el)el.textContent=v;};
+    m('m-sales',      fmt(d.sales_m)+'백만');
+    m('m-brand-count',d.brand_count);
+    m('m-franchise',  fmt(d.franchise_count));
+    m('m-general',    fmt(d.general_count));
+    m('m-customers',  fmt(d.customer_count));
+    m('m-cm',         (d.cm_rate||0)+'%');
+    m('m-cm-label',   'CM 최신 적재월 '+(d.profit_ym||'-'));
+    m('m-ar',         fmt(d.ar_balance_m)+'백만');
+
+    // ── 브랜드 목록 ──
+    var bl = document.getElementById('brand-list');
+    if(bl){
+      if(d.brands && d.brands.length){
+        bl.innerHTML = d.brands.map(renderBrand).join('');
+      } else {
+        bl.innerHTML = '<div class="empty"><b>담당 브랜드 데이터가 없습니다.</b><span>로그인 계정의 담당 매출 데이터를 확인해주세요.</span></div>';
+      }
+      // 동적으로 추가된 브랜드 링크에도 로딩 오버레이 바인딩
+      bindLoadingOverlay();
+    }
   }
 
-  fetch('/portal/dashboard-data')
-    .then(function(r){if(!r.ok)throw new Error(r.status);return r.json();})
+  // ── fetch (타임아웃 90초) ──
+  var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  var tid  = ctrl ? setTimeout(function(){ ctrl.abort(); }, 90000) : null;
+
+  fetch('/portal/dashboard-data', ctrl ? {signal: ctrl.signal} : {})
+    .then(function(r){
+      if(tid) clearTimeout(tid);
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      return r.json();
+    })
     .then(applyData)
-    .catch(function(){
-      document.getElementById('dash-error').style.display='block';
+    .catch(function(err){
+      var errEl = document.getElementById('dash-error');
+      if(errEl){
+        errEl.style.display = 'block';
+        errEl.textContent = (err && err.name === 'AbortError')
+          ? '데이터 조회 시간이 초과되었습니다. 잠시 후 새로고침해 주세요.'
+          : '데이터를 불러오지 못했습니다. 페이지를 새로고침해 주세요.';
+      }
     });
 })();
 </script>
