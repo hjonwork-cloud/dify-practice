@@ -8,6 +8,7 @@ import json
 import os
 import secrets
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from decimal import Decimal
 from pathlib import Path
 from urllib.parse import parse_qs, quote
@@ -33,7 +34,7 @@ _SESSION_SECRET = os.getenv("PORTAL_SESSION_SECRET", "dongwon-portal-dev-secret-
 _DEFAULT_EMP_CODE = "20230720"
 
 _cache: dict[str, tuple[float, object]] = {}
-_CACHE_TTL = 300
+_CACHE_TTL = 600  # 10분 캐시 (기존 5분 → 성능 개선)
 
 
 def _asset_version() -> str:
@@ -409,11 +410,20 @@ def portal_dashboard(emp_code: str = _DEFAULT_EMP_CODE) -> dict:
     if cached is not None:
         return cached
     import main
-    latest = _latest_ym(emp_code)
-    brands = _brand_rows(emp_code)
-    summary = {}
-    latest_bill_date = _latest_bill_date(emp_code, latest) if latest else ""
-    if latest:
+
+    # ── Phase 1: 서로 독립적인 쿼리 3개 병렬 실행 ──────────────────
+    with ThreadPoolExecutor(max_workers=3) as ex:
+        f_latest  = ex.submit(_latest_ym, emp_code)
+        f_brands  = ex.submit(_brand_rows, emp_code)
+        f_profit  = ex.submit(_profit_latest_ym, emp_code)
+    latest     = f_latest.result()
+    brands     = f_brands.result()
+    profit_ym  = f_profit.result()
+
+    # ── Phase 2: latest/profit_ym 확정 후 나머지 4개 병렬 실행 ──────
+    def _q_summary():
+        if not latest:
+            return {}
         rows = _q(f"""
             WITH base AS (
                 SELECT `ZC본부`, `거래처`, `매출액`
@@ -438,36 +448,55 @@ def portal_dashboard(emp_code: str = _DEFAULT_EMP_CODE) -> dict:
                 COUNT(DISTINCT `거래처`) AS total_count
             FROM base
         """)
-        summary = rows[0] if rows else {}
-    profit_ym = _profit_latest_ym(emp_code)
-    cm_rate = 0.0
-    try:
-        rows = _q(f"""
-            WITH my_customers AS (
-                SELECT DISTINCT `거래처`
-                FROM {main.T_MAIN}
+        return rows[0] if rows else {}
+
+    def _q_bill_date():
+        return _latest_bill_date(emp_code, latest) if latest else ""
+
+    def _q_cm():
+        if not profit_ym:
+            return 0.0
+        try:
+            rows = _q(f"""
+                WITH my_customers AS (
+                    SELECT DISTINCT `거래처`
+                    FROM {main.T_MAIN}
+                    WHERE `영업사원` = {_sql(emp_code)}
+                )
+                SELECT CASE WHEN SUM(p.`FI매출액`) = 0 THEN 0
+                            ELSE SUM(p.`공헌이익`) / SUM(p.`FI매출액`) END AS cm_rate
+                FROM {main.T_PROFIT} p
+                INNER JOIN my_customers c ON TRIM(LEADING '0' FROM CAST(p.`고객` AS STRING)) = TRIM(LEADING '0' FROM CAST(c.`거래처` AS STRING))
+                WHERE DATE_FORMAT(p.`날짜`, 'yyyyMM') = {_sql(profit_ym)}
+            """)
+            return _pct((rows[0] or {}).get("cm_rate")) if rows else 0.0
+        except Exception:
+            return 0.0
+
+    def _q_ar():
+        if not latest:
+            return 0
+        try:
+            rows = _q(f"""
+                SELECT SUM(`현재잔액`) AS balance
+                FROM {main.T_AR}
                 WHERE `영업사원` = {_sql(emp_code)}
-            )
-            SELECT CASE WHEN SUM(p.`FI매출액`) = 0 THEN 0
-                        ELSE SUM(p.`공헌이익`) / SUM(p.`FI매출액`) END AS cm_rate
-            FROM {main.T_PROFIT} p
-            INNER JOIN my_customers c ON TRIM(LEADING '0' FROM CAST(p.`고객` AS STRING)) = TRIM(LEADING '0' FROM CAST(c.`거래처` AS STRING))
-            WHERE DATE_FORMAT(p.`날짜`, 'yyyyMM') = {_sql(profit_ym)}
-        """)
-        cm_rate = _pct((rows[0] or {}).get("cm_rate")) if rows else 0.0
-    except Exception:
-        cm_rate = 0.0
-    ar_balance = 0
-    try:
-        rows = _q(f"""
-            SELECT SUM(`현재잔액`) AS balance
-            FROM {main.T_AR}
-            WHERE `영업사원` = {_sql(emp_code)}
-              AND `년월` = {_sql(latest)}
-        """)
-        ar_balance = _won_m((rows[0] or {}).get("balance")) if rows else 0
-    except Exception:
-        ar_balance = 0
+                  AND `년월` = {_sql(latest)}
+            """)
+            return _won_m((rows[0] or {}).get("balance")) if rows else 0
+        except Exception:
+            return 0
+
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        f_summary   = ex.submit(_q_summary)
+        f_bill_date = ex.submit(_q_bill_date)
+        f_cm        = ex.submit(_q_cm)
+        f_ar        = ex.submit(_q_ar)
+    summary          = f_summary.result()
+    latest_bill_date = f_bill_date.result()
+    cm_rate          = f_cm.result()
+    ar_balance       = f_ar.result()
+
     data = {
         "latest_ym": latest,
         "latest_bill_date": latest_bill_date,
@@ -751,8 +780,11 @@ def portal_admin_overview(thresholds: dict[str, float] | None = None) -> dict:
     import main
     latest = _division_latest_ym()
     prev_ym = _month_shift(latest, -1) if latest else ""
-    summary = {}
-    if latest:
+
+    # ── Phase 1: latest 확정 후 독립 쿼리 3개 병렬 실행 ──────────────
+    def _q_summary():
+        if not latest:
+            return {}
         rows = _q(f"""
             SELECT SUM(`매출액`) AS sales,
                    COUNT(DISTINCT `거래처`) AS customers,
@@ -762,22 +794,59 @@ def portal_admin_overview(thresholds: dict[str, float] | None = None) -> dict:
             WHERE `사업부명` = {_sql(access_control.AUTH_DEPT)}
               AND `년월` = {_sql(latest)}
         """)
-        summary = rows[0] if rows else {}
-    cm_rate = 0.0
-    profit_ym = ""
-    try:
-        rows = _q(f"""
-            WITH div_customers AS (
-                SELECT DISTINCT `거래처`
-                FROM {main.T_MAIN}
-                WHERE `사업부명` = {_sql(access_control.AUTH_DEPT)}
-            )
-            SELECT MAX(DATE_FORMAT(p.`날짜`, 'yyyyMM')) AS ym
-            FROM {main.T_PROFIT} p
-            INNER JOIN div_customers c ON TRIM(LEADING '0' FROM CAST(p.`고객` AS STRING)) = TRIM(LEADING '0' FROM CAST(c.`거래처` AS STRING))
-        """)
-        profit_ym = str((rows[0] or {}).get("ym") or "") if rows else ""
-        if profit_ym:
+        return rows[0] if rows else {}
+
+    def _q_profit_ym():
+        try:
+            rows = _q(f"""
+                WITH div_customers AS (
+                    SELECT DISTINCT `거래처`
+                    FROM {main.T_MAIN}
+                    WHERE `사업부명` = {_sql(access_control.AUTH_DEPT)}
+                )
+                SELECT MAX(DATE_FORMAT(p.`날짜`, 'yyyyMM')) AS ym
+                FROM {main.T_PROFIT} p
+                INNER JOIN div_customers c ON TRIM(LEADING '0' FROM CAST(p.`고객` AS STRING)) = TRIM(LEADING '0' FROM CAST(c.`거래처` AS STRING))
+            """)
+            return str((rows[0] or {}).get("ym") or "") if rows else ""
+        except Exception:
+            return ""
+
+    def _q_ar():
+        if not latest:
+            return 0
+        try:
+            rows = _q(f"""
+                WITH div_sales AS (
+                    SELECT DISTINCT `영업사원`
+                    FROM {main.T_MAIN}
+                    WHERE `사업부명` = {_sql(access_control.AUTH_DEPT)}
+                      AND `년월` = {_sql(latest)}
+                )
+                SELECT SUM(a.`현재잔액`) AS balance
+                FROM {main.T_AR} a
+                INNER JOIN div_sales s ON a.`영업사원` = s.`영업사원`
+                WHERE a.`년월` = {_sql(latest)}
+            """)
+            return _won_m((rows[0] or {}).get("balance")) if rows else 0
+        except Exception:
+            return 0
+
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        f_summary   = ex.submit(_q_summary)
+        f_profit_ym = ex.submit(_q_profit_ym)
+        f_ar        = ex.submit(_q_ar)
+        f_bill_date = ex.submit(_division_bill_date, latest)
+    summary    = f_summary.result()
+    profit_ym  = f_profit_ym.result()
+    ar_balance = f_ar.result()
+    bill_date  = f_bill_date.result()
+
+    # ── Phase 2: profit_ym 확정 후 CM율 + solution 병렬 ──────────────
+    def _q_cm():
+        if not profit_ym:
+            return 0.0
+        try:
             rows = _q(f"""
                 WITH div_customers AS (
                     SELECT DISTINCT `거래처`
@@ -790,31 +859,20 @@ def portal_admin_overview(thresholds: dict[str, float] | None = None) -> dict:
                 INNER JOIN div_customers c ON TRIM(LEADING '0' FROM CAST(p.`고객` AS STRING)) = TRIM(LEADING '0' FROM CAST(c.`거래처` AS STRING))
                 WHERE DATE_FORMAT(p.`날짜`, 'yyyyMM') = {_sql(profit_ym)}
             """)
-            cm_rate = _pct((rows[0] or {}).get("cm_rate")) if rows else 0.0
-    except Exception:
-        cm_rate = 0.0
-    ar_balance = 0
-    try:
-        rows = _q(f"""
-                        WITH div_sales AS (
-                                SELECT DISTINCT `영업사원`
-                                FROM {main.T_MAIN}
-                                WHERE `사업부명` = {_sql(access_control.AUTH_DEPT)}
-                                    AND `년월` = {_sql(latest)}
-                        )
-                        SELECT SUM(a.`현재잔액`) AS balance
-                        FROM {main.T_AR} a
-                        INNER JOIN div_sales s ON a.`영업사원` = s.`영업사원`
-                        WHERE a.`년월` = {_sql(latest)}
-        """)
-        ar_balance = _won_m((rows[0] or {}).get("balance")) if rows else 0
-    except Exception:
-        ar_balance = 0
-    solution = admin_proposal_solution(prev_ym, thresholds or {})
+            return _pct((rows[0] or {}).get("cm_rate")) if rows else 0.0
+        except Exception:
+            return 0.0
+
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        f_cm       = ex.submit(_q_cm)
+        f_solution = ex.submit(admin_proposal_solution, prev_ym, thresholds or {})
+    cm_rate  = f_cm.result()
+    solution = f_solution.result()
+
     return {
         "latest_ym": latest,
         "prev_ym": prev_ym,
-        "latest_bill_date": _division_bill_date(latest),
+        "latest_bill_date": bill_date,
         "profit_ym": profit_ym,
         "sales_m": _money_m(summary.get("sales")),
         "customer_count": int(summary.get("customers") or 0),
