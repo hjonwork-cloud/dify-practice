@@ -1,32 +1,12 @@
 {% extends 'portal_base.html' %}{% block title %}내 대시보드{% endblock %}{% block content %}
 <div class="portal-heading">
-  <div><p class="eyebrow">{% if data.is_leader %}TEAM DASHBOARD{% else %}MY DASHBOARD{% endif %}</p><h1>{% if data.is_leader %}{{ data.team_name }} 현황{% else %}내 담당 영업 현황{% endif %}</h1><p>{{ data.latest_ym or '-' }} 현월 기준 · 최신 대금청구일 {{ data.latest_bill_date or '-' }} · 로그인 계정 권한 기준으로 표시합니다.</p></div>
-<a class="btn portal-primary" href="/portal/brand-report" id="brandReportBtn">범용상품 제안 솔루션 보기</a>
-</div>
-<div id="dash-loading" class="portal-loading-overlay" hidden>
-  <div class="portal-loading-box">
-    <div class="portal-spinner"></div>
-    <p><b>거래처를 분석하고 있습니다</b></p>
-    <small>브랜드별 범용상품 비중과 제안 대상을 계산 중입니다.<br>잠시만 기다려 주세요.</small>
+  <div>
+    <p class="eyebrow">{% if data.is_leader %}TEAM DASHBOARD{% else %}MY DASHBOARD{% endif %}</p>
+    <h1>{% if data.is_leader %}{{ data.team_name }} 현황{% else %}내 담당 영업 현황{% endif %}</h1>
+    <p>{{ data.latest_ym or '-' }} 현월 기준 · 최신 대금청구일 {{ data.latest_bill_date or '-' }} · 로그인 계정 권한 기준으로 표시합니다.</p>
   </div>
+  <a class="btn portal-primary" href="/portal/brand-report" id="brandReportBtn">범용상품 제안 솔루션 보기</a>
 </div>
-<style>
-.portal-loading-overlay{position:fixed;inset:0;background:rgba(255,255,255,.92);z-index:9999;display:flex;align-items:center;justify-content:center;}
-.portal-loading-overlay[hidden]{display:none!important;}
-.portal-loading-box{text-align:center;padding:2rem;}
-.portal-spinner{width:48px;height:48px;border:5px solid #e5e7eb;border-top-color:#16a34a;border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 1.5rem;}
-@keyframes spin{to{transform:rotate(360deg);}}
-.portal-loading-box p{font-size:1.1rem;color:#111;margin:.5rem 0;}
-.portal-loading-box small{color:#6b7280;line-height:1.6;}
-</style>
-<script>
-document.querySelectorAll('a[href^="/portal/brand-report"], .portal-brand-row').forEach(function(el){
-  el.addEventListener('click', function(){
-    var lo = document.getElementById('dash-loading');
-    if(lo) lo.hidden = false;
-  });
-});
-</script>
 
 <section class="portal-metric-grid">
   <article><span>매출액</span><strong>{{ '{:,}'.format(data.sales_m) }}백만</strong><small>현월 담당 전체 매출</small></article>
@@ -59,4 +39,29 @@ document.querySelectorAll('a[href^="/portal/brand-report"], .portal-brand-row').
     <a class="btn portal-light" href="/portal/brand-report">바로 점검</a>
   </aside>
 </section>
+
+<style>
+.portal-loading-overlay{position:fixed;inset:0;background:rgba(255,255,255,.92);z-index:9999;display:flex;align-items:center;justify-content:center;}
+.portal-loading-overlay[hidden]{display:none!important;}
+.portal-loading-box{text-align:center;padding:2rem;}
+.portal-spinner{width:48px;height:48px;border:5px solid #e5e7eb;border-top-color:#16a34a;border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 1.5rem;}
+@keyframes spin{to{transform:rotate(360deg);}}
+.portal-loading-box p{font-size:1.1rem;color:#111;margin:.5rem 0;}
+.portal-loading-box small{color:#6b7280;line-height:1.6;}
+</style>
+<div id="dash-loading" class="portal-loading-overlay" hidden>
+  <div class="portal-loading-box">
+    <div class="portal-spinner"></div>
+    <p><b>거래처를 분석하고 있습니다</b></p>
+    <small>브랜드별 범용상품 비중과 제안 대상을 계산 중입니다.<br>잠시만 기다려 주세요.</small>
+  </div>
+</div>
+<script>
+document.querySelectorAll('a[href^="/portal/brand-report"], .portal-brand-row').forEach(function(el){
+  el.addEventListener('click', function(){
+    var lo = document.getElementById('dash-loading');
+    if(lo) lo.hidden = false;
+  });
+});
+</script>
 {% endblock %}
