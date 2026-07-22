@@ -86,6 +86,12 @@
   var PER_PAGE   = 20;
 
   function fmt(n){return Number(n||0).toLocaleString('ko-KR');}
+  function fmtDate(s){
+    s = String(s||'').replace(/-/g,'').replace(/\./g,'');
+    if(s.length===8) return s.slice(0,4)+'.'+s.slice(4,6)+'.'+s.slice(6,8);
+    if(s.length>=6)  return s.slice(0,6); // fallback: YYYYMM
+    return s||'-';
+  }
 
   function bindLoadingOverlay(){
     document.querySelectorAll('a[href^="/portal/brand-report"], .portal-brand-row').forEach(function(el){
@@ -172,7 +178,7 @@
       if(title)   title.textContent   = '내 담당 영업 현황';
     }
     var sub = document.getElementById('dash-subtitle');
-    if(sub) sub.textContent = (d.latest_ym||'-')+' 현월 기준 · 최신 대금청구일 '+(d.latest_bill_date||'-')+' · 로그인 계정 권한 기준으로 표시합니다.';
+    if(sub) sub.textContent = (d.latest_ym||'-')+' 현월 기준 · 최신 대금청구일 '+fmtDate(d.latest_bill_date)+' · 로그인 계정 권한 기준으로 표시합니다.';
 
     var m = function(id,v){var el=document.getElementById(id);if(el)el.textContent=v;};
     m('m-sales',      fmt(d.sales_m)+'백만');
