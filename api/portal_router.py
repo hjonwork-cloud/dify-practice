@@ -671,11 +671,10 @@ def _recommend_products(brand_name: str, customer_code: str, months: list[str], 
 
 def _dm_message(brand_name: str, customer: dict, brand_avg: float, products: list[dict]) -> str:
     product_lines = "\n".join(f"• {p.get('product_name') or p.get('product_code')}" for p in products[:5]) or "• 추천 후보 상품 확인 필요"
-    ratio = customer.get("generic_ratio", 0)
     return (
         f"안녕하세요, {customer.get('customer_name')} 사장님.\n\n"
-        f"최근 {brand_name} 가맹점의 범용상품 평균 사용률은 약 {brand_avg:.1f}%인데, "
-        f"{customer.get('customer_name')}은 현재 {ratio:.1f}% 수준으로 확인됩니다.\n\n"
+        f"{brand_name}을 운영해주셔서 감사드립니다. "
+        f"동원홈푸드 영업담당자입니다.\n\n"
         "동일 브랜드 내 다른 가맹점에서 사용 빈도가 높은 상품 중 아직 주문이 없는 품목이 있어 추천드립니다.\n\n"
         f"추천 품목\n{product_lines}\n\n"
         "해당 상품은 다른 가맹점에서 꾸준히 사용 중인 품목으로, 메뉴 운영 안정화와 원가 개선 관점에서 검토해보시면 좋겠습니다."
