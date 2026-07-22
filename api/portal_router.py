@@ -7,6 +7,7 @@ import hmac
 import json
 import os
 import secrets
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from decimal import Decimal
@@ -777,6 +778,12 @@ def _division_bill_date(ym: str) -> str:
 
 
 def portal_admin_overview(thresholds: dict[str, float] | None = None) -> dict:
+    # thresholds가 없는 기본 조회는 캐시 적용 (10분)
+    _th = thresholds or {}
+    _cache_key = f"admin_overview:{hashlib.md5(json.dumps(_th, sort_keys=True).encode()).hexdigest()[:8]}"
+    cached = _cache_get(_cache_key)
+    if cached is not None:
+        return cached
     import main
     latest = _division_latest_ym()
     prev_ym = _month_shift(latest, -1) if latest else ""
@@ -869,7 +876,7 @@ def portal_admin_overview(thresholds: dict[str, float] | None = None) -> dict:
     cm_rate  = f_cm.result()
     solution = f_solution.result()
 
-    return {
+    result = {
         "latest_ym": latest,
         "prev_ym": prev_ym,
         "latest_bill_date": bill_date,
@@ -882,11 +889,18 @@ def portal_admin_overview(thresholds: dict[str, float] | None = None) -> dict:
         "ar_balance_m": ar_balance,
         "solution": solution,
     }
+    return _cache_set(_cache_key, result)
 
 
 def admin_proposal_solution(prev_ym: str, thresholds: dict[str, float]) -> dict:
     if not prev_ym:
         return {"brands": [], "proposal_possible_sales_m": 0, "generic_gp_rate": 0, "expected_profit_increase_m": 0}
+    # thresholds가 기본값(빈 dict)이면 캐시 사용
+    _th_key = hashlib.md5(json.dumps(thresholds, sort_keys=True).encode()).hexdigest()[:8]
+    _cache_key = f"admin_solution:{prev_ym}:{_th_key}"
+    cached = _cache_get(_cache_key)
+    if cached is not None:
+        return cached
     import main
     rows = _q(f"""
         SELECT COALESCE(`ZC본부`, '') AS brand_code,
@@ -968,13 +982,14 @@ def admin_proposal_solution(prev_ym: str, thresholds: dict[str, float]) -> dict:
         })
     brands.sort(key=lambda x: x.get("proposal_possible_sales", 0), reverse=True)
     total_gp = (total_expected_profit / total_proposal) if total_proposal else 0.0
-    return {
+    result = {
         "brands": brands,
         "proposal_possible_sales_m": _money_m(total_proposal),
         "generic_gp_rate": _pct(total_gp),
         "expected_profit_increase_m": _money_m(total_expected_profit),
         "target_count": sum(int(b.get("targets") or 0) for b in brands),
     }
+    return _cache_set(_cache_key, result)
 
 
 @router.get("", response_class=HTMLResponse)
@@ -1097,3 +1112,27 @@ async def dm_log(request: Request):
         status="test_logged",
     )
     return _redirect_msg("/portal/brand-report", brand=form.get("brand_name", ""), sent="1")
+
+
+# ── 서버 시작 시 백그라운드 캐시 워밍업 ──────────────────────────────
+def _warmup_cache():
+    """서버 시작 후 30초 대기 후 주요 캐시를 미리 채운다."""
+    import logging
+    _log = logging.getLogger("portal_warmup")
+    time.sleep(30)  # 서버 완전 기동 대기
+    try:
+        _log.info("[warmup] 관리자 대시보드 캐시 워밍업 시작")
+        portal_admin_overview({})
+        _log.info("[warmup] 관리자 대시보드 캐시 완료")
+    except Exception as e:
+        _log.warning(f"[warmup] 관리자 대시보드 실패: {e}")
+    try:
+        _log.info("[warmup] 사업부 기준 데이터 워밍업 시작")
+        _division_latest_ym()
+        _employee_whitelist()
+        _log.info("[warmup] 사업부 기준 데이터 완료")
+    except Exception as e:
+        _log.warning(f"[warmup] 사업부 데이터 실패: {e}")
+
+
+threading.Thread(target=_warmup_cache, daemon=True, name="portal-warmup").start()
