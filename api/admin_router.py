@@ -443,9 +443,14 @@ async def login_page(request: Request):
     if _current_admin(request):
         return _redirect("/admin")
     # 이미 DB에 활성 관리자 계정이 있거나, 최초 부트스트랩용 환경변수가 설정돼 있으면 로그인 가능
-    configured = any(a.get("active") for a in admin_db.list_admins()) or bool(
-        os.getenv("ADMIN_CONSOLE_USERNAME") and os.getenv("ADMIN_CONSOLE_PASSWORD")
-    )
+    try:
+        configured = any(a.get("active") for a in admin_db.list_admins()) or bool(
+            os.getenv("ADMIN_CONSOLE_USERNAME") and os.getenv("ADMIN_CONSOLE_PASSWORD")
+        )
+    except Exception:
+        configured = bool(
+            os.getenv("ADMIN_CONSOLE_USERNAME") and os.getenv("ADMIN_CONSOLE_PASSWORD")
+        )
     return _render(request, "admin_login.html", configured=configured, error="")
 
 
