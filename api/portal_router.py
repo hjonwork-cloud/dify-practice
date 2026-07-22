@@ -472,16 +472,41 @@ def _brand_rows(emp_code: str = _DEFAULT_EMP_CODE) -> list[dict]:
         ORDER BY a.sales DESC
         LIMIT 200
     """)
-    out = []
+    zc8_rows: list[dict] = []
+    gen_sales = gen_my_sales = 0.0
+    gen_count = gen_my_count = 0
     for r in rows:
+        code = str(r.get("brand_code") or "")
+        is_zc8 = code.lstrip("0")[:1] == "8"
         sales = float(r.get("sales") or 0)
         classified = float(r.get("classified_sales") or 0)
-        out.append({
+        row_out = {
             **r,
             "sales_m": _money_m(sales),
             "my_sales_m": _money_m(r.get("my_sales")),
             "generic_ratio": _pct((float(r.get("generic_sales") or 0) / classified) if classified else 0),
-            "cm_rate": None,  # portal_dashboard에서 채움
+            "cm_rate": None,
+        }
+        if is_zc8:
+            zc8_rows.append(row_out)
+        else:
+            gen_sales += sales
+            gen_my_sales += float(r.get("my_sales") or 0)
+            gen_count += int(r.get("customer_count") or 0)
+            gen_my_count += int(r.get("my_customer_count") or 0)
+    out = zc8_rows
+    if gen_sales > 0 or gen_my_count > 0:
+        out.append({
+            "brand_code": "일반외식",
+            "brand_name": "🧑\u200d🍳일반외식업장",
+            "sales": gen_sales,
+            "sales_m": _money_m(gen_sales),
+            "my_sales": gen_my_sales,
+            "my_sales_m": _money_m(gen_my_sales),
+            "customer_count": gen_count,
+            "my_customer_count": gen_my_count,
+            "dedicated_sales": 0, "generic_sales": 0, "classified_sales": 0,
+            "generic_ratio": 0.0, "cm_rate": None,
         })
     return _cache_set(f"brands:{emp_code}", out)
 
@@ -904,7 +929,7 @@ def portal_admin_overview(thresholds: dict[str, float] | None = None) -> dict:
         rows = _q(f"""
             SELECT SUM(`매출액`) AS sales,
                    COUNT(DISTINCT `거래처`) AS customers,
-                   COUNT(DISTINCT `ZC본부명`) AS brands,
+                   COUNT(DISTINCT CASE WHEN LEFT(TRIM(LEADING '0' FROM TRIM(CAST(`ZC본부` AS STRING))), 1) = '8' THEN `ZC본부` ELSE NULL END) AS brands,
                    COUNT(DISTINCT `영업사원`) AS employees
             FROM {main.T_MAIN}
             WHERE `사업부명` = {_sql(access_control.AUTH_DEPT)}
@@ -1025,6 +1050,7 @@ def admin_proposal_solution(prev_ym: str, thresholds: dict[str, float]) -> dict:
         WHERE `사업부명` = {_sql(access_control.AUTH_DEPT)}
           AND `년월` = {_sql(prev_ym)}
           AND COALESCE(`ZC본부명`, '') <> ''
+          AND LEFT(TRIM(LEADING '0' FROM TRIM(CAST(`ZC본부` AS STRING))), 1) = '8'
         GROUP BY COALESCE(`ZC본부`, ''), COALESCE(`ZC본부명`, '미분류'), `거래처`
         HAVING SUM(`매출액`) > 0
     """)

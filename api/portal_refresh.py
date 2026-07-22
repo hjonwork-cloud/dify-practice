@@ -17,9 +17,12 @@ T_BRANDS = "h_hmfo_fsi_dm.gd_rst_ing.portal_emp_brands"
 def run_refresh(force: bool = False) -> dict:
     """요약 테이블 재계산 (서버 내부 호출용)."""
     import main
+    import access_control as _ac
     T_MAIN   = main.T_MAIN
     T_PROFIT = main.T_PROFIT
     T_AR     = main.T_AR
+    _admin_code = _ac.ADMIN_EMP_CODE
+    _auth_dept  = _ac.AUTH_DEPT
     start = time.time()
 
     rows = main._safe_query(f"SELECT MAX(`년월`) AS ym FROM {T_MAIN} WHERE `매출액` IS NOT NULL", raw=True)
@@ -124,7 +127,16 @@ def run_refresh(force: bool = False) -> dict:
                COUNT(DISTINCT cust_code) AS customer_count
         FROM leader_base GROUP BY emp_code
     ),
-    all_emp AS (SELECT * FROM emp_agg UNION ALL SELECT * FROM leader_agg)
+    admin_agg AS (
+        SELECT '{_admin_code}' AS emp_code, '{_auth_dept}' AS team_name,
+               ROUND(SUM(sales_raw)/10000) AS sales_m,
+               COUNT(DISTINCT CASE WHEN {_zc8a} THEN zc_code END) AS brand_count,
+               COUNT(DISTINCT CASE WHEN {_zc8a} THEN cust_code END) AS franchise_count,
+               COUNT(DISTINCT CASE WHEN NOT ({_zc8a}) THEN cust_code END) AS general_count,
+               COUNT(DISTINCT cust_code) AS customer_count
+        FROM base
+    ),
+    all_emp AS (SELECT * FROM emp_agg UNION ALL SELECT * FROM leader_agg UNION ALL SELECT * FROM admin_agg)
     SELECT e.emp_code, e.team_name,
            '{latest_ym}' AS latest_ym, '{profit_ym}' AS profit_ym,
            COALESCE(CAST(b.latest_bill_date AS STRING), '') AS latest_bill_date,
@@ -223,6 +235,40 @@ def run_refresh(force: bool = False) -> dict:
     ),
     gr AS (SELECT * FROM gr_emp UNION ALL SELECT * FROM gr_leader WHERE emp_code IS NOT NULL)
     {cm_brand_cte}
+    , gen_all AS (
+        SELECT ROUND(SUM(`매출액`)/10000) AS sales_m,
+               COUNT(DISTINCT `거래체`) AS customer_count
+        FROM {T_MAIN}
+        WHERE `년월` = '{latest_ym}' AND `사업부명` = '외식식재사업부'
+          AND (`ZC본부` IS NULL OR NOT ({_zc8}))
+    )
+    , gen_emp AS (
+        SELECT `영업사원` AS emp_code,
+               ROUND(SUM(`매출액`)/10000) AS my_sales_m,
+               COUNT(DISTINCT `거래체`) AS my_customer_count
+        FROM {T_MAIN}
+        WHERE `년월` = '{latest_ym}' AND `사업부명` = '외식식재사업부'
+          AND (`ZC본부` IS NULL OR NOT ({_zc8}))
+        GROUP BY `영업사원`
+    )
+    , gen_leader AS (
+        SELECT {_leader_case} AS emp_code,
+               ROUND(SUM(`매출액`)/10000) AS my_sales_m,
+               COUNT(DISTINCT `거래체`) AS my_customer_count
+        FROM {T_MAIN}
+        WHERE `년월` = '{latest_ym}' AND `사업부명` = '외식식재사업부'
+          AND (`ZC본부` IS NULL OR NOT ({_zc8})) AND `지점명` IN ({_leaders_in})
+        GROUP BY `지점명`
+    )
+    , gen_b AS (
+        SELECT * FROM gen_emp
+        UNION ALL SELECT * FROM gen_leader WHERE emp_code IS NOT NULL
+        UNION ALL SELECT '{_admin_code}' AS emp_code, sales_m AS my_sales_m, customer_count AS my_customer_count FROM gen_all
+    )
+    , admin_b AS (
+        SELECT '{_admin_code}' AS emp_code, brand_code, brand_name, customer_count AS my_customer_count, sales_m AS my_sales_m
+        FROM all_b
+    )
     SELECT mb.emp_code, mb.brand_code, mb.brand_name,
            COALESCE(ab.customer_count,0) AS customer_count,
            COALESCE(ab.sales_m,0) AS sales_m,
@@ -234,7 +280,22 @@ def run_refresh(force: bool = False) -> dict:
     LEFT JOIN all_b ab ON mb.brand_code = ab.brand_code
     LEFT JOIN gr    ON mb.emp_code = gr.emp_code AND mb.brand_code = gr.brand_code
     LEFT JOIN cm_brand cm ON mb.emp_code = cm.emp_code AND mb.brand_code = cm.brand_code
-    ORDER BY mb.emp_code, COALESCE(ab.sales_m,0) DESC
+    UNION ALL
+    SELECT gb.emp_code, '일반외식' AS brand_code, '🧑‍🍳일반외식업장' AS brand_name,
+           COALESCE(ga.customer_count, 0) AS customer_count,
+           COALESCE(ga.sales_m, 0) AS sales_m,
+           gb.my_customer_count, gb.my_sales_m,
+           0.0 AS generic_ratio, CAST(NULL AS DOUBLE) AS cm_rate,
+           CURRENT_TIMESTAMP() AS updated_at
+    FROM gen_b gb CROSS JOIN gen_all ga
+    UNION ALL
+    SELECT adb.emp_code, adb.brand_code, adb.brand_name,
+           COALESCE(ab3.customer_count, 0) AS customer_count,
+           COALESCE(ab3.sales_m, 0) AS sales_m,
+           adb.my_customer_count, adb.my_sales_m,
+           0.0 AS generic_ratio, CAST(NULL AS DOUBLE) AS cm_rate,
+           CURRENT_TIMESTAMP() AS updated_at
+    FROM admin_b adb LEFT JOIN all_b ab3 ON adb.brand_code = ab3.brand_code
     """
 
     try:
