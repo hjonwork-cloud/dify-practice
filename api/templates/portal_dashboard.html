@@ -1,35 +1,30 @@
-{% extends 'portal_base.html' %}{% block title %}내 대시보드{% endblock %}{% block content %}
+﻿{% extends 'portal_base.html' %}{% block title %}내 대시보드{% endblock %}{% block content %}
 <div class="portal-heading">
   <div>
-    <p class="eyebrow">{% if data.is_leader %}TEAM DASHBOARD{% else %}MY DASHBOARD{% endif %}</p>
-    <h1>{% if data.is_leader %}{{ data.team_name }} 현황{% else %}내 담당 영업 현황{% endif %}</h1>
-    <p>{{ data.latest_ym or '-' }} 현월 기준 · 최신 대금청구일 {{ data.latest_bill_date or '-' }} · 로그인 계정 권한 기준으로 표시합니다.</p>
+    <p class="eyebrow" id="dash-eyebrow">MY DASHBOARD</p>
+    <h1 id="dash-title">내 담당 영업 현황</h1>
+    <p id="dash-subtitle"><span class="skel skel-text" style="width:320px"></span></p>
   </div>
   <a class="btn portal-primary" href="/portal/brand-report" id="brandReportBtn">범용상품 제안 솔루션 보기</a>
 </div>
 
 <section class="portal-metric-grid">
-  <article><span>매출액</span><strong>{{ '{:,}'.format(data.sales_m) }}백만</strong><small>현월 담당 전체 매출</small></article>
-  <article><span>담당 브랜드</span><strong>{{ data.brand_count }}</strong><small>가맹 ZC코드 기준</small></article>
-  <article><span>가맹점</span><strong>{{ '{:,}'.format(data.franchise_count) }}</strong><small>ZC코드 8로 시작하는 거래처</small></article>
-  <article><span>일반외식업장</span><strong>{{ '{:,}'.format(data.general_count) }}</strong><small>ZC코드 외 거래처</small></article>
-  <article><span>총 거래처 수</span><strong>{{ '{:,}'.format(data.customer_count) }}</strong><small>담당 전체 거래처</small></article>
-  <article><span>공헌이익률</span><strong>{{ data.cm_rate }}%</strong><small>CM 최신 적재월 {{ data.profit_ym or '-' }}</small></article>
-  <article><span>미수채권</span><strong>{{ '{:,}'.format(data.ar_balance_m) }}백만</strong><small>현재잔액 합계</small></article>
+  <article><span>매출액</span><strong id="m-sales"><span class="skel skel-num"></span></strong><small>현월 담당 전체 매출</small></article>
+  <article><span>담당 브랜드</span><strong id="m-brand-count"><span class="skel skel-num skel-sm"></span></strong><small>가맹 ZC코드 기준</small></article>
+  <article><span>가맹점</span><strong id="m-franchise"><span class="skel skel-num"></span></strong><small>ZC코드 8로 시작하는 거래처</small></article>
+  <article><span>일반외식업장</span><strong id="m-general"><span class="skel skel-num"></span></strong><small>ZC코드 외 거래처</small></article>
+  <article><span>총 거래처 수</span><strong id="m-customers"><span class="skel skel-num"></span></strong><small>담당 전체 거래처</small></article>
+  <article><span>공헌이익률</span><strong id="m-cm"><span class="skel skel-num skel-sm"></span></strong><small id="m-cm-label">CM 최신 적재월 -</small></article>
+  <article><span>미수채권</span><strong id="m-ar"><span class="skel skel-num"></span></strong><small>현재잔액 합계</small></article>
 </section>
 
 <section class="portal-grid">
   <article class="portal-panel wide">
     <div class="portal-panel-head"><div><p class="eyebrow">BRANDS</p><h2>담당 브랜드</h2></div></div>
-    <div class="portal-brand-list">
-      {% for b in data.brands %}
-      <a href="/portal/brand-report?brand={{ b.brand_name|urlencode }}" class="portal-brand-row">
-             <div><b>{{ b.brand_name }}</b><small>브랜드 전체 {{ b.customer_count }}개 거래처 · 내 담당 {{ b.my_customer_count }}개 / {{ '{:,}'.format(b.my_sales_m) }}백만 · 범용상품 {{ b.generic_ratio }}%{% if b.cm_rate is not none %} · CM {{ b.cm_rate }}%{% endif %}</small></div>
-        <strong>{{ '{:,}'.format(b.sales_m) }}백만</strong>
-      </a>
-      {% else %}
-      <div class="empty"><b>담당 브랜드 데이터가 없습니다.</b><span>로그인 계정의 담당 매출 데이터를 확인해주세요.</span></div>
-      {% endfor %}
+    <div class="portal-brand-list" id="brand-list">
+      <div class="portal-brand-row skel-row"><div><div class="skel skel-text" style="width:140px;margin-bottom:6px"></div><div class="skel skel-text" style="width:260px"></div></div><div class="skel skel-text" style="width:60px"></div></div>
+      <div class="portal-brand-row skel-row"><div><div class="skel skel-text" style="width:120px;margin-bottom:6px"></div><div class="skel skel-text" style="width:220px"></div></div><div class="skel skel-text" style="width:60px"></div></div>
+      <div class="portal-brand-row skel-row"><div><div class="skel skel-text" style="width:160px;margin-bottom:6px"></div><div class="skel skel-text" style="width:240px"></div></div><div class="skel skel-text" style="width:60px"></div></div>
     </div>
   </article>
   <aside class="portal-panel accent">
@@ -41,6 +36,12 @@
 </section>
 
 <style>
+@keyframes shimmer{0%{background-position:-600px 0}100%{background-position:600px 0}}
+.skel{display:inline-block;background:linear-gradient(90deg,#e5e7eb 25%,#f3f4f6 50%,#e5e7eb 75%);background-size:600px 100%;animation:shimmer 1.4s infinite linear;border-radius:4px;vertical-align:middle;}
+.skel-text{height:14px;}
+.skel-num{height:28px;width:80px;}
+.skel-sm{width:52px;}
+.skel-row{pointer-events:none;cursor:default;}
 .portal-loading-overlay{position:fixed;inset:0;background:rgba(255,255,255,.92);z-index:9999;display:flex;align-items:center;justify-content:center;}
 .portal-loading-overlay[hidden]{display:none!important;}
 .portal-loading-box{text-align:center;padding:2rem;}
@@ -48,7 +49,11 @@
 @keyframes spin{to{transform:rotate(360deg);}}
 .portal-loading-box p{font-size:1.1rem;color:#111;margin:.5rem 0;}
 .portal-loading-box small{color:#6b7280;line-height:1.6;}
+#dash-error{display:none;background:#fef2f2;border:1px solid #fca5a5;color:#b91c1c;padding:.75rem 1rem;border-radius:8px;margin-bottom:1rem;font-size:.95rem;}
 </style>
+
+<div id="dash-error">데이터를 불러오지 못했습니다. 페이지를 새로고침해 주세요.</div>
+
 <div id="dash-loading" class="portal-loading-overlay" hidden>
   <div class="portal-loading-box">
     <div class="portal-spinner"></div>
@@ -56,12 +61,54 @@
     <small>브랜드별 범용상품 비중과 제안 대상을 계산 중입니다.<br>잠시만 기다려 주세요.</small>
   </div>
 </div>
+
 <script>
-document.querySelectorAll('a[href^="/portal/brand-report"], .portal-brand-row').forEach(function(el){
-  el.addEventListener('click', function(){
-    var lo = document.getElementById('dash-loading');
-    if(lo) lo.hidden = false;
-  });
-});
+(function(){
+  function fmt(n){return Number(n||0).toLocaleString('ko-KR');}
+
+  function renderBrand(b){
+    var enc = encodeURIComponent(b.brand_name||'');
+    var cm  = b.cm_rate != null ? ' · CM '+b.cm_rate+'%' : '';
+    return '<a href="/portal/brand-report?brand='+enc+'" class="portal-brand-row">'
+      +'<div><b>'+b.brand_name+'</b>'
+      +'<small>브랜드 전체 '+fmt(b.customer_count)+'개 거래처 · 내 담당 '
+      +fmt(b.my_customer_count)+'개 / '+fmt(b.my_sales_m)+'백만 · 범용상품 '+b.generic_ratio+'%'+cm+'</small></div>'
+      +'<strong>'+fmt(b.sales_m)+'백만</strong></a>';
+  }
+
+  function applyData(d){
+    document.getElementById('dash-eyebrow').textContent = d.is_leader ? 'TEAM DASHBOARD' : 'MY DASHBOARD';
+    document.getElementById('dash-title').textContent   = d.is_leader ? (d.team_name+' 현황') : '내 담당 영업 현황';
+    document.getElementById('dash-subtitle').textContent
+      = (d.latest_ym||'-')+' 현월 기준 · 최신 대금청구일 '+(d.latest_bill_date||'-')+' · 로그인 계정 권한 기준으로 표시합니다.';
+    document.getElementById('m-sales').textContent        = fmt(d.sales_m)+'백만';
+    document.getElementById('m-brand-count').textContent  = d.brand_count;
+    document.getElementById('m-franchise').textContent    = fmt(d.franchise_count);
+    document.getElementById('m-general').textContent      = fmt(d.general_count);
+    document.getElementById('m-customers').textContent    = fmt(d.customer_count);
+    document.getElementById('m-cm').textContent           = d.cm_rate+'%';
+    document.getElementById('m-cm-label').textContent     = 'CM 최신 적재월 '+(d.profit_ym||'-');
+    document.getElementById('m-ar').textContent           = fmt(d.ar_balance_m)+'백만';
+    var bl = document.getElementById('brand-list');
+    if(d.brands && d.brands.length){
+      bl.innerHTML = d.brands.map(renderBrand).join('');
+    } else {
+      bl.innerHTML = '<div class="empty"><b>담당 브랜드 데이터가 없습니다.</b><span>로그인 계정의 담당 매출 데이터를 확인해주세요.</span></div>';
+    }
+    document.querySelectorAll('a[href^="/portal/brand-report"], .portal-brand-row').forEach(function(el){
+      el.addEventListener('click',function(){
+        var lo=document.getElementById('dash-loading');
+        if(lo)lo.hidden=false;
+      });
+    });
+  }
+
+  fetch('/portal/dashboard-data')
+    .then(function(r){if(!r.ok)throw new Error(r.status);return r.json();})
+    .then(applyData)
+    .catch(function(){
+      document.getElementById('dash-error').style.display='block';
+    });
+})();
 </script>
 {% endblock %}

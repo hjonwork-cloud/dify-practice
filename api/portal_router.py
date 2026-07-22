@@ -1100,8 +1100,17 @@ def admin_proposal_solution(prev_ym: str, thresholds: dict[str, float]) -> dict:
 @router.get("", response_class=HTMLResponse)
 @router.get("/", response_class=HTMLResponse)
 async def portal_home(request: Request):
+    _require_user(request)          # 인증 확인만 (데이터 로드 없음 → 즉시 반환)
+    return _render(request, "portal_dashboard.html")
+
+
+@router.get("/dashboard-data")
+async def dashboard_data_api(request: Request):
+    """대시보드 데이터를 JSON으로 반환 (AJAX 전용)"""
+    from fastapi.responses import JSONResponse
     user = _require_user(request)
-    return _render(request, "portal_dashboard.html", data=portal_dashboard(user["emp_code"]))
+    data = portal_dashboard(user["emp_code"])
+    return JSONResponse(content=data)
 
 
 @router.get("/login", response_class=HTMLResponse)
