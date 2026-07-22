@@ -549,6 +549,8 @@ async def faq_list(request: Request):
     return _render(request, "admin_faq_list.html", faqs=admin_db.list_faqs())
 
 
+import access_control
+
 @router.get("/users", response_class=HTMLResponse)
 async def users(request: Request):
     _require_admin(request, ("system_admin",))
@@ -613,6 +615,7 @@ async def users(request: Request):
         members=members, registered_users=registered_users,
         registered_count=len(registered_users), blacklist_rows=blacklist_rows,
         admins=admin_db.list_admins(), team_options=main.TEAM_OPTIONS,
+        beta_emps=set(access_control.load_beta_testers().keys()),
     )
 
 

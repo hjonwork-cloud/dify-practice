@@ -23,12 +23,13 @@
   </article>
 </section>
 
-<section class="panel table-panel"><div class="panel-head"><div><p class="eyebrow">ORGANIZATION</p><h2>외식식재사업부 조직원</h2></div><div class="org-head-actions"><span class="team-batch-info" hidden></span><button type="button" id="teamBatchSave" class="btn tiny primary" hidden>변경내역 저장</button><input class="table-search" data-target="orgTable" placeholder="이름·사번·팀 검색"></div></div>
+<section class="panel table-panel" id="orgSection"><div class="panel-head"><div><p class="eyebrow">ORGANIZATION</p><h2>외식식재사업부 조직원</h2></div><div class="org-head-actions"><span class="team-batch-info" hidden></span><button type="button" id="teamBatchSave" class="btn tiny primary" hidden>변경내역 저장</button><select id="orgTeamFilter" class="table-search" style="width:auto;min-width:120px;" aria-label="소속 필터"><option value="">전체 소속</option>{% set _teams = [] %}{% for m in members %}{% if m.team and m.team not in _teams %}{% set _ = _teams.append(m.team) %}{% endif %}{% endfor %}{% for t in _teams|sort %}<option value="{{ t }}">{{ t }}</option>{% endfor %}</select><input class="table-search" id="orgSearch" data-target="orgTable" placeholder="이름·사번·팀 검색"><button type="button" id="orgToggle" class="btn tiny" onclick="toggleOrg()">접기 ▲</button></div></div>
+<div id="orgBody">
 {% if members %}
 <div class="table-scroll"><table id="orgTable"><thead><tr><th>이름</th><th>사번</th><th>소속</th><th>상태</th><th>처리</th></tr></thead><tbody>
 {% for m in members %}
-<tr data-search="{{ m.name }} {{ m.emp_code }} {{ m.team }}">
-  <td><b>{{ m.name }}</b></td><td>{{ m.emp_code }}</td>
+<tr data-search="{{ m.name }} {{ m.emp_code }} {{ m.team }}" data-team="{{ m.team }}">
+  <td><b>{{ m.name }}</b>{% if m.emp_code in beta_emps %} <span class="badge-beta">베타</span>{% endif %}</td><td>{{ m.emp_code }}</td>
   <td>
     <select class="team-select" data-emp="{{ m.emp_code }}" data-orig="{{ m.team }}" aria-label="{{ m.name }} 소속">
       {% if m.team and m.team not in team_options %}<option value="{{ m.team }}" selected>{{ m.team }} (현재)</option>{% endif %}
@@ -51,6 +52,22 @@
 {% else %}
 <div class="empty"><b>조직원 목록을 불러오지 못했습니다.</b><span>매출 데이터(Databricks) 조회 권한을 확인해주세요. 목록 조회와 무관하게 위 <b>신규 입사자 수기 등록</b>은 사용할 수 있습니다.</span></div>
 {% endif %}
+</div>
+<script>
+function toggleOrg(){
+  var b=document.getElementById('orgBody'),btn=document.getElementById('orgToggle');
+  var collapsed=b.style.display==='none';
+  b.style.display=collapsed?'':'none';
+  btn.textContent=collapsed?'접기 ▲':'펼치기 ▼';
+}
+document.getElementById('orgTeamFilter').addEventListener('change',function(){
+  var val=this.value;
+  document.querySelectorAll('#orgTable tbody tr').forEach(function(tr){
+    tr.style.display=(!val||tr.dataset.team===val)?'':'none';
+  });
+});
+</script>
+<style>.badge-beta{display:inline-block;font-size:10px;font-weight:700;padding:1px 6px;border-radius:9px;background:#6c47ff;color:#fff;vertical-align:middle;margin-left:4px;letter-spacing:.02em;}</style>
 </section>
 
 <section class="grid-2">
