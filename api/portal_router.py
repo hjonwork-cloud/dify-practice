@@ -470,7 +470,7 @@ def _brand_rows(emp_code: str = _DEFAULT_EMP_CODE) -> list[dict]:
         LEFT JOIN my_sales ms ON a.brand_code = ms.brand_code AND a.brand_name = ms.brand_name
         WHERE a.sales <> 0
         ORDER BY a.sales DESC
-        LIMIT 50
+        LIMIT 200
     """)
     out = []
     for r in rows:

@@ -20,12 +20,21 @@
 
 <section class="portal-grid">
   <article class="portal-panel wide">
-    <div class="portal-panel-head"><div><p class="eyebrow">BRANDS</p><h2>담당 브랜드</h2></div></div>
+    <div class="portal-panel-head">
+      <div><p class="eyebrow">BRANDS</p><h2>담당 브랜드 <span id="brand-count-label" style="font-size:.9rem;font-weight:400;color:#6b7280"></span></h2></div>
+      <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;">
+        <span style="font-size:.8rem;color:#6b7280">정렬:</span>
+        <button class="btn-sort active" data-sort="sales_desc" onclick="setSort('sales_desc')">매출↓</button>
+        <button class="btn-sort" data-sort="sales_asc"  onclick="setSort('sales_asc')">매출↑</button>
+        <button class="btn-sort" data-sort="name_asc"   onclick="setSort('name_asc')">브랜드명</button>
+      </div>
+    </div>
     <div class="portal-brand-list" id="brand-list">
       <div class="portal-brand-row skel-row"><div><div class="skel skel-text" style="width:140px;margin-bottom:6px"></div><div class="skel skel-text" style="width:260px"></div></div><div class="skel skel-text" style="width:60px"></div></div>
       <div class="portal-brand-row skel-row"><div><div class="skel skel-text" style="width:120px;margin-bottom:6px"></div><div class="skel skel-text" style="width:220px"></div></div><div class="skel skel-text" style="width:60px"></div></div>
       <div class="portal-brand-row skel-row"><div><div class="skel skel-text" style="width:160px;margin-bottom:6px"></div><div class="skel skel-text" style="width:240px"></div></div><div class="skel skel-text" style="width:60px"></div></div>
     </div>
+    <div id="brand-pagination" style="display:none;padding:1rem 0 .5rem;text-align:center;gap:.4rem;flex-wrap:wrap;justify-content:center;align-items:center;"></div>
   </article>
   <aside class="portal-panel accent">
     <p class="eyebrow">MVP FEATURE</p>
@@ -50,6 +59,13 @@
 .portal-loading-box p{font-size:1.1rem;color:#111;margin:.5rem 0;}
 .portal-loading-box small{color:#6b7280;line-height:1.6;}
 #dash-error{display:none;background:#fef2f2;border:1px solid #fca5a5;color:#b91c1c;padding:.75rem 1rem;border-radius:8px;margin-bottom:1rem;font-size:.95rem;}
+.btn-sort{padding:.3rem .7rem;border:1px solid #d1d5db;border-radius:6px;background:#fff;color:#374151;font-size:.78rem;cursor:pointer;transition:all .15s;}
+.btn-sort:hover{background:#f3f4f6;}
+.btn-sort.active{background:#16a34a;color:#fff;border-color:#16a34a;}
+#brand-pagination .pg-btn{padding:.3rem .65rem;border:1px solid #d1d5db;border-radius:6px;background:#fff;color:#374151;font-size:.82rem;cursor:pointer;transition:all .15s;}
+#brand-pagination .pg-btn:hover{background:#f3f4f6;}
+#brand-pagination .pg-btn.active{background:#16a34a;color:#fff;border-color:#16a34a;pointer-events:none;}
+#brand-pagination .pg-btn:disabled{opacity:.4;cursor:default;}
 </style>
 
 <div id="dash-error">데이터를 불러오지 못했습니다. 페이지를 새로고침해 주세요.</div>
@@ -64,9 +80,13 @@
 
 <script>
 (function(){
+  var _allBrands = [];
+  var _curSort   = 'sales_desc';
+  var _curPage   = 1;
+  var PER_PAGE   = 20;
+
   function fmt(n){return Number(n||0).toLocaleString('ko-KR');}
 
-  // ── 범용상품 로딩 오버레이: API 응답 여부와 무관하게 즉시 바인딩 ──
   function bindLoadingOverlay(){
     document.querySelectorAll('a[href^="/portal/brand-report"], .portal-brand-row').forEach(function(el){
       if(el.dataset.lobound) return;
@@ -77,7 +97,6 @@
       });
     });
   }
-  // 정적 "범용상품 제안 솔루션 보기" 버튼은 페이지 로드 즉시 바인딩
   bindLoadingOverlay();
 
   function renderBrand(b){
@@ -90,8 +109,59 @@
       +'<strong>'+fmt(b.sales_m)+'백만</strong></a>';
   }
 
+  function sortedBrands(){
+    var arr = _allBrands.slice();
+    if(_curSort==='sales_desc') arr.sort(function(a,b){return (b.sales_m||0)-(a.sales_m||0);});
+    else if(_curSort==='sales_asc') arr.sort(function(a,b){return (a.sales_m||0)-(b.sales_m||0);});
+    else arr.sort(function(a,b){return (a.brand_name||'').localeCompare(b.brand_name||'','ko');});
+    return arr;
+  }
+
+  function renderPage(){
+    var arr   = sortedBrands();
+    var total = arr.length;
+    var pages = Math.max(1, Math.ceil(total/PER_PAGE));
+    _curPage  = Math.min(Math.max(1,_curPage), pages);
+    var start = (_curPage-1)*PER_PAGE;
+    var slice = arr.slice(start, start+PER_PAGE);
+
+    var bl = document.getElementById('brand-list');
+    var cl = document.getElementById('brand-count-label');
+    if(cl) cl.textContent = '(' + total + '개)';
+
+    if(bl){
+      bl.innerHTML = slice.length ? slice.map(renderBrand).join('') :
+        '<div class="empty"><b>담당 브랜드 데이터가 없습니다.</b></div>';
+      bindLoadingOverlay();
+    }
+
+    var pg = document.getElementById('brand-pagination');
+    if(pg && total > PER_PAGE){
+      pg.style.display = 'flex';
+      var html = '<button class="pg-btn" onclick="goBrandPage('+(_curPage-1)+')" '+((_curPage===1)?'disabled':'')+'>‹ 이전</button> ';
+      var s = Math.max(1,_curPage-2), e = Math.min(pages,s+4);
+      if(e-s<4) s=Math.max(1,e-4);
+      for(var i=s;i<=e;i++){
+        html += '<button class="pg-btn'+(_curPage===i?' active':'')+'" onclick="goBrandPage('+i+')">'+i+'</button> ';
+      }
+      html += '<button class="pg-btn" onclick="goBrandPage('+(_curPage+1)+')" '+((_curPage===pages)?'disabled':'')+'>다음 ›</button>';
+      html += '<span style="margin-left:.5rem;font-size:.8rem;color:#6b7280">'+start+1+'–'+Math.min(total,start+PER_PAGE)+' / '+total+'</span>';
+      pg.innerHTML = html;
+    } else if(pg){
+      pg.style.display = 'none';
+    }
+  }
+
+  window.goBrandPage = function(p){ _curPage=p; renderPage(); };
+  window.setSort = function(s){
+    _curSort=s; _curPage=1;
+    document.querySelectorAll('.btn-sort').forEach(function(b){
+      b.classList.toggle('active', b.dataset.sort===s);
+    });
+    renderPage();
+  };
+
   function applyData(d){
-    // ── 타이틀: is_leader 여부로 결정 ──
     var eyebrow = document.getElementById('dash-eyebrow');
     var title   = document.getElementById('dash-title');
     if(d.is_leader && d.team_name){
@@ -104,7 +174,6 @@
     var sub = document.getElementById('dash-subtitle');
     if(sub) sub.textContent = (d.latest_ym||'-')+' 현월 기준 · 최신 대금청구일 '+(d.latest_bill_date||'-')+' · 로그인 계정 권한 기준으로 표시합니다.';
 
-    // ── 지표 카드 ──
     var m = function(id,v){var el=document.getElementById(id);if(el)el.textContent=v;};
     m('m-sales',      fmt(d.sales_m)+'백만');
     m('m-brand-count',d.brand_count);
@@ -115,20 +184,11 @@
     m('m-cm-label',   'CM 최신 적재월 '+(d.profit_ym||'-'));
     m('m-ar',         fmt(d.ar_balance_m)+'백만');
 
-    // ── 브랜드 목록 ──
-    var bl = document.getElementById('brand-list');
-    if(bl){
-      if(d.brands && d.brands.length){
-        bl.innerHTML = d.brands.map(renderBrand).join('');
-      } else {
-        bl.innerHTML = '<div class="empty"><b>담당 브랜드 데이터가 없습니다.</b><span>로그인 계정의 담당 매출 데이터를 확인해주세요.</span></div>';
-      }
-      // 동적으로 추가된 브랜드 링크에도 로딩 오버레이 바인딩
-      bindLoadingOverlay();
-    }
+    _allBrands = d.brands || [];
+    _curPage   = 1;
+    renderPage();
   }
 
-  // ── fetch (타임아웃 90초) ──
   var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
   var tid  = ctrl ? setTimeout(function(){ ctrl.abort(); }, 90000) : null;
 

@@ -85,6 +85,14 @@ def main():
     _zc8 = "LEFT(TRIM(LEADING '0' FROM TRIM(CAST(`ZC본부` AS STRING))), 1) = '8'"
     _zc8a= "LEFT(TRIM(LEADING '0' FROM TRIM(CAST(zc_code AS STRING))), 1) = '8'"
 
+    _leaders_in = "'외식1팀','외식3팀','외식2팀','영남지점'"
+    _leader_case = """CASE `지점명`
+               WHEN '외식1팀'  THEN '20115003'
+               WHEN '외식3팀'  THEN '20065782'
+               WHEN '외식2팀'  THEN '20145012'
+               WHEN '영남지점' THEN '20135653'
+           END"""
+
     # ── 3. portal_emp_dashboard 생성 ──────────────────────────────────
     cm_cte = ""
     if profit_ym:
@@ -95,11 +103,11 @@ def main():
         FROM {T_PROFIT}
         WHERE DATE_FORMAT(`날짜`, 'yyyyMM') = '{profit_ym}'
     ),
+    -- 일반 영업사원 CM
     emp_cust AS (
         SELECT DISTINCT `영업사원` AS emp_code,
                TRIM(LEADING '0' FROM CAST(`거래처` AS STRING)) AS cust_t
-        FROM {T_MAIN}
-        WHERE `년월` = '{latest_ym}'
+        FROM {T_MAIN} WHERE `년월` = '{latest_ym}'
     ),
     cm_emp AS (
         SELECT ec.emp_code,
@@ -108,9 +116,26 @@ def main():
                END AS cm_rate
         FROM emp_cust ec JOIN cm_base cb ON ec.cust_t = cb.cust_t
         GROUP BY ec.emp_code
+    ),
+    -- 팀 리더 CM (지점명 기준 집계)
+    leader_cust AS (
+        SELECT DISTINCT {_leader_case} AS emp_code,
+               TRIM(LEADING '0' FROM CAST(`거래처` AS STRING)) AS cust_t
+        FROM {T_MAIN}
+        WHERE `년월` = '{latest_ym}' AND `지점명` IN ({_leaders_in})
+    ),
+    cm_leader AS (
+        SELECT lc.emp_code,
+               CASE WHEN SUM(cb.`FI매출액`)=0 THEN 0
+                    ELSE ROUND(SUM(cb.`공헌이익`)/SUM(cb.`FI매출액`)*100,1)
+               END AS cm_rate
+        FROM leader_cust lc JOIN cm_base cb ON lc.cust_t = cb.cust_t
+        WHERE lc.emp_code IS NOT NULL
+        GROUP BY lc.emp_code
     ),"""
     else:
-        cm_cte = "cm_emp AS (SELECT CAST(NULL AS STRING) AS emp_code, CAST(0 AS DOUBLE) AS cm_rate WHERE 1=0),"
+        cm_cte = """cm_emp    AS (SELECT CAST(NULL AS STRING) AS emp_code, CAST(0 AS DOUBLE) AS cm_rate WHERE 1=0),
+    cm_leader AS (SELECT CAST(NULL AS STRING) AS emp_code, CAST(0 AS DOUBLE) AS cm_rate WHERE 1=0),"""
 
     dash_sql = f"""
     CREATE OR REPLACE TABLE {T_DASH} AS
@@ -186,13 +211,14 @@ def main():
         e.franchise_count,
         e.general_count,
         e.customer_count,
-        COALESCE(cm.cm_rate, 0.0) AS cm_rate,
+        COALESCE(lcm.cm_rate, cm.cm_rate, 0.0) AS cm_rate,
         COALESCE(ar.ar_balance_m, 0) AS ar_balance_m,
         CURRENT_TIMESTAMP() AS updated_at
     FROM all_emp e
-    LEFT JOIN bill   b  ON e.emp_code = b.emp_code
-    LEFT JOIN cm_emp cm ON e.emp_code = cm.emp_code
-    LEFT JOIN ar_emp ar ON e.emp_code = ar.emp_code
+    LEFT JOIN bill      b   ON e.emp_code = b.emp_code
+    LEFT JOIN cm_emp    cm  ON e.emp_code = cm.emp_code
+    LEFT JOIN cm_leader lcm ON e.emp_code = lcm.emp_code
+    LEFT JOIN ar_emp    ar  ON e.emp_code = ar.emp_code
     """
 
     run_sql(conn, dash_sql, f"CREATE {T_DASH}")
@@ -207,15 +233,22 @@ def main():
                     ELSE ROUND(SUM(cb.`공헌이익`)/SUM(cb.`FI매출액`)*100,1)
                END AS cm_rate
         FROM (
+            -- 일반 영업사원
             SELECT DISTINCT `영업사원` AS emp_code, `ZC본부` AS brand_code,
                    TRIM(LEADING '0' FROM CAST(`거래처` AS STRING)) AS cust_t
             FROM {T_MAIN} WHERE `년월` = '{latest_ym}'
+            UNION ALL
+            -- 팀 리더
+            SELECT DISTINCT {_leader_case} AS emp_code, `ZC본부` AS brand_code,
+                   TRIM(LEADING '0' FROM CAST(`거래처` AS STRING)) AS cust_t
+            FROM {T_MAIN} WHERE `년월` = '{latest_ym}' AND `지점명` IN ({_leaders_in})
         ) ec
         JOIN (
             SELECT TRIM(LEADING '0' FROM CAST(`고객` AS STRING)) AS cust_t,
                    `공헌이익`, `FI매출액`
             FROM {T_PROFIT} WHERE DATE_FORMAT(`날짜`, 'yyyyMM') = '{profit_ym}'
         ) cb ON ec.cust_t = cb.cust_t
+        WHERE ec.emp_code IS NOT NULL
         GROUP BY ec.emp_code, ec.brand_code
     )"""
     else:
@@ -233,7 +266,8 @@ def main():
           AND `ZC본부` IS NOT NULL AND {_zc8}
         GROUP BY `ZC본부`, `ZC본부명`
     ),
-    my_b AS (
+    -- 일반 영업사원 브랜드
+    my_b_emp AS (
         SELECT `영업사원` AS emp_code, `ZC본부` AS brand_code, `ZC본부명` AS brand_name,
                COUNT(DISTINCT `거래처`) AS my_customer_count,
                ROUND(SUM(`매출액`)/10000) AS my_sales_m
@@ -242,19 +276,53 @@ def main():
           AND `ZC본부` IS NOT NULL AND {_zc8}
         GROUP BY `영업사원`, `ZC본부`, `ZC본부명`
     ),
-    gr AS (
+    -- 팀 리더 브랜드 (지점명 기준)
+    my_b_leader AS (
+        SELECT {_leader_case} AS emp_code,
+               `ZC본부` AS brand_code, `ZC본부명` AS brand_name,
+               COUNT(DISTINCT `거래처`) AS my_customer_count,
+               ROUND(SUM(`매출액`)/10000) AS my_sales_m
+        FROM {T_MAIN}
+        WHERE `년월` = '{latest_ym}' AND `사업부명` = '외식식재사업부'
+          AND `ZC본부` IS NOT NULL AND {_zc8}
+          AND `지점명` IN ({_leaders_in})
+        GROUP BY `지점명`, `ZC본부`, `ZC본부명`
+    ),
+    my_b AS (
+        SELECT * FROM my_b_emp
+        UNION ALL
+        SELECT * FROM my_b_leader WHERE emp_code IS NOT NULL
+    ),
+    -- 일반 영업사원 범용비율
+    gr_emp AS (
         SELECT `영업사원` AS emp_code, `ZC본부` AS brand_code,
                CASE WHEN SUM(CASE WHEN `자재그룹명` IS NOT NULL THEN `매출액` ELSE 0 END)=0 THEN 0
                     ELSE ROUND(
-                        SUM(CASE WHEN COALESCE(`자재그룹명`,'') <> 'FC전용상품'
-                                      AND `자재그룹명` IS NOT NULL
-                                 THEN `매출액` ELSE 0 END)
+                        SUM(CASE WHEN COALESCE(`자재그룹명`,'') <> 'FC전용상품' AND `자재그룹명` IS NOT NULL THEN `매출액` ELSE 0 END)
                         / SUM(CASE WHEN `자재그룹명` IS NOT NULL THEN `매출액` ELSE 0 END)*100, 1)
                END AS generic_ratio
         FROM {T_MAIN}
         WHERE `년월` = '{latest_ym}' AND `사업부명` = '외식식재사업부'
           AND `ZC본부` IS NOT NULL AND {_zc8}
         GROUP BY `영업사원`, `ZC본부`
+    ),
+    -- 팀 리더 범용비율
+    gr_leader AS (
+        SELECT {_leader_case} AS emp_code, `ZC본부` AS brand_code,
+               CASE WHEN SUM(CASE WHEN `자재그룹명` IS NOT NULL THEN `매출액` ELSE 0 END)=0 THEN 0
+                    ELSE ROUND(
+                        SUM(CASE WHEN COALESCE(`자재그룹명`,'') <> 'FC전용상품' AND `자재그룹명` IS NOT NULL THEN `매출액` ELSE 0 END)
+                        / SUM(CASE WHEN `자재그룹명` IS NOT NULL THEN `매출액` ELSE 0 END)*100, 1)
+               END AS generic_ratio
+        FROM {T_MAIN}
+        WHERE `년월` = '{latest_ym}' AND `사업부명` = '외식식재사업부'
+          AND `ZC본부` IS NOT NULL AND {_zc8} AND `지점명` IN ({_leaders_in})
+        GROUP BY `지점명`, `ZC본부`
+    ),
+    gr AS (
+        SELECT * FROM gr_emp
+        UNION ALL
+        SELECT * FROM gr_leader WHERE emp_code IS NOT NULL
     )
     {cm_brand_cte}
     SELECT mb.emp_code, mb.brand_code, mb.brand_name,
