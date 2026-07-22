@@ -23,7 +23,9 @@ OPEN_DATE = date.fromisoformat(os.getenv("SALES_AI_OPEN_DATE", "2026-08-03"))
 # 베타테스터 10명 확정 전 기본 운영 안전장치: 관리자와 기존 대표 테스트 계정만 허용.
 _SEED_BETA_TESTERS: dict[str, dict] = {
     ADMIN_EMP_CODE: {"name": ADMIN_EMP_NAME, "team": ADMIN_TEAM, "role": "admin"},
-    "20230720": {"name": "이 충규", "team": "외식3팀", "role": "beta"},
+    "20230720": {"name": "이충규", "team": "외식3팀", "role": "beta"},
+    "20250629": {"name": "서용산", "team": "신규개발파트", "role": "beta"},
+    "20151017": {"name": "서경일", "team": "신규개발파트", "role": "beta"},
 }
 
 
@@ -67,6 +69,9 @@ def load_beta_testers() -> dict[str, dict]:
     for code in env_codes:
         data.setdefault(code, {"name": "", "team": "", "role": "beta", "added_at": "env"})
     data.setdefault(ADMIN_EMP_CODE, {"name": ADMIN_EMP_NAME, "team": ADMIN_TEAM, "role": "admin", "added_at": "seed"})
+    # 항상 seed 항목이 누락 없이 유지되도록 보장
+    for _emp, _info in _SEED_BETA_TESTERS.items():
+        data.setdefault(_emp, {**_info, "added_at": "seed"})
     return data
 
 

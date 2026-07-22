@@ -3535,7 +3535,7 @@ class SalesRequest(BaseModel):
 # ─── 엔드포인트 ───────────────────────────────────────────
 
 @app.get("/health")
-def health():
+def ㄴhealth():
     return {"status": "ok", "auth": "cached" if _cached_token else "not_authenticated"}
 
 
@@ -3667,6 +3667,8 @@ _SEED_WHITELIST: dict[str, dict] = {
     "20115029": {"name": "강동민", "team": "외식식재사업부"},
     "20190061": {"name": "박지웅", "team": "신규개발파트"},
     "20190801": {"name": "김남우", "team": "신규개발파트"},
+    "20250629": {"name": "서용산", "team": "신규개발파트"},
+    "20151017": {"name": "서경일", "team": "신규개발파트"},
 }
 _SEED_BLACKLIST: list[str] = [
     "20065629",  # 엄철용
@@ -3730,27 +3732,30 @@ def _save_team_overrides(ov: dict):
 
 
 def _seed_admin_lists():
-    """최초 1회 하드코딩 seed를 JSON 화이트/블랙리스트로 이관한다.
-    마커 파일이 있으면 실행하지 않아 웹에서 삭제한 항목이 되살아나지 않는다."""
+    """앱 시작 시마다 _SEED_WHITELIST 누락 항목을 JSON 파일에 병합한다.
+    이미 파일에 있는 항목은 건드리지 않아 웹에서 변경한 값이 유지된다."""
     try:
-        if os.path.exists(_SEED_MARKER_FILE):
-            return
-        os.makedirs(os.path.dirname(_SEED_MARKER_FILE), exist_ok=True)
+        os.makedirs(os.path.dirname(_SEED_MARKER_FILE) if os.path.dirname(_SEED_MARKER_FILE) else _DATA_DIR, exist_ok=True)
         now = time.strftime("%Y-%m-%d %H:%M:%S")
         with _users_lock:
             wl = _load_whitelist()
+            added = []
             for emp, info in _SEED_WHITELIST.items():
                 if emp not in wl:
                     wl[emp] = {"name": info["name"], "team": info.get("team", ""), "added_at": now}
+                    added.append(emp)
             _save_whitelist(wl)
             bl = _load_blacklist()
             for emp in _SEED_BLACKLIST:
                 if emp not in bl:
                     bl.append(emp)
             _save_blacklist(bl)
-        with open(_SEED_MARKER_FILE, "w", encoding="utf-8") as f:
-            json_mod.dump({"seeded_at": now}, f, ensure_ascii=False)
-        logger.info("[seed] 관리자 화이트/블랙리스트 초기 이관 완료")
+        if added:
+            logger.info(f"[seed] 화이트리스트 신규 추가: {added}")
+        # 마커 파일 유지 (하위 호환)
+        if not os.path.exists(_SEED_MARKER_FILE):
+            with open(_SEED_MARKER_FILE, "w", encoding="utf-8") as f:
+                json_mod.dump({"seeded_at": now}, f, ensure_ascii=False)
     except Exception as e:
         logger.warning(f"[seed] 초기 이관 실패: {e}")
 
