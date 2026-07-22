@@ -55,7 +55,7 @@ def _scope_cond(emp_code: str) -> str:
     return f"`영업사원` = {_sql(emp_code)}"
 
 _cache: dict[str, tuple[float, object]] = {}
-_CACHE_TTL = 600  # 10분 캐시 (기존 5분 → 성능 개선)
+_CACHE_TTL = 21600  # 6시간 캐시 (로그인 속도 개선)
 
 
 def _asset_version() -> str:
@@ -197,32 +197,42 @@ def _portal_user(emp_code: str) -> dict | None:
     code = str(emp_code or "").strip()
     if not code:
         return None
-    # 베타테스터 명단에 있으면 Databricks 화이트리스트 체크 우회
-    beta_testers = access_control.load_beta_testers()
-    in_beta = code in beta_testers
     if not access_control.beta_access_allowed(code):
         return None
+    # 베타테스터/팀리더는 Databricks 화이트리스트 쿼리 완전 스킵 (로그인 속도 개선)
+    beta_testers = access_control.load_beta_testers()
+    in_beta = code in beta_testers
+    is_admin = access_control.is_admin_emp(code)
+    is_leader = _is_team_leader(code)
+    if in_beta or is_admin or is_leader:
+        # 빠른 경로: Databricks 쿼리 없이 즉시 반환
+        if in_beta:
+            binfo = beta_testers[code]
+            name = binfo.get("name", code)
+            team = binfo.get("team", "") or _leader_team(code)
+            role_raw = binfo.get("role", "user")
+        else:
+            name = access_control.ADMIN_EMP_NAME if is_admin else code
+            team = access_control.ADMIN_TEAM if is_admin else _leader_team(code)
+            role_raw = "admin" if is_admin else "user"
+        return {
+            "emp_code": code,
+            "name": name,
+            "team": team,
+            "role": "admin" if is_admin else "user",
+            "is_admin": is_admin,
+        }
+    # 일반 영업사원: Databricks 화이트리스트 확인 (캐시 6시간)
     allowed = _employee_whitelist()
-    if code not in allowed and not access_control.is_admin_emp(code) and not in_beta:
+    if code not in allowed:
         return None
-    # 정보 우선순위: Databricks 실적 데이터 > 베타테스터 파일 > 팀 리더 상수
     info = allowed.get(code) or {}
-    if not info and in_beta:
-        binfo = beta_testers[code]
-        info = {"name": binfo.get("name", code), "team": binfo.get("team", ""), "role": binfo.get("role", "user")}
-    if not info.get("team") and _is_team_leader(code):
-        info["team"] = _leader_team(code)
-    role = "admin" if access_control.is_admin_emp(code) else str(info.get("role") or "user")
-    if role == "admin":
-        role = "user"  # admin role은 is_admin 플래그로만 처리
-    if access_control.is_admin_emp(code):
-        role = "admin"
     return {
         "emp_code": code,
-        "name": info.get("name") or (access_control.ADMIN_EMP_NAME if access_control.is_admin_emp(code) else code),
-        "team": info.get("team") or (access_control.ADMIN_TEAM if access_control.is_admin_emp(code) else ""),
-        "role": role,
-        "is_admin": access_control.is_admin_emp(code),
+        "name": info.get("name") or code,
+        "team": info.get("team") or "",
+        "role": "user",
+        "is_admin": False,
     }
 
 
@@ -1113,9 +1123,9 @@ async def login(request: Request):
     ua = request.headers.get("user-agent", "")[:300]
     user = _portal_user(emp_code)
     if not user:
+        # 실패 이유 판단 - 베타게이트 활성 중이면 베타 미등록으로 표기
         in_beta = emp_code in access_control.load_beta_testers()
-        in_wl = emp_code in _employee_whitelist()
-        if (in_beta or in_wl) and access_control.beta_gate_active():
+        if in_beta and access_control.beta_gate_active():
             reason = "beta_not_allowed"
         else:
             reason = "not_in_sales_whitelist"
@@ -1208,6 +1218,12 @@ def _warmup_cache():
     import logging
     _log = logging.getLogger("portal_warmup")
     time.sleep(30)  # 서버 완전 기동 대기
+    try:
+        _log.info("[warmup] 영업사원 화이트리스트 캐시 워밍업 시작")
+        _employee_whitelist()  # 로그인 속도 개선: 미리 채워둠
+        _log.info("[warmup] 영업사원 화이트리스트 캐시 완료")
+    except Exception as e:
+        _log.warning(f"[warmup] 화이트리스트 실패: {e}")
     try:
         _log.info("[warmup] 관리자 대시보드 캐시 워밍업 시작")
         portal_admin_overview({})
