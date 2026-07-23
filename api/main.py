@@ -3065,34 +3065,22 @@ def _fetch_profit_by_customer(branch: str, period: str, top_n: int = 10) -> str:
     return "\n".join(lines)
 
 
-def _fetch_profit_by_name(keyword: str, period: str, branch: str = "") -> str:
-    """브랜드명/거래처명 키워드로 수익성 조회"""
-    cond = _profit_period_cond(period)
-    scope_cond = _profit_scope_cond(branch)
-    keyword_lit = _sql_literal(keyword)
-    code_cond = f"OR `고객` = '{keyword_lit}'" if re.fullmatch(r'\d{5,10}', str(keyword).strip()) else ""
-    rows = _safe_query(f"""
-        SELECT MAX(`고객`) AS cust_code, MAX(`거래처명`) AS cust_name,
-               SUM(`FI매출액`) AS fi, SUM(`매출총이익`) AS gp,
-               SUM(`총운송비`) AS trans, SUM(`총하역비`) AS unload,
-               SUM(`변동비`) AS varfee, SUM(`공헌이익`) AS cm
-        FROM {T_PROFIT}
-        WHERE {cond} AND {scope_cond}
-          AND (`Zc본부명` LIKE '%{keyword_lit}%' OR `거래처명` LIKE '%{keyword_lit}%' {code_cond})
-    """, raw=True)
-    if not rows or rows[0].get("fi") is None:
-        return (f"📊 [{keyword}] {_period_label(period)} 수익성 데이터가 없습니다.\n"
-                f"※ 현재 수익성 데이터는 {_get_profit_latest_label()}까지 제공되고 있습니다.")
-    r = rows[0]
-    fi    = int(r.get("fi") or 0)
-    gp    = int(r.get("gp") or 0)
-    trans = int(r.get("trans") or 0)
+# 수익성 브랜드 정확 매핑 — LIKE 오매칭 방지 (예: "샐러디" → "샐러디아" 혼합 방지)
+# 키: 사용자 입력, 값: T_PROFIT.Zc본부명 정확값. 신규 사례 발생 시 여기에 추가.
+_PROFIT_BRAND_EXACT: dict[str, str] = {
+    "샐러디":  "샐러디",
+    "샐러디아": "샐러디아",
+}
+
+
+def _fmt_profit_row(display_name: str, r: dict, period: str) -> str:
+    """T_PROFIT 집계 row → CM 결과 포맷 문자열"""
+    fi     = int(r.get("fi")     or 0)
+    gp     = int(r.get("gp")     or 0)
+    trans  = int(r.get("trans")  or 0)
     unload = int(r.get("unload") or 0)
-    var   = int(r.get("varfee") or 0)
-    cm    = int(r.get("cm") or 0)
-    display_name = keyword
-    if r.get("cust_code") or r.get("cust_name"):
-        display_name = f"{r.get('cust_code') or ''} {r.get('cust_name') or keyword}".strip()
+    var    = int(r.get("varfee") or 0)
+    cm     = int(r.get("cm")     or 0)
     return "\n".join([
         f"💰 [{display_name}] {_period_label(period)} CM(공헌이익)",
         "",
@@ -3105,6 +3093,83 @@ def _fetch_profit_by_name(keyword: str, period: str, branch: str = "") -> str:
         "",
         "※확정실적/CM 데이터 기준",
     ])
+
+
+def _fetch_profit_by_name(keyword: str, period: str, branch: str = "") -> str | list[str]:
+    """브랜드명/거래처명 키워드로 수익성 조회.
+
+    Returns:
+        str       — 포맷된 CM 결과 (단일 매칭 또는 거래처코드)
+        list[str] — ZC본부명 후보 목록 (복수 매칭, 호출자가 선택 처리)
+    """
+    cond = _profit_period_cond(period)
+    scope_cond = _profit_scope_cond(branch)
+    keyword_lit = _sql_literal(keyword)
+
+    def _zc_rows(zc_cond: str) -> list[dict]:
+        return _safe_query(f"""
+            SELECT `Zc본부명` AS zc_name,
+                   SUM(`FI매출액`) AS fi, SUM(`매출총이익`) AS gp,
+                   SUM(`총운송비`) AS trans, SUM(`총하역비`) AS unload,
+                   SUM(`변동비`) AS varfee, SUM(`공헌이익`) AS cm
+            FROM {T_PROFIT}
+            WHERE {{cond}} AND {{scope_cond}} AND {{zc_cond}}
+            GROUP BY `Zc본부명`
+            HAVING SUM(`FI매출액`) > 0
+            ORDER BY SUM(`FI매출액`) DESC
+        """.format(cond=cond, scope_cond=scope_cond, zc_cond=zc_cond), raw=True) or []
+
+    # ── Step 1: 정확 매핑 사전 (샐러디 ≠ 샐러디아 등 혼동 방지)
+    exact_zc = _PROFIT_BRAND_EXACT.get(keyword)
+    if exact_zc:
+        rows = _zc_rows(f"`Zc본부명` = '{_sql_literal(exact_zc)}'")
+        if rows:
+            return _fmt_profit_row(str(rows[0]["zc_name"]), rows[0], period)
+
+    # ── Step 2: 거래처코드 직접 조회 (숫자 코드인 경우)
+    if re.fullmatch(r'\d{5,10}', keyword.strip()):
+        rows = _safe_query(f"""
+            SELECT MAX(`고객`) AS cust_code, MAX(`거래처명`) AS cust_name,
+                   SUM(`FI매출액`) AS fi, SUM(`매출총이익`) AS gp,
+                   SUM(`총운송비`) AS trans, SUM(`총하역비`) AS unload,
+                   SUM(`변동비`) AS varfee, SUM(`공헌이익`) AS cm
+            FROM {T_PROFIT}
+            WHERE {cond} AND {scope_cond} AND `고객` = '{keyword_lit}'
+        """, raw=True)
+        if rows and rows[0].get("fi") is not None:
+            r = rows[0]
+            display = f"{r.get('cust_code') or ''} {r.get('cust_name') or keyword}".strip()
+            return _fmt_profit_row(display, r, period)
+
+    # ── Step 3: ZC본부명 정확 매칭
+    rows = _zc_rows(f"`Zc본부명` = '{keyword_lit}'")
+    if rows:
+        return _fmt_profit_row(str(rows[0]["zc_name"]), rows[0], period)
+
+    # ── Step 4: ZC본부명 LIKE (거래처명 OR 없음 — 혼합 집계 방지)
+    zc_like = _zc_rows(f"`Zc본부명` LIKE '%{keyword_lit}%'")
+    if len(zc_like) == 1:
+        return _fmt_profit_row(str(zc_like[0]["zc_name"]), zc_like[0], period)
+    if len(zc_like) > 1:
+        return [str(r["zc_name"]) for r in zc_like[:5]]  # 후보 목록 반환
+
+    # ── Step 5: 거래처명 LIKE fallback (ZC 검색 실패 시에만)
+    cust_rows = _safe_query(f"""
+        SELECT MAX(`고객`) AS cust_code, MAX(`거래처명`) AS cust_name,
+               SUM(`FI매출액`) AS fi, SUM(`매출총이익`) AS gp,
+               SUM(`총운송비`) AS trans, SUM(`총하역비`) AS unload,
+               SUM(`변동비`) AS varfee, SUM(`공헌이익`) AS cm
+        FROM {T_PROFIT}
+        WHERE {cond} AND {scope_cond}
+          AND `거래처명` LIKE '%{keyword_lit}%'
+    """, raw=True)
+    if cust_rows and cust_rows[0].get("fi") is not None:
+        r = cust_rows[0]
+        display = f"{r.get('cust_code') or ''} {r.get('cust_name') or keyword}".strip()
+        return _fmt_profit_row(display, r, period)
+
+    return (f"📊 [{keyword}] {_period_label(period)} 수익성 데이터가 없습니다.\n"
+            f"※ 현재 수익성 데이터는 {_get_profit_latest_label()}까지 제공되고 있습니다.")
 
 
 _PROFIT_NAME_GUIDE = (
@@ -4579,6 +4644,13 @@ def _bg_candidate_query(
                   AND `ZA거래처명` = '{matched_cand}'
                   AND `년월` = '{cand_ym}'
             """)
+        elif cand_level == "수익성(ZC)":
+            # 수익성 후보 선택 → _fetch_profit_by_name 정확 매칭으로 재조회
+            _pr = _fetch_profit_by_name(matched_cand, cand_ym)
+            _pr_text = _pr if isinstance(_pr, str) else f"'{matched_cand}' 수익성 데이터를 찾을 수 없습니다."
+            _pr_qr = _profit_qr_nav(matched_cand, cand_ym)
+            _send_kakao_callback_qr(callback_url, _to_kakao_text(_pr_text), _pr_qr, "수익성후보결과")
+            return
         else:
             rows = _safe_query(f"""
                 SELECT ROUND(COALESCE(SUM(`매출액`), 0) / 1000000, 2) AS sales
@@ -5325,8 +5397,20 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
             logger.info(f"[콜백] 월없는수익성: kw={_nm_kw}, period={_nm_period}, branch={_nm_branch}")
             try:
                 _nm_text = _fetch_profit_by_name(_nm_kw, _nm_period, _nm_branch)
-                _nm_qr = _profit_qr_nav(_nm_kw, _nm_period)
-                _send_kakao_callback_qr(callback_url, _to_kakao_text(_nm_text), _nm_qr, "월없는수익성")
+                if isinstance(_nm_text, list):
+                    _short = _nm_text[:5]
+                    _opts = "\n".join(f"  {i+1}. {n}" for i, n in enumerate(_short))
+                    _mo = int(_nm_period[-2:]) if _nm_period and len(_nm_period) >= 6 and _nm_period[-2:].isdigit() else 0
+                    _user_pending_candidates[user_id] = {
+                        "yearmonth": _nm_period, "month_num": _mo,
+                        "candidates": {n: "수익성(ZC)" for n in _short},
+                    }
+                    _qrl = [{"label": n, "action": "message", "messageText": n} for n in _short]
+                    _card = (f"'{_nm_kw}'와(과) 유사한 브랜드가 여러 개 있습니다.\n{_opts}\n\n버튼으로 선택하거나 정확한 이름으로 입력해주세요.")
+                    _send_kakao_callback_qr(callback_url, _card, _qrl, "월없는수익성")
+                else:
+                    _nm_qr = _profit_qr_nav(_nm_kw, _nm_period)
+                    _send_kakao_callback_qr(callback_url, _to_kakao_text(_nm_text), _nm_qr, "월없는수익성")
             except Exception as e:
                 logger.error(f"[콜백] 월없는수익성 오류: {e}")
                 _send_kakao_callback(callback_url, "⚠️ 수익성 조회 중 오류가 발생했습니다.", "월없는수익성")
@@ -5353,8 +5437,19 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
             logger.info(f"[콜백] 전년동기수익성: kw={_ut_kw}, period={_ut_period}")
             try:
                 _ut_text = _fetch_profit_by_name(_ut_kw, _ut_period, _ut_branch)
-                _ut_qr = _profit_qr_nav(_ut_kw, _ut_period)
-                _send_kakao_callback_qr(callback_url, _to_kakao_text(_ut_text), _ut_qr, "전년동기수익성")
+                if isinstance(_ut_text, list):
+                    _short = _ut_text[:5]
+                    _opts = "\n".join(f"  {i+1}. {n}" for i, n in enumerate(_short))
+                    _user_pending_candidates[user_id] = {
+                        "yearmonth": _ut_period, "month_num": _ut_mo,
+                        "candidates": {n: "수익성(ZC)" for n in _short},
+                    }
+                    _qrl = [{"label": n, "action": "message", "messageText": n} for n in _short]
+                    _card = (f"'{_ut_kw}'와(과) 유사한 브랜드가 여러 개 있습니다.\n{_opts}\n\n버튼으로 선택하거나 정확한 이름으로 입력해주세요.")
+                    _send_kakao_callback_qr(callback_url, _card, _qrl, "전년동기수익성")
+                else:
+                    _ut_qr = _profit_qr_nav(_ut_kw, _ut_period)
+                    _send_kakao_callback_qr(callback_url, _to_kakao_text(_ut_text), _ut_qr, "전년동기수익성")
             except Exception as e:
                 logger.error(f"[콜백] 전년동기수익성 오류: {e}")
                 _send_kakao_callback(callback_url, "⚠️ 수익성 조회 중 오류가 발생했습니다.", "전년동기수익성")
@@ -5378,8 +5473,20 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
             logger.info(f"[콜백] 이름수익성: kw={_biz_kw}, ym={_biz_ym}, branch={_bp_branch}")
             try:
                 _bp_text = _fetch_profit_by_name(_biz_kw, _biz_ym, _bp_branch)
-                _bp_qr = _profit_qr_nav(_biz_kw, _biz_ym)
-                _send_kakao_callback_qr(callback_url, _to_kakao_text(_bp_text), _bp_qr, "이름수익성")
+                if isinstance(_bp_text, list):
+                    _short = _bp_text[:5]
+                    _opts = "\n".join(f"  {i+1}. {n}" for i, n in enumerate(_short))
+                    _biz_mo = int(_biz_ym[-2:]) if _biz_ym and len(_biz_ym) >= 6 and _biz_ym[-2:].isdigit() else 0
+                    _user_pending_candidates[user_id] = {
+                        "yearmonth": _biz_ym, "month_num": _biz_mo,
+                        "candidates": {n: "수익성(ZC)" for n in _short},
+                    }
+                    _qrl = [{"label": n, "action": "message", "messageText": n} for n in _short]
+                    _card = (f"'{_biz_kw}'와(과) 유사한 브랜드가 여러 개 있습니다.\n{_opts}\n\n버튼으로 선택하거나 정확한 이름으로 입력해주세요.")
+                    _send_kakao_callback_qr(callback_url, _card, _qrl, "이름수익성")
+                else:
+                    _bp_qr = _profit_qr_nav(_biz_kw, _biz_ym)
+                    _send_kakao_callback_qr(callback_url, _to_kakao_text(_bp_text), _bp_qr, "이름수익성")
             except Exception as e:
                 logger.error(f"[콜백] 이름수익성 오류: {e}")
                 _send_kakao_callback(callback_url, "⚠️ 수익성 조회 중 오류가 발생했습니다.", "이름수익성")
