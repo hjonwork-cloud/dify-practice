@@ -3126,7 +3126,19 @@ def _fetch_profit_by_name(keyword: str, period: str, branch: str = "") -> str | 
         if rows:
             return _fmt_profit_row(str(rows[0]["zc_name"]), rows[0], period)
 
-    # ── Step 2: 거래처코드 직접 조회 (숫자 코드인 경우)
+    # ── Step 2-a: ZC본부 코드 직접 조회 (5~7자리 숫자 → Zc본부 컬럼 매칭)
+    if re.fullmatch(r'\d{5,7}', keyword.strip()):
+        # T_PROFIT.Zc본부는 6자리 코드 저장 (예: '800923')
+        zc_code_rows = _zc_rows(f"`Zc본부` = '{keyword_lit}'")
+        if not zc_code_rows:
+            # LPAD 없이 저장된 경우 대비 LIKE 검색
+            zc_code_rows = _zc_rows(f"`Zc본부` LIKE '%{keyword_lit}%'")
+        if len(zc_code_rows) == 1:
+            return _fmt_profit_row(str(zc_code_rows[0]["zc_name"]), zc_code_rows[0], period)
+        if len(zc_code_rows) > 1:
+            return [str(r["zc_name"]) for r in zc_code_rows[:5]]
+
+    # ── Step 2-b: 거래처코드 직접 조회 (숫자 코드인 경우)
     if re.fullmatch(r'\d{5,10}', keyword.strip()):
         rows = _safe_query(f"""
             SELECT MAX(`고객`) AS cust_code, MAX(`거래처명`) AS cust_name,
@@ -4953,7 +4965,35 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                     _cm_text = _build_customer_master_card(_cm_row) if _cm_intent == "master" else _build_customer_master_field_answer(_cm_row, _cm_intent)
                     _send_kakao_callback_qr(callback_url, _cm_text, _MAIN_MENU_QR, "고객마스터")
                 else:
-                    _send_kakao_callback(callback_url, f"⚠️ {_cm_code} 고객코드를 고객마스터에서 찾을 수 없습니다.", "고객마스터")
+                    # 코드 직접 조회 실패 시 fallback (일시적 쿼리 오류 대비)
+                    # ① ORDER BY 없이 단순 재조회
+                    _fb_rows = _safe_query(f"""
+                        SELECT {_CUSTOMER_MASTER_SELECT}
+                        FROM {T_CUSTOMER_MASTER}
+                        WHERE `고객코드` = '{_sql_literal(_cm_code)}'
+                        LIMIT 1
+                    """, raw=True)
+                    if _fb_rows:
+                        _cm_row = _fb_rows[0]
+                        _cm_text = _build_customer_master_card(_cm_row) if _cm_intent == "master" else _build_customer_master_field_answer(_cm_row, _cm_intent)
+                        _send_kakao_callback_qr(callback_url, _cm_text, _MAIN_MENU_QR, "고객마스터")
+                    elif _cm_name and len(_cm_name) >= 2:
+                        # ② 이름 검색 fallback
+                        _fb_candidates = _search_customer_master_candidates(_cm_name)
+                        if _fb_candidates:
+                            if len(_fb_candidates) == 1:
+                                _fb_text = _build_customer_master_card(_fb_candidates[0]) if _cm_intent == "master" else _build_customer_master_field_answer(_fb_candidates[0], _cm_intent)
+                                _send_kakao_callback_qr(callback_url, _fb_text, _MAIN_MENU_QR, "고객마스터")
+                            else:
+                                _qr_fb = [{"label": f"{i+1}. {str(_c.get('고객코드') or '')} 선택", "action": "message",
+                                            "messageText": f"{str(_c.get('고객코드') or '')} {_CUSTOMER_MASTER_FIELD_LABEL.get(_cm_intent, '고객마스터')}"}
+                                           for i, _c in enumerate(_fb_candidates[:6])]
+                                _qr_fb.append({"label": "🏠 메인 메뉴", "action": "message", "messageText": "메뉴"})
+                                _send_kakao_callback_qr(callback_url, _build_customer_master_candidate_text(_cm_name, _fb_candidates[:6], _cm_intent), _qr_fb, "고객마스터")
+                        else:
+                            _send_kakao_callback(callback_url, f"⚠️ {_cm_code} 고객코드를 고객마스터에서 찾을 수 없습니다.", "고객마스터")
+                    else:
+                        _send_kakao_callback(callback_url, f"⚠️ {_cm_code} 고객코드를 고객마스터에서 찾을 수 없습니다.", "고객마스터")
                 return
 
             if not _cm_name or len(_cm_name) < 2:
@@ -6214,6 +6254,8 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
 
             if brand_name and brand_name in _BRAND_BYPASS_BLACKLIST:
                 brand_name = ""  # 블랙리스트 → Dify로 넘기기
+            if brand_name and (re.fullmatch(r'\d+', brand_name) or '신규' in brand_name):
+                brand_name = ""  # 숫자코드·신규 → 브랜드 오인 방지
 
             if brand_name and 1 <= month_num <= 12:
                 yearmonth = f"{cur_year}{month_num:02d}"
@@ -6326,7 +6368,9 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                     query_for_brand.strip(), re.IGNORECASE,
                 )
                 _bnm = re.sub(r'[는은의이가을를로에서만]$', '', _bno_m_sp.group(1)).strip() if _bno_m_sp else ''
-            if _bnm and _bnm not in _BRAND_BYPASS_BLACKLIST and len(_bnm) >= 2:
+            if (_bnm and _bnm not in _BRAND_BYPASS_BLACKLIST and len(_bnm) >= 2
+                    and not re.fullmatch(r'\d+', _bnm)   # 숫자코드→브랜드 오인 방지
+                    and '신규' not in _bnm):              # 신규매출 바이패스 미도달 방지
                 logger.info(f"[콜백] 브랜드매출(월미명시) 직접 처리: brand={_bnm}, ym={_ym_now}")
                 try:
                     res = _fetch_brand_monthly_sales(_bnm, _ym_now)
