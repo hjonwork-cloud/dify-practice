@@ -638,35 +638,29 @@ def _build_new_cm_markdown(
     brand_cnt   = len(zc_rows) + len(no_data_brands)
 
     lines = [
-        f"📊 {sp_name} 님 신규거래처 CM 현황 ({ym_label}, 외식식재사업부)",
+        f"📊 {sp_name} 님 신규거래처 CM 현황",
+        f"{ym_label} | 외식식재사업부",
         "",
-        f"신규브랜드: {brand_cnt}개 | 총매출: {_fmt(total_sales)}백만 | 평균CM율: {avg_cm_rate}%",
+        f"신규브랜드 {brand_cnt}개 | 총매출 {_fmt(total_sales)}백만 | 평균CM율 {avg_cm_rate}%",
         "",
-        "| 브랜드명 | 매출 | CM금액 | CM율 |",
-        "| --- | ---: | ---: | ---: |",
     ]
-    for r in sorted(zc_rows, key=lambda x: float(x.get("sales") or 0), reverse=True):
-        nm   = r.get("Zc본부명") or "-"
-        sal  = _fmt(r.get("sales"))   # 숫자만 (백만원) — _to_kakao_text가 백만 붙임
-        cm_  = _fmt(r.get("cm"))
-        rate = r.get("cm_rate") or 0
-        lines.append(f"| {nm} | {sal} | {cm_} | {rate}% |")
-    for nm in no_data_brands:
-        lines.append(f"| {nm} | - | (미집계) | - |")
-    lines.append("")
 
-    insights = []
-    for r in zc_rows:
-        rate = float(r.get("cm_rate") or 0)
-        nm   = r.get("Zc본부명") or "-"
-        if rate < 5:
-            insights.append(f"- {nm}: CM율 {rate}% (매우 낮음 — 변동비 점검 필요)")
-        elif rate < 8:
-            insights.append(f"- {nm}: CM율 {rate}% (낮음)")
-    if insights:
-        lines.append("\u203b 전사 CM 실적 기준으로 당월 신규 거래처는 매출액 집계가 되지 않습니다.")
-    else:
-        lines.append("\u203b 전사 CM 실적 기준으로 당월 신규 거래처는 매출액 집계가 되지 않습니다.")
+    all_brands = [
+        (r.get("Zc본부명") or "-", float(r.get("sales") or 0),
+         float(r.get("cm") or 0), float(r.get("cm_rate") or 0), True)
+        for r in sorted(zc_rows, key=lambda x: float(x.get("sales") or 0), reverse=True)
+    ] + [(nm, 0, 0, 0, False) for nm in no_data_brands]
+
+    for idx, (nm, sal, cm_, rate, has_data) in enumerate(all_brands, 1):
+        lines.append(f"{idx}. {nm}")
+        if has_data:
+            cm_flag = " ↓낮음" if rate < 5 else (" ↓" if rate < 8 else "")
+            lines.append(f"   매출 {_fmt(sal)}백만  CM {_fmt(cm_)}백만  CM율 {rate}%{cm_flag}")
+        else:
+            lines.append("   (당월 미집계)")
+        lines.append("")
+
+    lines.append("※ 전사 CM 실적 기준으로 당월 신규 거래처는 매출액 집계가 되지 않습니다.")
     return "\n".join(lines)
 
 
@@ -2524,6 +2518,9 @@ def _format_yyyymmdd(value) -> str:
 
 def _detect_customer_master_intent(query: str) -> str | None:
     q = query.strip()
+    # 플랜트별 매출 쿼리는 고객마스터가 아님
+    if re.match(r'^플랜트별\s+', q):
+        return None
     if re.search(r'(?:ZC|zc)\s*(?:코드)?|8\s*코드|팔\s*코드|(?:FC|fc)\s*(?:본사|본부|코드)?', q, re.IGNORECASE):
         return "fc"
     if re.search(r'(?:ZA|za)\s*(?:대표거래처|본사|코드)?', q, re.IGNORECASE):
@@ -2614,7 +2611,25 @@ def _search_customer_master_candidates(name_query: str, limit: int = 6) -> list[
     """, raw=True)
     seen: set[str] = set()
     result: list[dict] = []
-    for row in rows or []:
+    # relevance 점수 계산 후 정렬
+    kw_ns_score = re.sub(r'\s+', '', keyword)
+    tokens_score = [re.sub(r'\s+', '', t) for t in tokens]
+
+    def _relevance(row: dict) -> int:
+        nm   = re.sub(r'\s+', '', row.get('고객명') or '')
+        addr = (row.get('사업주소') or row.get('사업자주소') or '')
+        score = 0
+        if nm == kw_ns_score:                          score += 1000
+        elif all(t in nm for t in tokens_score):       score += 500
+        else: score += sum(100 for t in tokens_score if t in nm)
+        score += sum(20 for t in tokens_score if t in addr)
+        if (row.get('LOEVM') or ''):                   score -= 200  # 삭제거래처 후순위
+        return score
+
+    scored = [(row, _relevance(row)) for row in (rows or [])]
+    scored.sort(key=lambda x: x[1], reverse=True)
+
+    for row, _ in scored:
         code = str(row.get("고객코드") or "")
         if not code or code in seen:
             continue
