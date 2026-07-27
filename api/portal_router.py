@@ -49,7 +49,9 @@ def _leader_team(emp_code: str) -> str:
     return _TEAM_LEADERS.get(emp_code, "")
 
 def _scope_cond(emp_code: str) -> str:
-    """팀 리더: 지점명 기준 팀 전체, 일반: 영업사원 개인"""
+    """팀 리더: 지점명 기준 팀 전체, 관리자: 전체 사업부, 일반: 영업사원 개인"""
+    if access_control.is_admin_emp(emp_code):
+        return f"`사업부명` = {_sql(access_control.AUTH_DEPT)}"
     if emp_code in _TEAM_LEADERS:
         return f"`지점명` = {_sql(_TEAM_LEADERS[emp_code])}"
     return f"`영업사원` = {_sql(emp_code)}"
@@ -439,7 +441,8 @@ def _brand_rows(emp_code: str = _DEFAULT_EMP_CODE) -> list[dict]:
                 SUM(CASE WHEN `자재그룹명` IS NOT NULL AND COALESCE(`자재그룹명`, '') <> 'FC전용상품' THEN `매출액` ELSE 0 END) AS generic_sales,
                 SUM(CASE WHEN `자재그룹명` IS NOT NULL THEN `매출액` ELSE 0 END) AS classified_sales
             FROM {main.T_MAIN}
-            WHERE `년월` = {_sql(latest)}
+            WHERE `사업부명` = {_sql(access_control.AUTH_DEPT)}
+              AND `년월` = {_sql(latest)}
               AND COALESCE(`ZC본부명`, '') <> ''
             GROUP BY COALESCE(`ZC본부`, ''), COALESCE(`ZC본부명`, '미분류')
         ),
