@@ -5,7 +5,31 @@
     <h1>전체 대시보드</h1>
     <p>외식식재사업부 전체 기준 · {{ data.latest_ym or '-' }} 현월 · 최신 대금청구일 {{ data.latest_bill_date or '-' }}</p>
   </div>
+  <div>
+    <button id="refreshBtn" type="button" class="btn portal-primary" onclick="runRefresh()">⟳ 데이터 재계산</button>
+    <small id="refreshStatus" style="display:block;margin-top:4px;color:#888"></small>
+  </div>
 </div>
+<script>
+function runRefresh(){
+  var btn=document.getElementById('refreshBtn'), st=document.getElementById('refreshStatus');
+  btn.disabled=true; btn.textContent='계산 중...'; st.textContent='Databricks 쿼리 실행 중 (30~60초 소요)';
+  fetch('/portal/admin/refresh-dashboard',{method:'POST',headers:{'Content-Type':'application/json'}})
+    .then(function(r){return r.json();})
+    .then(function(d){
+      if(d.status==='ok'){
+        st.textContent='완료! '+d.emp_count+'명 · '+d.elapsed_sec+'초 · '+d.latest_ym;
+        st.style.color='#00b050';
+        setTimeout(function(){location.reload();},1500);
+      } else {
+        st.textContent='오류: '+(d.reason||JSON.stringify(d));
+        st.style.color='red';
+        btn.disabled=false; btn.textContent='⟳ 데이터 재계산';
+      }
+    })
+    .catch(function(e){ st.textContent='요청 실패: '+e; st.style.color='red'; btn.disabled=false; btn.textContent='⟳ 데이터 재계산'; });
+}
+</script>
 
 <section class="portal-metric-grid">
   <article><span>전체 매출액</span><strong>{{ '{:,}'.format(data.sales_m) }}백만</strong><small>외식식재사업부 현월</small></article>
