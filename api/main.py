@@ -2364,9 +2364,16 @@ def _fetch_ar_by_customer_code(cust_code: str, yearmonth: str) -> dict | None:
             MAX(`지급조건`) AS `지급조건`,
             MAX(`영업사원명`) AS `영업사원명`,
             MAX(`지점명`) AS `지점명`
-        FROM {T_AR}
-        WHERE `고객코드` = '{code}'
-          AND `년월` = '{ym}'
+        FROM (
+            SELECT *,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY `고객코드`, `년월`
+                       ORDER BY `update_date` DESC
+                   ) AS _rn
+            FROM {T_AR}
+            WHERE `고객코드` = '{code}'
+              AND `년월` = '{ym}'
+        ) WHERE _rn = 1
     """, raw=True)
     if not rows:
         return None
@@ -2400,9 +2407,16 @@ def _search_ar_customer_candidates(name_query: str, yearmonth: str, limit: int =
             COALESCE(SUM(`당월매출`), 0) AS `당월매출합`,
             MAX(`영업사원명`) AS `영업사원명`,
             MAX(`지점명`) AS `지점명`
-        FROM {T_AR}
-        WHERE `년월` = '{ym}'
-          AND {like_cond}
+        FROM (
+            SELECT *,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY `고객코드`, `년월`
+                       ORDER BY `update_date` DESC
+                   ) AS _rn
+            FROM {T_AR}
+            WHERE `년월` = '{ym}'
+              AND {like_cond}
+        ) WHERE _rn = 1
         GROUP BY `고객코드`
                 ORDER BY `현재잔액합` DESC, `당월매출합` DESC
         LIMIT {int(limit)}
@@ -6644,9 +6658,9 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                 _prev_ncm = (_now_ncm.replace(day=1) - _dt_ncm.timedelta(days=1))
                 _ncm_ym   = _prev_ncm.strftime("%Y%m")
                 _ncm_label = f"{_prev_ncm.year}년 {_prev_ncm.month}월"
-            elif re.search(r'올해|금년', query):
-                _ncm_ym   = None  # 연간
-                _ncm_label = f"{_now_ncm.year}년 전체"
+            elif re.search(r'올해|금년|누계', query):
+                _ncm_ym   = None  # 연간 누계
+                _ncm_label = f"{_now_ncm.year}년 신규개첩 누계 ({int(_NEW_CUST_DATE[:4])}년 {int(_NEW_CUST_DATE[4:6])}월이후)"
             else:
                 # 월 미지정 → T_PROFIT 최신 확정 월 자동 적용
                 _latest_ym_r = _safe_query(
@@ -6726,13 +6740,14 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                 _sp_display_ncm, _cm_rows or [], _no_data, _ncm_label
             )
 
-            # QR: 브랜드별 세부내역 버튼 + 네비
-            _ncm_qr = [
-                {"label": f"{r['Zc본부명'][:8]} 세부내역",
-                 "action": "message",
-                 "messageText": f"__신규CM세부__{_sp_cm}|{r['Zc본부명']}"}  # sp|브랜드 인코딩
-                for r in (_cm_rows or [])
-            ]
+            # QR: 전체 세부내역 단일 버튼 + 네비
+            _ncm_qr = []
+            if _cm_rows:
+                _ncm_qr.append({
+                    "label": "📋 전체 세부내역 보기",
+                    "action": "message",
+                    "messageText": f"__신규CM전체세부__{_sp_cm}|{_ncm_label}"
+                })
             _ncm_qr.append({"label": "🏠 메인 메뉴", "action": "message", "messageText": "메뉴"})
 
             _send_kakao_callback_qr(callback_url, _to_kakao_text(_ncm_text), _ncm_qr, "신규CM")
@@ -6741,7 +6756,72 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
             _send_kakao_callback(callback_url, "⚠️ 신규CM 조회 중 오류가 발생했습니다.", "신규CM")
         return
 
-    # ─── 신규CM 세부내역 ─────────────────────────────────────────
+    # ─── 신규CM 전체 세부내역 (모든 브랜드 한 번에) ──────────────────
+    _ncm_all_m = re.match(r'^__신규CM전체세부__(.+)\|(.+)$', query.strip())
+    if _ncm_all_m:
+        _nca_sp     = re.sub(r'\s+', '', _ncm_all_m.group(1))
+        _nca_label  = _ncm_all_m.group(2).strip()
+        try:
+            import datetime as _dt_nca
+            _latest_r2 = _safe_query(f"SELECT date_format(MAX(`날짜`), 'yyyyMM') AS mx FROM {T_PROFIT}", raw=True)
+            _nca_ym = str(_latest_r2[0]["mx"]) if _latest_r2 and _latest_r2[0].get("mx") else _dt_nca.date.today().strftime("%Y%m")
+            _is_ytd = '누계' in _nca_label or '전체' in _nca_label
+            # 신규 ZC 목록
+            _nca_zc_rows = _safe_query(f"""
+                SELECT `ZC본부`, `ZC본부명`
+                FROM {T_MAIN}
+                WHERE regexp_replace(`영업사원명`, ' ', '') LIKE '%{_nca_sp}%'
+                  AND `사업부명` = '외식식재사업부'
+                GROUP BY `ZC본부`, `ZC본부명`
+                HAVING MIN(`대금청구일`) >= '{_NEW_CUST_DATE}'
+            """)
+            _nca_zc_map = {str(int(r["ZC본부"])): r["ZC본부명"] for r in (_nca_zc_rows or [])}
+            _nca_ids = "'" + "','".join(_nca_zc_map.keys()) + "'"
+            _nca_date_cond = (
+                f"date_format(`날짜`, 'yyyy') = '{_dt_nca.date.today().year}'"
+                if _is_ytd
+                else f"date_format(`날짜`, 'yyyyMM') = '{_nca_ym}'"
+            )
+            _nca_cm = _safe_query(f"""
+                SELECT
+                    `Zc본부`, `Zc본부명`,
+                    ROUND(SUM(`FI매출액`)/1000000,    2) AS sales,
+                    ROUND(SUM(`매출총이익`)/1000000,  2) AS gross,
+                    ROUND(SUM(`변동비`)/1000000,       2) AS var,
+                    ROUND(SUM(`총운송비`)/1000000,     2) AS trans,
+                    ROUND(SUM(`총하역비`)/1000000,     2) AS load,
+                    ROUND(SUM(`브랜드수수료`)/1000000, 2) AS brand_fee,
+                    ROUND(SUM(`보증보험료`)/1000000,   2) AS ins,
+                    ROUND(SUM(`포장비`)/1000000,       2) AS pack,
+                    ROUND(SUM(`대리점수수료`)/1000000, 2) AS agent,
+                    ROUND(SUM(`공헌이익`)/1000000,     2) AS cm
+                FROM {T_PROFIT}
+                WHERE `Zc본부` IN ({_nca_ids})
+                  AND {_nca_date_cond}
+                GROUP BY `Zc본부`, `Zc본부명`
+                ORDER BY SUM(`FI매출액`) DESC
+            """)
+            # 브랜드별 세부리스트 조립
+            _all_parts = []
+            for _cr in (_nca_cm or []):
+                _nm = _cr.get("Zc본부명") or "-"
+                _all_parts.append(_build_new_cm_detail(_nm, _cr, _nca_label))
+            if not _all_parts:
+                _send_kakao_callback(callback_url, f"'{_nca_sp}'님의 신규거래처 CM 데이터가 없습니다. ({_nca_label})", "신규CM세부")
+                return
+            _all_text = ("\n" + "─" * 20 + "\n").join(_all_parts)
+            _all_text += f"\n\n※ 전사 CM 실적 기준으로 당월 신규 거래처는 매출액 집계가 되지 않습니다."
+            _all_qr = [
+                {"label": "◀ 신규CM 목록", "action": "message", "messageText": f"{_nca_sp} 신규 CM"},
+                {"label": "🏠 메인 메뉴", "action": "message", "messageText": "메뉴"},
+            ]
+            _send_kakao_callback_qr(callback_url, _to_kakao_text(_all_text), _all_qr, "신규CM세부")
+        except Exception as _e_nca:
+            logger.error(f"[콜백] 신규CM전체세부 오류: {_e_nca}")
+            _send_kakao_callback(callback_url, "⚠️ CM 세부내역 조회 중 오류가 발생했습니다.", "신규CM세부")
+        return
+
+    # ─── 신규CM 단일 브랜드 세부내역 ─────────────────────────────────
     _ncm_detail_encoded = re.match(r'^__신규CM세부__(.+)\|(.+)$', query.strip())
     if _ncm_detail_encoded:
         _ncm_sp_re   = re.sub(r'\s+', '', _ncm_detail_encoded.group(1))
