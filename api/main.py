@@ -6628,8 +6628,8 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
             import calendar as _cal_ncm
             _now_ncm = _dt_ncm.date.today()
             # ── 월 파싱 ──
-            _ncm_ym = _now_ncm.strftime("%Y%m")
-            _ncm_label = f"{_now_ncm.month}월"
+            _ncm_ym: str | None
+            _ncm_label: str
             if re.search(r'지난\s*달|지난\s*월|전월', query):
                 _prev_ncm = (_now_ncm.replace(day=1) - _dt_ncm.timedelta(days=1))
                 _ncm_ym   = _prev_ncm.strftime("%Y%m")
@@ -6637,6 +6637,18 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
             elif re.search(r'올해|금년', query):
                 _ncm_ym   = None  # 연간
                 _ncm_label = f"{_now_ncm.year}년 전체"
+            else:
+                # 월 미지정 → T_PROFIT 최신 확정 월 자동 적용
+                _latest_ym_r = _safe_query(
+                    f"SELECT date_format(MAX(`날짜`), 'yyyyMM') AS mx FROM {T_PROFIT}", raw=True
+                )
+                if _latest_ym_r and _latest_ym_r[0].get("mx"):
+                    _ncm_ym = str(_latest_ym_r[0]["mx"])
+                else:
+                    _ncm_ym = _now_ncm.strftime("%Y%m")
+                _ncm_mo = int(_ncm_ym[4:6])
+                _ncm_yr = int(_ncm_ym[:4])
+                _ncm_label = f"{_ncm_yr}년 {_ncm_mo}월 (최신 확정)"
 
             # ── Step1: 신규 ZC본부 코드 목록 ──
             _new_zc_rows = _safe_query(f"""
