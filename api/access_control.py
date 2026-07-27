@@ -53,9 +53,12 @@ def _read_json(path: Path, default):
 
 
 def _write_json(path: Path, data) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except OSError:
+        pass  # 쓰기 실패 시 무시 (읽기 전용 환경 대응)
 
 
 def load_beta_testers() -> dict[str, dict]:

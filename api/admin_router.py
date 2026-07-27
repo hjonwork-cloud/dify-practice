@@ -553,7 +553,16 @@ import access_control
 
 @router.get("/users", response_class=HTMLResponse)
 async def users(request: Request):
+    import logging as _log
     _require_admin(request, ("system_admin",))
+    try:
+        return await _users_inner(request)
+    except Exception as _exc:
+        _log.getLogger("admin_router").exception("[/admin/users] 500 오류")
+        raise
+
+
+async def _users_inner(request: Request) -> HTMLResponse:
     import main
     registered = main._load_users()
     whitelist = main._load_whitelist()
