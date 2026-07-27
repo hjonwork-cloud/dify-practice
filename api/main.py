@@ -621,6 +621,90 @@ def _fetch_peer_stats(sp_compact: str) -> dict | None:
     }
 
 
+def _build_new_cm_markdown(
+    sp_name: str,
+    zc_rows: list[dict],
+    no_data_brands: list[str],
+    ym_label: str,
+) -> str:
+    """신규거래처 CM 현황 마크다운"""
+    total_sales = sum(float(r.get("sales") or 0) for r in zc_rows)
+    total_cm    = sum(float(r.get("cm")    or 0) for r in zc_rows)
+    avg_cm_rate = round(total_cm / total_sales * 100, 1) if total_sales > 0 else 0.0
+    brand_cnt   = len(zc_rows) + len(no_data_brands)
+
+    lines = [
+        f"📊 {sp_name} 님 신규거래처 CM 현황 ({ym_label}, 외식식재사업부)",
+        "",
+        f"신규브랜드: {brand_cnt}개 | 총매출: {_format_value(total_sales)}백만 | 평균CM율: {avg_cm_rate}%",
+        "",
+        "| 브랜드명 | 매출 | CM금액 | CM율 |",
+        "| --- | ---: | ---: | ---: |",
+    ]
+    for r in sorted(zc_rows, key=lambda x: float(x.get("sales") or 0), reverse=True):
+        nm   = r.get("Zc본부명") or "-"
+        sal  = _format_value(float(r.get("sales")   or 0))
+        cm_  = _format_value(float(r.get("cm")      or 0))
+        rate = r.get("cm_rate") or 0
+        lines.append(f"| {nm} | {sal}백만 | {cm_}백만 | {rate}% |")
+    for nm in no_data_brands:
+        lines.append(f"| {nm} | - | (미집계) | - |")
+    lines.append("")
+
+    insights = []
+    for r in zc_rows:
+        rate = float(r.get("cm_rate") or 0)
+        nm   = r.get("Zc본부명") or "-"
+        if rate < 5:
+            insights.append(f"- {nm}: CM율 {rate}% (매우 낮음 — 변동비 점검 필요)")
+        elif rate < 8:
+            insights.append(f"- {nm}: CM율 {rate}% (낮음)")
+    if insights:
+        lines.append("💡 주요 포인트:")
+        lines.extend(insights)
+        lines.append("")
+
+    lines.append("※ 00_customers_cm 기준")
+    return "\n".join(lines)
+
+
+def _build_new_cm_detail(brand_name: str, detail: dict, ym_label: str) -> str:
+    """신규CM 세부내역 카드 (브랜드 1개)"""
+    fi    = float(detail.get("fi")    or 0)
+    gross = float(detail.get("gross") or 0)
+    var   = float(detail.get("var")   or 0)
+    trans = float(detail.get("trans") or 0)
+    load  = float(detail.get("load")  or 0)
+    brand_fee = float(detail.get("brand_fee") or 0)
+    ins   = float(detail.get("ins")   or 0)
+    pack  = float(detail.get("pack")  or 0)
+    agent = float(detail.get("agent") or 0)
+    cm    = float(detail.get("cm")    or 0)
+
+    def pct(v): return f"{round(v/fi*100,1)}%" if fi > 0 else "-"
+    def fmt(v): return _format_value(v)
+
+    lines = [
+        f"📌 {brand_name} CM 세부 ({ym_label})",
+        "",
+        f"📌 매출액(FI):    {fmt(fi)}백만",
+        f"📌 매출총이익:    {fmt(gross)}백만 ({pct(gross)})",
+        f"🔧 변동비:        {fmt(var)}백만 ({pct(var)})",
+        f"  🚚 운송비:      {fmt(trans)}백만 ({pct(trans)})",
+        f"  🏗️ 하역비:      {fmt(load)}백만 ({pct(load)})",
+    ]
+    if brand_fee:
+        lines.append(f"  💰 브랜드수수료: {fmt(brand_fee)}백만 ({pct(brand_fee)})")
+    if ins:
+        lines.append(f"  🛡️ 보증보험료:   {fmt(ins)}백만 ({pct(ins)})")
+    if pack:
+        lines.append(f"  📦 포장비:       {fmt(pack)}백만 ({pct(pack)})")
+    if agent:
+        lines.append(f"  🤝 대리점수수료: {fmt(agent)}백만 ({pct(agent)})")
+    lines.append(f"✅ 공헌이익:      {fmt(cm)}백만 ({pct(cm)})")
+    return "\n".join(lines)
+
+
 def _build_new_sales_markdown(rows: list[dict], original_sql: str = "") -> str:
     """신규매출 분석 마크다운 (가맹점 · 동료비교 · 리스크 포함)"""
 
@@ -4801,6 +4885,7 @@ _user_last_reason: dict[str, str] = {}  # user_id → 전년대비 섹션 텍스
 _user_pending_confirm: dict[str, dict] = {}    # user_id → {exact_name, month_num, yearmonth, level_label}
 _user_pending_candidates: dict[str, dict] = {} # user_id → {이름 → level_label}
 _user_pending_ar_input: dict[str, dict] = {}   # user_id → 미수채권 고객코드/고객명 입력 대기
+_user_last_new_cm: dict[str, dict] = {}        # user_id → {ZC본부명: {detail fields}} 신규CM 세부내역용
 _user_pending_customer_master_input: dict[str, dict] = {}  # user_id → 고객마스터 고객코드/고객명 입력 대기
 _user_pending_profit_period: dict[str, dict] = {}  # user_id → 특정연월 입력 대기 {dim, ts}
 
@@ -6525,10 +6610,142 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                 except Exception as e:
                     logger.error(f"[콜백] 브랜드매출(월미명시) 오류: {e}")
 
+    # ─── 영업사원 신규 CM (Dify 바이패스) ─────────────────────
+    _SP_CM_BL = {'전체', '사업부', '외식식재', '브랜드', '품목별', '월별', '팀별', '본사별', '사업부별', '매출액', '영업사원'}
+    _sp_cm_m = re.search(r'([가-힣]{2,5})\s*(?:신규매출|신규실적|신규 매출|신규 실적|신규)', query)
+    if (
+        _sp_cm_m
+        and '신규' in query
+        and re.search(r'수익성|[Cc][Mm]\b|공헌이익률?|공헌이익율?', query)
+        and _sp_cm_m.group(1) not in _SP_CM_BL
+    ):
+        _sp_cm = re.sub(r'\s+', '', _sp_cm_m.group(1))
+        _user_last_sp[user_id] = _sp_cm
+        logger.info(f"[콜백] 신규CM 바이패스: sp={_sp_cm}")
+        try:
+            import datetime as _dt_ncm
+            import calendar as _cal_ncm
+            _now_ncm = _dt_ncm.date.today()
+            # ── 월 파싱 ──
+            _ncm_ym = _now_ncm.strftime("%Y%m")
+            _ncm_label = f"{_now_ncm.month}월"
+            if re.search(r'지난\s*달|지난\s*월|전월', query):
+                _prev_ncm = (_now_ncm.replace(day=1) - _dt_ncm.timedelta(days=1))
+                _ncm_ym   = _prev_ncm.strftime("%Y%m")
+                _ncm_label = f"{_prev_ncm.year}년 {_prev_ncm.month}월"
+            elif re.search(r'올해|금년', query):
+                _ncm_ym   = None  # 연간
+                _ncm_label = f"{_now_ncm.year}년 전체"
+
+            # ── Step1: 신규 ZC본부 코드 목록 ──
+            _new_zc_rows = _safe_query(f"""
+                SELECT `ZC본부`, `ZC본부명`
+                FROM {T_MAIN}
+                WHERE regexp_replace(`영업사원명`, ' ', '') LIKE '%{_sp_cm}%'
+                  AND `사업부명` = '외식식재사업부'
+                GROUP BY `ZC본부`, `ZC본부명`
+                HAVING MIN(`대금청구일`) >= '{_NEW_CUST_DATE}'
+            """)
+            if not _new_zc_rows:
+                _send_kakao_callback(
+                    callback_url,
+                    f"'{_sp_cm}'님의 신규거래처가 없습니다.",
+                    "신규CM",
+                )
+                return
+
+            # T_MAIN ZC코드(0000801089) → T_PROFIT 형식(801089): BIGINT 변환
+            _zc_map = {str(int(r["ZC본부"])): r["ZC본부명"] for r in _new_zc_rows}
+            _zc_ids_sql = "'" + "','".join(_zc_map.keys()) + "'"
+
+            # ── Step2: T_PROFIT CM 조회 ──
+            _date_cond = f"date_format(`날짜`, 'yyyyMM') = '{_ncm_ym}'" if _ncm_ym else f"date_format(`날짜`, 'yyyy') = '{_now_ncm.year}'"
+            _cm_rows = _safe_query(f"""
+                SELECT
+                    `Zc본부`, `Zc본부명`,
+                    ROUND(SUM(`FI매출액`)/1000000,    2) AS sales,
+                    ROUND(SUM(`매출총이익`)/1000000,  2) AS gross,
+                    ROUND(SUM(`변동비`)/1000000,       2) AS var,
+                    ROUND(SUM(`총운송비`)/1000000,     2) AS trans,
+                    ROUND(SUM(`총하역비`)/1000000,     2) AS load,
+                    ROUND(SUM(`브랜드수수료`)/1000000, 2) AS brand_fee,
+                    ROUND(SUM(`보증보험료`)/1000000,   2) AS ins,
+                    ROUND(SUM(`포장비`)/1000000,       2) AS pack,
+                    ROUND(SUM(`대리점수수료`)/1000000, 2) AS agent,
+                    ROUND(SUM(`공헌이익`)/1000000,     2) AS cm,
+                    ROUND(SUM(`공헌이익`)/NULLIF(SUM(`FI매출액`),0)*100, 1) AS cm_rate
+                FROM {T_PROFIT}
+                WHERE `Zc본부` IN ({_zc_ids_sql})
+                  AND {_date_cond}
+                GROUP BY `Zc본부`, `Zc본부명`
+            """)
+
+            _cm_found_ids = {r["Zc본부"] for r in _cm_rows} if _cm_rows else set()
+            _no_data = [v for k, v in _zc_map.items() if k not in _cm_found_ids]
+
+            # ── 세부내역 세션 저장 ──
+            _user_last_new_cm[user_id] = {}
+            for _cr in (_cm_rows or []):
+                _user_last_new_cm[user_id][_cr["Zc본부명"]] = dict(_cr, ym_label=_ncm_label)
+
+            # ── 출력 ──
+            _sp_display_ncm = _sp_cm
+            _sp_chk_ncm = _safe_query(f"""
+                SELECT MAX(regexp_replace(`영업사원명`, ' ', '')) AS nm
+                FROM {T_MAIN}
+                WHERE regexp_replace(`영업사원명`, ' ', '') LIKE '%{_sp_cm}%'
+                  AND `사업부명` = '외식식재사업부'
+            """)
+            if _sp_chk_ncm and _sp_chk_ncm[0].get("nm"):
+                _sp_display_ncm = _sp_chk_ncm[0]["nm"]
+
+            _ncm_text = _build_new_cm_markdown(
+                _sp_display_ncm, _cm_rows or [], _no_data, _ncm_label
+            )
+
+            # QR: 브랜드별 세부내역 버튼 + 네비
+            _ncm_qr = [
+                {"label": f"{r['Zc본부명'][:8]} 세부내역",
+                 "action": "message",
+                 "messageText": f"{r['Zc본부명']} 세부내역"}
+                for r in (_cm_rows or [])
+            ]
+            _ncm_qr.append({"label": "🏠 메인 메뉴", "action": "message", "messageText": "메뉴"})
+
+            _send_kakao_callback_qr(callback_url, _to_kakao_text(_ncm_text), _ncm_qr, "신규CM")
+        except Exception as _e_ncm:
+            logger.error(f"[콜백] 신규CM 바이패스 오류: {_e_ncm}")
+            _send_kakao_callback(callback_url, "⚠️ 신규CM 조회 중 오류가 발생했습니다.", "신규CM")
+        return
+
+    # ─── 신규CM 세부내역 ─────────────────────────────────────────
+    _ncm_detail_m = re.search(r'(.{2,15})\s*세부내역$', query.strip())
+    if _ncm_detail_m and user_id in _user_last_new_cm and _user_last_new_cm[user_id]:
+        _detail_brand = _ncm_detail_m.group(1).strip()
+        # 완전 일치 우선, 없으면 부분 일치
+        _detail_data = _user_last_new_cm[user_id].get(_detail_brand)
+        if not _detail_data:
+            for _k, _v in _user_last_new_cm[user_id].items():
+                if _detail_brand in _k or _k in _detail_brand:
+                    _detail_data = _v
+                    _detail_brand = _k
+                    break
+        if _detail_data:
+            _detail_ym = _detail_data.get("ym_label", "")
+            _detail_text = _build_new_cm_detail(_detail_brand, _detail_data, _detail_ym)
+            _detail_qr = [
+                {"label": "◀ 신규CM 목록", "action": "message",
+                 "messageText": f"{_user_last_sp.get(user_id, '')} 신규 CM"},
+                {"label": "🏠 메인 메뉴", "action": "message", "messageText": "메뉴"},
+            ]
+            _send_kakao_callback_qr(callback_url, _to_kakao_text(_detail_text), _detail_qr, "신규CM세부")
+            return
+
     # ─── 영업사원 신규매출 (Dify 바이패스) ─────────────────────
     _SP_BLACKLIST = {'전체', '사업부', '외식식재', '브랜드', '품목별', '월별', '팀별', '본사별', '사업부별', '매출액', '영업사원'}
     sp_match = re.search(r'([가-힣]{2,5})\s*(?:신규매출|신규실적|신규 매출|신규 실적)', query)
-    if sp_match and '신규' in query and sp_match.group(1) not in _SP_BLACKLIST:
+    if sp_match and '신규' in query and sp_match.group(1) not in _SP_BLACKLIST\
+            and not re.search(r'수익성|[Cc][Mm]\b|공헌이익률?|공헌이익율?', query):
         sp = re.sub(r'\s+', '', sp_match.group(1))
         _user_last_sp[user_id] = sp
         logger.info(f"[콜백] 영업사원 신규매출 바이패스: sp={sp}")
