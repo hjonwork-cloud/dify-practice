@@ -692,6 +692,24 @@ def _build_new_sales_markdown(rows: list[dict], original_sql: str = "") -> str:
         if max(mcv[c].values(), default=0) > 0.01
     )
 
+    # ── 2.6 당월 예상값 스케일업 ──
+    # 마지막 월이 당월(부분 집계)이면 일수 비례로 월말 예상값으로 환산
+    import calendar as _cal
+    import datetime as _dt_ns2
+    _today2 = _dt_ns2.date.today()
+    _cur_ym = _today2.strftime("%Y%m")
+    _cur_month_forecast_ratio: float | None = None
+    _cur_month_label: str = ""
+    if month_set and month_set[-1] == _cur_ym and _today2.day >= 1:
+        _days_in_m = _cal.monthrange(_today2.year, _today2.month)[1]
+        if _today2.day < _days_in_m:
+            _cur_month_forecast_ratio = _days_in_m / _today2.day
+            _cur_month_label = f"{_today2.month}월"
+            for _c in mcv:
+                if _cur_ym in mcv[_c]:
+                    mcv[_c][_cur_ym] = round(mcv[_c][_cur_ym] * _cur_month_forecast_ratio, 2)
+            logger.info(f"[마크다운] 당월({_cur_ym}) 예상 스케일업: ×{_cur_month_forecast_ratio:.2f} ({_today2.day}/{_days_in_m}일)")
+
     has_stores = bool(store_data)
 
     # ── 3. 합계 계산 ──
@@ -736,7 +754,10 @@ def _build_new_sales_markdown(rows: list[dict], original_sql: str = "") -> str:
     month_labels = []
     for m in month_set:
         mn = int(m[4:6]) if len(m) >= 6 else m
-        month_labels.append(f"{mn}월")
+        if m == _cur_ym and _cur_month_forecast_ratio:
+            month_labels.append(f"{mn}월(예상)")
+        else:
+            month_labels.append(f"{mn}월")
 
     cols = ["브랜드명"] + month_labels + ["합계"]
     if has_stores:
@@ -895,6 +916,10 @@ def _build_new_sales_markdown(rows: list[dict], original_sql: str = "") -> str:
     if insights:
         lines.append("💡 주요 포인트:")
         lines.extend(insights)
+
+    if _cur_month_forecast_ratio:
+        lines.append("")
+        lines.append(f"※ {_cur_month_label} 매출은 {_today2.day}일 기준 일수 비례 예상값 ({_today2.day}/{_cal.monthrange(_today2.year, _today2.month)[1]}일)")
 
     if personal_count > 0:
         lines.append("")
