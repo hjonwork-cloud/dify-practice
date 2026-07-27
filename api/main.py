@@ -3896,8 +3896,11 @@ _SEED_MARKER_FILE = os.getenv("SEED_MARKER_FILE", os.path.join(_DATA_DIR, "_seed
 def _load_users() -> dict:
     """등록 사용자 목록 로드. {kakao_id: {name, emp_code, registered_at}}"""
     if os.path.exists(_USERS_FILE):
-        with open(_USERS_FILE, "r", encoding="utf-8") as f:
-            return json_mod.load(f)
+        try:
+            with open(_USERS_FILE, "r", encoding="utf-8") as f:
+                return json_mod.load(f)
+        except (OSError, ValueError):
+            return {}
     return {}
 
 
@@ -3909,8 +3912,11 @@ def _save_users(users: dict):
 def _load_whitelist() -> dict:
     """관리자 등록 화이트리스트. {emp_code: {name, team, added_at}}"""
     if os.path.exists(_WHITELIST_FILE):
-        with open(_WHITELIST_FILE, "r", encoding="utf-8") as f:
-            return json_mod.load(f)
+        try:
+            with open(_WHITELIST_FILE, "r", encoding="utf-8") as f:
+                return json_mod.load(f)
+        except (OSError, ValueError):
+            return {}
     return {}
 
 
@@ -3922,8 +3928,11 @@ def _save_whitelist(wl: dict):
 def _load_blacklist() -> list:
     """관리자 블랙리스트. [emp_code, ...] — 영구 등록 차단"""
     if os.path.exists(_BLACKLIST_FILE):
-        with open(_BLACKLIST_FILE, "r", encoding="utf-8") as f:
-            return json_mod.load(f)
+        try:
+            with open(_BLACKLIST_FILE, "r", encoding="utf-8") as f:
+                return json_mod.load(f)
+        except (OSError, ValueError):
+            return []
     return []
 
 
