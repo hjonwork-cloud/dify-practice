@@ -664,11 +664,9 @@ def _build_new_cm_markdown(
         elif rate < 8:
             insights.append(f"- {nm}: CM율 {rate}% (낮음)")
     if insights:
-        lines.append("💡 주요 포인트:")
-        lines.extend(insights)
-        lines.append("")
-
-    lines.append("※ 00_customers_cm 기준")
+        lines.append("\u203b 전사 CM 실적 기준으로 당월 신규 거래처는 매출액 집계가 되지 않습니다.")
+    else:
+        lines.append("\u203b 전사 CM 실적 기준으로 당월 신규 거래처는 매출액 집계가 되지 않습니다.")
     return "\n".join(lines)
 
 
@@ -6732,7 +6730,7 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
             _ncm_qr = [
                 {"label": f"{r['Zc본부명'][:8]} 세부내역",
                  "action": "message",
-                 "messageText": f"{r['Zc본부명']} 세부내역"}
+                 "messageText": f"__신규CM세부__{_sp_cm}|{r['Zc본부명']}"}  # sp|브랜드 인코딩
                 for r in (_cm_rows or [])
             ]
             _ncm_qr.append({"label": "🏠 메인 메뉴", "action": "message", "messageText": "메뉴"})
@@ -6744,27 +6742,64 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
         return
 
     # ─── 신규CM 세부내역 ─────────────────────────────────────────
-    _ncm_detail_m = re.search(r'(.{2,15})\s*세부내역$', query.strip())
-    if _ncm_detail_m and user_id in _user_last_new_cm and _user_last_new_cm[user_id]:
-        _detail_brand = _ncm_detail_m.group(1).strip()
-        # 완전 일치 우선, 없으면 부분 일치
-        _detail_data = _user_last_new_cm[user_id].get(_detail_brand)
-        if not _detail_data:
-            for _k, _v in _user_last_new_cm[user_id].items():
-                if _detail_brand in _k or _k in _detail_brand:
-                    _detail_data = _v
-                    _detail_brand = _k
-                    break
-        if _detail_data:
-            _detail_ym = _detail_data.get("ym_label", "")
-            _detail_text = _build_new_cm_detail(_detail_brand, _detail_data, _detail_ym)
+    _ncm_detail_encoded = re.match(r'^__신규CM세부__(.+)\|(.+)$', query.strip())
+    if _ncm_detail_encoded:
+        _ncm_sp_re   = re.sub(r'\s+', '', _ncm_detail_encoded.group(1))
+        _ncm_brand_re = _ncm_detail_encoded.group(2).strip()
+        try:
+            import datetime as _dt_det
+            # 연도 및 세션 유지 데이터 활용
+            _det_data = (_user_last_new_cm.get(user_id) or {}).get(_ncm_brand_re)
+            if _det_data:
+                _det_ym_label = _det_data.get("ym_label", "")
+            else:
+                # 세션 없으면 T_PROFIT 재조회
+                _latest_r = _safe_query(f"SELECT date_format(MAX(`날짜`), 'yyyyMM') AS mx FROM {T_PROFIT}", raw=True)
+                _det_ym = str(_latest_r[0]["mx"]) if _latest_r and _latest_r[0].get("mx") else _dt_det.date.today().strftime("%Y%m")
+                _det_ym_label = f"{int(_det_ym[:4])}년 {int(_det_ym[4:6])}월 (최신 확정)"
+                # 신규 ZC 재조회
+                _det_zc_rows = _safe_query(f"""
+                    SELECT `ZC본부`, `ZC본부명`
+                    FROM {T_MAIN}
+                    WHERE regexp_replace(`영업사원명`, ' ', '') LIKE '%{_ncm_sp_re}%'
+                      AND `사업부명` = '외식식재사업부'
+                    GROUP BY `ZC본부`, `ZC본부명`
+                    HAVING MIN(`대금청구일`) >= '{_NEW_CUST_DATE}'
+                """)
+                _det_zc_map = {str(int(r["ZC본부"])): r["ZC본부명"] for r in (_det_zc_rows or [])}
+                # 브랜드명 매칭 ZC코드 찾기
+                _det_zc_code = next((k for k, v in _det_zc_map.items() if _ncm_brand_re in v or v in _ncm_brand_re), None)
+                if not _det_zc_code:
+                    _send_kakao_callback(callback_url, f"'{_ncm_brand_re}' 브랜드를 찾을 수 없습니다.", "신규CM세부")
+                    return
+                _det_cm = _safe_query(f"""
+                    SELECT
+                        ROUND(SUM(`FI매출액`)/1000000,    2) AS sales,
+                        ROUND(SUM(`매출총이익`)/1000000,  2) AS gross,
+                        ROUND(SUM(`변동비`)/1000000,       2) AS var,
+                        ROUND(SUM(`총운송비`)/1000000,     2) AS trans,
+                        ROUND(SUM(`총하역비`)/1000000,     2) AS load,
+                        ROUND(SUM(`브랜드수수료`)/1000000, 2) AS brand_fee,
+                        ROUND(SUM(`보증보험료`)/1000000,   2) AS ins,
+                        ROUND(SUM(`포장비`)/1000000,       2) AS pack,
+                        ROUND(SUM(`대리점수수료`)/1000000, 2) AS agent,
+                        ROUND(SUM(`공헌이익`)/1000000,     2) AS cm
+                    FROM {T_PROFIT}
+                    WHERE `Zc본부` = '{_det_zc_code}'
+                      AND date_format(`날짜`, 'yyyyMM') = '{_det_ym}'
+                """)
+                _det_data = _det_cm[0] if _det_cm else {}
+            _detail_text = _build_new_cm_detail(_ncm_brand_re, _det_data, _det_ym_label)
             _detail_qr = [
                 {"label": "◀ 신규CM 목록", "action": "message",
-                 "messageText": f"{_user_last_sp.get(user_id, '')} 신규 CM"},
+                 "messageText": f"{_ncm_sp_re} 신규 CM"},
                 {"label": "🏠 메인 메뉴", "action": "message", "messageText": "메뉴"},
             ]
             _send_kakao_callback_qr(callback_url, _to_kakao_text(_detail_text), _detail_qr, "신규CM세부")
-            return
+        except Exception as _e_det:
+            logger.error(f"[콜백] 신규CM세부 오류: {_e_det}")
+            _send_kakao_callback(callback_url, "⚠️ CM 세부내역 조회 중 오류가 발생했습니다.", "신규CM세부")
+        return
 
     # ─── 영업사원 신규매출 (Dify 바이패스) ─────────────────────
     _SP_BLACKLIST = {'전체', '사업부', '외식식재', '브랜드', '품목별', '월별', '팀별', '본사별', '사업부별', '매출액', '영업사원'}
