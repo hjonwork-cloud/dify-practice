@@ -628,6 +628,10 @@ def _build_new_cm_markdown(
     ym_label: str,
 ) -> str:
     """신규거래처 CM 현황 마크다운"""
+    # CM 쿼리 결과는 이미 백만원 단위 → _format_value(억원 단위 함수) 사용 금지
+    def _fmt(v) -> str:
+        return f"{round(float(v or 0)):,}"
+
     total_sales = sum(float(r.get("sales") or 0) for r in zc_rows)
     total_cm    = sum(float(r.get("cm")    or 0) for r in zc_rows)
     avg_cm_rate = round(total_cm / total_sales * 100, 1) if total_sales > 0 else 0.0
@@ -636,17 +640,17 @@ def _build_new_cm_markdown(
     lines = [
         f"📊 {sp_name} 님 신규거래처 CM 현황 ({ym_label}, 외식식재사업부)",
         "",
-        f"신규브랜드: {brand_cnt}개 | 총매출: {_format_value(total_sales)}백만 | 평균CM율: {avg_cm_rate}%",
+        f"신규브랜드: {brand_cnt}개 | 총매출: {_fmt(total_sales)}백만 | 평균CM율: {avg_cm_rate}%",
         "",
         "| 브랜드명 | 매출 | CM금액 | CM율 |",
         "| --- | ---: | ---: | ---: |",
     ]
     for r in sorted(zc_rows, key=lambda x: float(x.get("sales") or 0), reverse=True):
         nm   = r.get("Zc본부명") or "-"
-        sal  = _format_value(float(r.get("sales")   or 0))
-        cm_  = _format_value(float(r.get("cm")      or 0))
+        sal  = _fmt(r.get("sales"))   # 숫자만 (백만원) — _to_kakao_text가 백만 붙임
+        cm_  = _fmt(r.get("cm"))
         rate = r.get("cm_rate") or 0
-        lines.append(f"| {nm} | {sal}백만 | {cm_}백만 | {rate}% |")
+        lines.append(f"| {nm} | {sal} | {cm_} | {rate}% |")
     for nm in no_data_brands:
         lines.append(f"| {nm} | - | (미집계) | - |")
     lines.append("")
@@ -670,19 +674,19 @@ def _build_new_cm_markdown(
 
 def _build_new_cm_detail(brand_name: str, detail: dict, ym_label: str) -> str:
     """신규CM 세부내역 카드 (브랜드 1개)"""
-    fi    = float(detail.get("fi")    or 0)
-    gross = float(detail.get("gross") or 0)
-    var   = float(detail.get("var")   or 0)
-    trans = float(detail.get("trans") or 0)
-    load  = float(detail.get("load")  or 0)
+    fi    = float(detail.get("sales")     or 0)  # FI매출액 (백만원)
+    gross = float(detail.get("gross")     or 0)
+    var   = float(detail.get("var")       or 0)
+    trans = float(detail.get("trans")     or 0)
+    load  = float(detail.get("load")      or 0)
     brand_fee = float(detail.get("brand_fee") or 0)
-    ins   = float(detail.get("ins")   or 0)
-    pack  = float(detail.get("pack")  or 0)
-    agent = float(detail.get("agent") or 0)
-    cm    = float(detail.get("cm")    or 0)
+    ins   = float(detail.get("ins")       or 0)
+    pack  = float(detail.get("pack")      or 0)
+    agent = float(detail.get("agent")     or 0)
+    cm    = float(detail.get("cm")        or 0)
 
     def pct(v): return f"{round(v/fi*100,1)}%" if fi > 0 else "-"
-    def fmt(v): return _format_value(v)
+    def fmt(v): return f"{round(float(v or 0)):,}"
 
     lines = [
         f"📌 {brand_name} CM 세부 ({ym_label})",
@@ -4199,7 +4203,7 @@ def _to_kakao_text(answer: str) -> str:
             if len(cells) >= 2 and len(headers) >= 2:
                 brand = _shorten_brand(cells[0])
 
-                # ── 매출값 추출: 합계 > 매출(억) > GP(억) ──
+                # ── 매출값 추출: 합계 > 매출(억) > 매출(백만) > 매출 > GP(억) ──
                 total_val = ""
                 if '합계' in headers:
                     ti = headers.index('합계')
@@ -4209,18 +4213,26 @@ def _to_kakao_text(answer: str) -> str:
                     ti = headers.index('매출(억)')
                     if ti < len(cells):
                         total_val = cells[ti]
+                elif '매출(백만)' in headers:
+                    ti = headers.index('매출(백만)')
+                    if ti < len(cells):
+                        total_val = cells[ti]
+                elif '매출' in headers:
+                    ti = headers.index('매출')
+                    if ti < len(cells):
+                        total_val = cells[ti]
                 elif 'GP(억)' in headers:
                     ti = headers.index('GP(억)')
                     if ti < len(cells):
                         total_val = cells[ti]
 
-                # ── 비중/GP율 추출 ──
+                # ── 비중/GP율/CM율 추출 ──
                 pct_val = ""
-                for pct_h in ('비중', 'GP율'):
+                for pct_h in ('비중', 'GP율', 'CM율'):
                     if pct_h in headers:
                         pi = headers.index(pct_h)
                         if pi < len(cells) and cells[pi] not in ('-', ''):
-                            pct_val = cells[pi] if pct_h == '비중' else f"GP {cells[pi]}"
+                            pct_val = cells[pi] if pct_h in ('비중', 'CM율') else f"GP {cells[pi]}"
                             break
 
                 brand_count += 1
