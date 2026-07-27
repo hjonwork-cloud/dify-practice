@@ -3904,9 +3904,25 @@ def _load_users() -> dict:
     return {}
 
 
+def _atomic_save(path, data):
+    """임시 파일에 쓴 뒤 rename — 중간에 프로세스가 죽어도 원본 파일이 손상되지 않는다."""
+    import tempfile
+    dir_ = os.path.dirname(path) or "."
+    fd, tmp = tempfile.mkstemp(dir=dir_, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json_mod.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def _save_users(users: dict):
-    with open(_USERS_FILE, "w", encoding="utf-8") as f:
-        json_mod.dump(users, f, ensure_ascii=False, indent=2)
+    _atomic_save(_USERS_FILE, users)
 
 
 def _load_whitelist() -> dict:
@@ -3921,8 +3937,7 @@ def _load_whitelist() -> dict:
 
 
 def _save_whitelist(wl: dict):
-    with open(_WHITELIST_FILE, "w", encoding="utf-8") as f:
-        json_mod.dump(wl, f, ensure_ascii=False, indent=2)
+    _atomic_save(_WHITELIST_FILE, wl)
 
 
 def _load_blacklist() -> list:
@@ -3937,8 +3952,7 @@ def _load_blacklist() -> list:
 
 
 def _save_blacklist(bl: list):
-    with open(_BLACKLIST_FILE, "w", encoding="utf-8") as f:
-        json_mod.dump(bl, f, ensure_ascii=False, indent=2)
+    _atomic_save(_BLACKLIST_FILE, bl)
 
 
 def _load_team_overrides() -> dict:
@@ -3953,8 +3967,7 @@ def _load_team_overrides() -> dict:
 
 
 def _save_team_overrides(ov: dict):
-    with open(_TEAM_OVERRIDE_FILE, "w", encoding="utf-8") as f:
-        json_mod.dump(ov, f, ensure_ascii=False, indent=2)
+    _atomic_save(_TEAM_OVERRIDE_FILE, ov)
 
 
 def _seed_admin_lists():
