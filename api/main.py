@@ -5507,6 +5507,7 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
     # 월 없이 CM/공헌이익/수익성 키워드만 있는 경우 (예: "신화푸드 CM 알려줘", "신화푸드 올해 누계 CM")
     _no_month_profit_m = None
     if (re.search(_PROFIT_KW_PAT, query, re.IGNORECASE)
+            and '신규' not in query
             and not re.search(r'\d{1,2}월|이번달|지난달', query)
             and not re.search(r'\b20\d{2}(?:0[1-9]|1[0-2])\b', query)
             and not re.match(r'^(지점|브랜드별|거래처별)\s*수익성', query.strip())
