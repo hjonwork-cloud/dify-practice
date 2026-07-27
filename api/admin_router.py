@@ -558,8 +558,10 @@ async def users(request: Request):
     try:
         return await _users_inner(request)
     except Exception as _exc:
+        import traceback as _tb
         _log.getLogger("admin_router").exception("[/admin/users] 500 오류")
-        raise
+        _html = f"<pre style='color:red;padding:2rem'>[admin/users 디버그 에러]\n{_tb.format_exc()}</pre>"
+        return HTMLResponse(_html, status_code=500)
 
 
 async def _users_inner(request: Request) -> HTMLResponse:
