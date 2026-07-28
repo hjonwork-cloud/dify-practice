@@ -874,7 +874,8 @@ def brand_report(
             needed_generic_sales = max(0.0, (target_ratio * classified_sales - generic_sales) / (1.0 - target_ratio))
             proposal_possible_sales_raw += needed_generic_sales
         c = {
-            **r,
+            "customer_code": str(r.get("customer_code") or ""),
+            "customer_name": str(r.get("customer_name") or ""),
             "sales_m": _money_m(sales),
             "dedicated_sales_m": _money_m(dedicated_sales),
             "generic_sales_m": _money_m(generic_sales),
