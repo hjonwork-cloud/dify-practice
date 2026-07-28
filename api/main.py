@@ -444,6 +444,29 @@ def _extract_sp_compact(sql: str) -> str | None:
     return None
 
 
+_SALESREP_NAME_CACHE: dict = {"ts": 0.0, "names": set()}
+
+def _is_salesrep_name(name: str) -> bool:
+    """T_MAIN 영업사원명 목록에 포함되는 이름인지 판별 (6시간 캐시).
+    브랜드명 오인 방지 목적."""
+    import time as _time_mod
+    now = _time_mod.time()
+    if now - _SALESREP_NAME_CACHE["ts"] > 21600 or not _SALESREP_NAME_CACHE["names"]:
+        try:
+            rows = _safe_query(f"""
+                SELECT DISTINCT regexp_replace(`영업사원명`, ' ', '') AS cname
+                FROM {T_MAIN}
+                WHERE `사업부명` = '{AUTH_DEPT}'
+                  AND `영업사원명` IS NOT NULL
+            """)
+            _SALESREP_NAME_CACHE["names"] = {str(r.get("cname") or "").strip() for r in rows if r.get("cname")}
+            _SALESREP_NAME_CACHE["ts"] = now
+        except Exception:
+            pass  # 조회 실패 시 대근하지 않음
+    compact = re.sub(r'\s+', '', name)
+    return compact in _SALESREP_NAME_CACHE["names"]
+
+
 def _extract_team_name(sql: str) -> str | None:
     """SQL에서 지점명/팀명 추출"""
     m = re.search(r"`?지점명`?\s+LIKE\s+'%([^']+)%'", sql, re.IGNORECASE)
@@ -6428,6 +6451,8 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                 brand_name = ""  # 블랙리스트 → Dify로 넘기기
             if brand_name and (re.fullmatch(r'\d+', brand_name) or '신규' in brand_name):
                 brand_name = ""  # 숫자코드·신규 → 브랜드 오인 방지
+            if brand_name and _is_salesrep_name(brand_name):
+                brand_name = ""  # 영업사원명 → 브랜드 오인 방지
 
             if brand_name and 1 <= month_num <= 12:
                 yearmonth = f"{cur_year}{month_num:02d}"
@@ -6542,7 +6567,8 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                 _bnm = re.sub(r'[는은의이가을를로에서만]$', '', _bno_m_sp.group(1)).strip() if _bno_m_sp else ''
             if (_bnm and _bnm not in _BRAND_BYPASS_BLACKLIST and len(_bnm) >= 2
                     and not re.fullmatch(r'\d+', _bnm)   # 숫자코드→브랜드 오인 방지
-                    and '신규' not in _bnm):              # 신규매출 바이패스 미도달 방지
+                    and '신규' not in _bnm              # 신규매출 바이패스 미도달 방지
+                    and not _is_salesrep_name(_bnm)):      # 영업사원명 오인 방지
                 logger.info(f"[콜백] 브랜드매출(월미명시) 직접 처리: brand={_bnm}, ym={_ym_now}")
                 try:
                     res = _fetch_brand_monthly_sales(_bnm, _ym_now)
