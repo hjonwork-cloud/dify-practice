@@ -1253,6 +1253,8 @@ async def login(request: Request):
         samesite="lax",
         secure=os.getenv("PORTAL_SESSION_HTTPS_ONLY", "false").lower() == "true",
     )
+    # 첫 로그인 시 사이드바 펼침 강제 (JS에서 sb_fresh 감지 후 localStorage 초기화)
+    response.set_cookie("sb_fresh", "1", max_age=10, samesite="lax")
     return response
 
 

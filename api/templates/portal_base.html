@@ -29,13 +29,13 @@
   .portal-nav a, .portal-nav .nav-parent { display:flex; align-items:center; gap:10px; }
   .nav-icon  { flex-shrink:0; font-size:15px; width:20px; text-align:center; }
   .nav-label { transition:opacity .18s,max-width .22s; opacity:1; max-width:200px; overflow:hidden; white-space:nowrap; }
-  .nav-parent { padding:14px 15px; border-radius:14px; color:#b7c0cc; cursor:pointer; font-weight:750; user-select:none; }
+  .nav-parent { padding:14px 15px; border-radius:14px; color:#fff; cursor:pointer; font-weight:750; user-select:none; }
   .nav-parent:hover,.nav-parent.active { background:linear-gradient(135deg,#fff,var(--portal-coral-soft,#e8fdf5)); color:#071015; }
   .nav-sub { display:grid; gap:2px; margin:2px 0 4px 28px;
              overflow:hidden; transition:max-height .22s cubic-bezier(.4,0,.2,1); max-height:200px; }
   .nav-sub.closed { max-height:0; }
-  .nav-sub a { padding:9px 12px; border-radius:10px; color:#8b99a8; font-size:.85rem; font-weight:600; }
-  .nav-sub a.active,.nav-sub a:hover { background:rgba(255,255,255,.1); color:#fff; }
+  .nav-sub a { padding:9px 12px; border-radius:10px; color:rgba(255,255,255,.78); font-size:.85rem; font-weight:600; }
+  .nav-sub a.active,.nav-sub a:hover { background:rgba(255,255,255,.14); color:#fff; }
   .nav-arrow { margin-left:auto; font-size:11px; transition:transform .2s; }
   .nav-parent.open .nav-arrow { transform:rotate(180deg); }
   /* --- 기존 portal-sidebar 너비 유지 --- */
@@ -56,8 +56,9 @@
   body.sidebar-collapsed .nav-arrow        { display:none; }
   body.sidebar-collapsed .portal-nav a,
   body.sidebar-collapsed .nav-parent       { justify-content:center; padding:13px 8px; }
-  body.sidebar-collapsed .portal-user-card>div { display:none; }
+  body.sidebar-collapsed .portal-user-card>div { opacity:0; max-width:0; overflow:hidden; transition:opacity .18s,max-width .22s; }
   body.sidebar-collapsed .portal-user-card { justify-content:center; }
+  body.sidebar-collapsed .portal-avatar { flex-shrink:0; }
   @media(max-width:760px){
     body.sidebar-collapsed .portal-sidebar { width:280px!important; }
     body.sidebar-collapsed .portal-main    { margin-left:0!important; width:100%!important; }
@@ -128,6 +129,11 @@
     if (!sub) return;
     if (open) { sub.classList.remove('closed'); if (par) par.classList.add('open'); }
     else      { sub.classList.add('closed');    if (par) par.classList.remove('open'); }
+  }
+  // 로그인 직후(sb_fresh 쿠키) 사이드바 강제 펼침
+  if (document.cookie.indexOf('sb_fresh=1') !== -1) {
+    localStorage.removeItem(SB_KEY);
+    document.cookie = 'sb_fresh=; max-age=0; path=/';
   }
   applyCollapsed(localStorage.getItem(SB_KEY) === '1');
   var pathIsBrand = location.pathname.indexOf('/portal/brand-report') === 0;
