@@ -19,15 +19,12 @@
 <div class="portal-heading"><div><p class="eyebrow">PROPOSAL SOLUTION</p><h1>브랜드 데이터 없음</h1><p>로그인 계정의 담당 브랜드 데이터를 찾을 수 없습니다.</p></div></div>
 {% else %}
 <div class="portal-heading">
-  <div><p class="eyebrow">GENERIC PRODUCT PROPOSAL</p><h1>{{ report.brand.brand_name }}</h1><p>범용상품 제안 솔루션입니다. 브랜드 전체 매출은 최근 3개월, 가맹점별 상품 구성비는 전월({{ report.prev_ym }}) 기준입니다.</p></div>
-  <div style="display:flex;gap:.75rem;align-items:center;flex-wrap:wrap;">
-    <a href="/portal/brand-report/action?brand={{ report.brand.brand_name|urlencode }}" class="btn portal-primary">🎯 상세·액션 보기</a>
-    <form method="get" action="/portal/brand-report" class="portal-brand-picker">
-      <select name="brand" onchange="this.form.submit()">
-        {% for b in report.brands %}<option value="{{ b.brand_name }}" {% if b.brand_name == report.brand.brand_name %}selected{% endif %}>{{ b.brand_name }}</option>{% endfor %}
-      </select>
-    </form>
-  </div>
+  <div><p class="eyebrow">GENERIC PRODUCT PROPOSAL</p><h1>{{ report.brand.brand_name }}</h1><p>범용상품 제안 솔루션. 가맹점별 상품 구성비는 전월({{ report.prev_ym }}) 기준입니다.</p></div>
+  <form method="get" action="/portal/brand-report" class="portal-brand-picker">
+    <select name="brand" onchange="this.form.submit()">
+      {% for b in report.brands %}<option value="{{ b.brand_name }}" {% if b.brand_name == report.brand.brand_name %}selected{% endif %}>{{ b.brand_name }}</option>{% endfor %}
+    </select>
+  </form>
 </div>
 
 <section class="portal-metric-grid compact">
@@ -39,183 +36,18 @@
 
 <section class="portal-panel portal-scatter-section">
   <div class="scatter-header">
-    <div><p class="eyebrow">DISTRIBUTION</p><h2>가맹점 범용상품 비중 분포</h2>
-    <p>X: 범용비중(%) &nbsp;·&nbsp; Y: 매출액(백만) &nbsp;·&nbsp; <span style="color:#dc2626;">●</span> 제안대상 &nbsp; <span style="color:#16a34a;">●</span> 기준충족 &nbsp;· 수직점선: 브랜드평균/기준</p></div>
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:.5rem;">
+      <div><p class="eyebrow">DISTRIBUTION</p><h2>가맹점 범용상품 비중 분포</h2>
+      <p style="font-size:.82rem;color:#6b7280;margin:.25rem 0 0;">X: 범용비중(%) &nbsp;·&nbsp; Y: 매출액(백만) &nbsp;·&nbsp; <span style="color:#dc2626;">●</span> 제안대상 &nbsp;<span style="color:#16a34a;">●</span> 기준충족 &nbsp;· 수직점선: 브랜드평균/기준</p></div>
+      <a href="/portal/brand-report/action?brand={{ report.brand.brand_name|urlencode }}" class="btn portal-primary" style="font-size:.82rem;padding:.35rem .8rem;​">⚡ 액션 실행</a>
+    </div>
     <div class="scatter-stats-grid" id="scatterStats"></div>
   </div>
-  <div class="scatter-canvas-wrap" style="height:480px;"><canvas id="scatterChart"></canvas></div>
+  <div class="scatter-canvas-wrap"><canvas id="scatterChart"></canvas></div>
 </section>
 
-<div class="portal-tabs"><span class="active">고객 프로모션 제안</span><span>매출 분석</span><span>CM</span><span>채권</span><span>마스터</span></div>
-
-<section class="portal-grid report-grid">
-  <article class="portal-panel">
-    <div class="portal-panel-head"><div><p class="eyebrow">CUSTOMER MIX</p><h2>가맹점별 평균 범용상품 사용률</h2><p>{{ report.prev_ym }} 전월 기준이며 전체 매출액 내림차순입니다. <span id="customerRange">1-10</span> / {{ report.customers|length }}개 표시</p></div></div>
-    <div class="portal-bars">
-      {% for c in report.customers %}
-      <div class="portal-bar-row js-customer-row {% if c.is_target %}target{% endif %}" data-index="{{ loop.index0 }}" data-sales="{{ c.sales_m }}" data-ratio="{{ c.generic_ratio }}">
-        <div class="bar-label"><b>{{ c.customer_name }}</b><small>{{ c.customer_code }} · 전체 {{ '{:,}'.format(c.sales_m) }}백만 · 전용 {{ '{:,}'.format(c.dedicated_sales_m) }}백만 · 범용 {{ '{:,}'.format(c.generic_sales_m) }}백만</small></div>
-        <div class="bar-track"><i style="width:{{ c.generic_ratio }}%"></i><em style="left:{{ report.brand_avg }}%"></em></div>
-        <strong>{{ c.generic_ratio }}%</strong>
-      </div>
-      {% else %}<div class="empty"><b>가맹점별 구성비 데이터가 없습니다.</b></div>{% endfor %}
-    </div>
-    {% if report.customers|length > 10 %}
-    <nav class="portal-pagination" data-pager="customers">
-      <button type="button" data-page-prev>이전</button>
-      <b><span data-page-current>1</span> / <span data-page-total>1</span></b>
-      <button type="button" data-page-next>다음</button>
-    </nav>
-    {% endif %}
-  </article>
-
-  <aside class="portal-panel">
-    <div class="portal-panel-head target-panel-head"><div><p class="eyebrow">ACTION TARGETS</p><h2>DM 제안 후보</h2><p>범용상품 사용률 {{ report.threshold }}% 미만 전체 후보입니다. <span id="targetRange">1-10</span> / {{ report.target_count }}개 표시</p></div><div class="target-sort-actions"><button type="button" data-target-sort="sales">매출액 ↓</button><button type="button" data-target-sort="ratio">범용비중 ↓</button></div></div>
-    <div class="portal-target-list">
-      {% for c in report.targets %}
-      <div class="portal-target js-target-row" data-index="{{ loop.index0 }}" data-sales="{{ c.sales_m }}" data-ratio="{{ c.generic_ratio }}" data-loaded="0" data-open="0" data-detail-url="/portal/target-detail?brand={{ report.brand.brand_name|urlencode }}&customer_code={{ c.customer_code|urlencode }}">
-        <div class="target-summary">
-          <span><b>{{ c.customer_name }}</b><small>{{ c.customer_code }} · 범용 {{ c.generic_ratio }}% · 제안가능 {{ '{:,}'.format(c.proposal_possible_sales_m) }}백만 · Gap {{ c.gap }}%p</small></span>
-          <button type="button" class="dm-toggle" data-dm-toggle>💬 DM</button>
-        </div>
-        <div class="target-body" hidden data-target-body><div class="empty"><b>추천상품과 DM 문구를 불러오는 중입니다.</b></div></div>
-      </div>
-      {% else %}<div class="empty"><b>현재 기준으로 제안 대상이 없습니다.</b><span>슬라이더 기준 미만의 거래처가 없습니다.</span></div>{% endfor %}
-    </div>
-    {% if report.target_count > 10 %}
-    <nav class="portal-pagination" data-pager="targets">
-      <button type="button" data-page-prev>이전</button>
-      <b><span data-page-current>1</span> / <span data-page-total>1</span></b>
-      <button type="button" data-page-next>다음</button>
-    </nav>
-    {% endif %}
-  </aside>
-</section>
-<script>
-(function(){
-  const perPage = 10;
-  const brandCode = {{ report.brand.brand_code|tojson }};
-  const brandName = {{ report.brand.brand_name|tojson }};
-
-  function setupPager(rowSelector, pagerName, rangeId){
-    const pager = document.querySelector('[data-pager="' + pagerName + '"]');
-    const range = document.getElementById(rangeId);
-    let page = 1;
-    function render(nextPage){
-      const rows = Array.from(document.querySelectorAll(rowSelector));
-      const totalPages = Math.max(1, Math.ceil(rows.length / perPage));
-      if (nextPage) page = nextPage;
-      page = Math.min(Math.max(1, page), totalPages);
-      const start = (page - 1) * perPage;
-      const end = Math.min(rows.length, start + perPage);
-      rows.forEach((row, idx) => {
-        const hide = idx < start || idx >= end;
-        row.hidden = hide;
-        row.style.display = hide ? 'none' : '';
-      });
-      if (range) range.textContent = rows.length ? (start + 1) + '-' + end : '0-0';
-      if (pager) {
-        pager.querySelector('[data-page-current]').textContent = page;
-        pager.querySelector('[data-page-total]').textContent = totalPages;
-        pager.querySelector('[data-page-prev]').disabled = page <= 1;
-        pager.querySelector('[data-page-next]').disabled = page >= totalPages;
-      }
-    }
-    if (pager) {
-      pager.querySelector('[data-page-prev]').addEventListener('click', () => { if (page > 1) { page -= 1; render(); } });
-      pager.querySelector('[data-page-next]').addEventListener('click', () => { page += 1; render(); });
-    }
-    render();
-    return { render };
-  }
-
-  function text(value){ return document.createTextNode(value == null ? '' : String(value)); }
-
-  function renderDmBody(row, data){
-    const body = row.querySelector('[data-target-body]');
-    body.innerHTML = '';
-    const title = document.createElement('h4');
-    title.textContent = '추천 범용상품';
-    body.appendChild(title);
-    const ul = document.createElement('ul');
-    ul.className = 'product-list';
-    if (data.products && data.products.length) {
-      data.products.forEach((p) => {
-        const li = document.createElement('li');
-        const b = document.createElement('b'); b.appendChild(text(p.product_name || p.product_code || '상품명 없음'));
-        const small = document.createElement('small'); small.appendChild(text('사용 가맹점 ' + (p.adopter_count || 0) + ' · GP ' + (p.gp_pct || 0) + '%'));
-        li.appendChild(b); li.appendChild(small); ul.appendChild(li);
-      });
-    } else {
-      const li = document.createElement('li'); li.appendChild(text('추천 후보 없음')); ul.appendChild(li);
-    }
-    body.appendChild(ul);
-
-    const form = document.createElement('form');
-    form.method = 'post';
-    form.action = '/portal/dm-log';
-    [['brand_code', brandCode], ['brand_name', brandName], ['customer_code', data.customer_code], ['customer_name', data.customer_name], ['product_names', data.product_names || '']].forEach(([name, value]) => {
-      const input = document.createElement('input'); input.type = 'hidden'; input.name = name; input.value = value || ''; form.appendChild(input);
-    });
-    const label = document.createElement('label');
-    label.appendChild(text('DM 제안 문구'));
-    const textarea = document.createElement('textarea'); textarea.name = 'message'; textarea.rows = 10; textarea.value = data.dm_message || '';
-    label.appendChild(textarea); form.appendChild(label);
-    const btn = document.createElement('button'); btn.className = 'btn portal-primary full'; btn.type = 'submit'; btn.textContent = '💬 DM 발송';
-    form.appendChild(btn); body.appendChild(form);
-  }
-
-  document.querySelectorAll('[data-dm-toggle]').forEach((button) => {
-    button.addEventListener('click', async () => {
-      const row = button.closest('.js-target-row');
-      const body = row.querySelector('[data-target-body]');
-      const isOpen = row.dataset.open === '1';
-      if (isOpen) {
-        body.hidden = true;
-        row.dataset.open = '0';
-        button.textContent = '💬 DM';
-        return;
-      }
-      body.hidden = false;
-      row.dataset.open = '1';
-      button.textContent = '접기';
-      if (row.dataset.loaded === '1') return;
-      try {
-        const res = await fetch(row.dataset.detailUrl, {headers: {'Accept': 'application/json'}});
-        if (!res.ok) throw new Error('detail load failed');
-        renderDmBody(row, await res.json());
-        row.dataset.loaded = '1';
-      } catch (err) {
-        body.innerHTML = '<div class="empty"><b>DM 상세 정보를 불러오지 못했습니다.</b></div>';
-      }
-    });
-  });
-
-  const customerPager = setupPager('.js-customer-row', 'customers', 'customerRange');
-  const targetPager = setupPager('.js-target-row', 'targets', 'targetRange');
-  // 로딩 오버레이 숨김 (DOM 완료)
-  const lo = document.getElementById('portal-loading');
-  if (lo) lo.hidden = true;
-  const sortDirections = {sales: 'desc', ratio: 'desc'};
-  document.querySelectorAll('[data-target-sort]').forEach((button) => {
-    button.addEventListener('click', () => {
-      const key = button.dataset.targetSort;
-      const dir = sortDirections[key] || 'desc';
-      const list = document.querySelector('.portal-target-list');
-      const rows = Array.from(document.querySelectorAll('.js-target-row'));
-      rows.sort((a, b) => {
-        const av = Number(a.dataset[key] || 0);
-        const bv = Number(b.dataset[key] || 0);
-        return dir === 'desc' ? bv - av : av - bv;
-      });
-      rows.forEach((row) => list.appendChild(row));
-      button.textContent = (key === 'sales' ? '매출액 ' : '범용비중 ') + (dir === 'desc' ? '↓' : '↑');
-      sortDirections[key] = dir === 'desc' ? 'asc' : 'desc';
-      targetPager.render(1);
-    });
-  });
-})();
-</script>
+{% endif %}
+{% endblock %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
 <script>
 (function(){
@@ -304,7 +136,9 @@
         },
       },
       scales: {
-        x: { title: { display: true, text: '범용상품 비중 (%)' }, min: 0, max: 100, ticks: { font: { size: 10 } } },
+        x: { title: { display: true, text: '범용상품 비중 (%)' }, min: 0,
+             max: Math.min(100, Math.max(brandAvg * 2.2, 60)),
+             ticks: { font: { size: 10 } } },
         y: { title: { display: true, text: '매출액 (백만원)' }, ticks: { font: { size: 10 } } },
       },
     },

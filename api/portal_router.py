@@ -1343,6 +1343,36 @@ async def brand_report_action_page(
     return _render(request, "portal_brand_report_action.html", report=report)
 
 
+@router.get("/brand-report/results", response_class=HTMLResponse)
+async def brand_report_results_page(
+    request: Request,
+    brand_code: str = "",
+    action_ym: str = "",
+):
+    """액션 실적 상세 페이지."""
+    user = _require_user(request)
+    try:
+        from portal_refresh import read_action_results
+        rows = read_action_results(user["emp_code"], brand_code=brand_code, action_ym=action_ym)
+    except Exception:
+        rows = []
+    # 브랜드 목록 (필터용)
+    brands = _brand_rows(user["emp_code"])
+    total_sales   = sum(r.get("sales_after_m", 0) for r in rows)
+    total_gp      = sum(r.get("gp_after_m", 0) for r in rows)
+    total_generic = sum(r.get("generic_sales_after_m", 0) for r in rows)
+    summary = {
+        "count":                 len(rows),
+        "total_sales_after_m":   total_sales,
+        "total_gp_after_m":      total_gp,
+        "total_generic_after_m": total_generic,
+        "avg_gp_rate":           round(total_gp / total_sales * 100, 1) if total_sales else 0,
+    }
+    return _render(request, "portal_brand_report_results.html",
+                   rows=rows, brands=brands, summary=summary,
+                   sel_brand_code=brand_code, sel_action_ym=action_ym)
+
+
 @router.get("/action-results")
 async def action_results(
     request: Request,

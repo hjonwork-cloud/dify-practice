@@ -1,0 +1,187 @@
+{% extends 'portal_base.html' %}{% block title %}액션 실적{% endblock %}{% block content %}
+<style>
+.results-filter-bar{display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;
+  background:#f9fafb;border:1px solid #e5e7eb;border-radius:.6rem;padding:.6rem 1rem;margin-bottom:1rem;font-size:.85rem;}
+.results-filter-bar select,.results-filter-bar input{font-size:.82rem;padding:.3rem .5rem;
+  border:1px solid #d1d5db;border-radius:.35rem;background:#fff;}
+.results-filter-bar button{font-size:.82rem;padding:.3rem .75rem;border:1px solid #d1d5db;
+  border-radius:.35rem;background:#fff;cursor:pointer;}
+.results-filter-bar button:hover{background:#f3f4f6;}
+
+/* 요약 배지 */
+.results-summary{display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:1rem;}
+.rs-badge{display:inline-flex;flex-direction:column;align-items:center;
+  background:#fff;border:1px solid #e5e7eb;border-radius:.6rem;padding:.5rem 1rem;min-width:90px;}
+.rs-badge b{font-size:1.15rem;letter-spacing:-.5px;color:#111;}
+.rs-badge span{font-size:.72rem;color:#6b7280;margin-top:2px;}
+.rs-badge.green b{color:#16a34a;}
+.rs-badge.blue  b{color:#2563eb;}
+.rs-badge.amber b{color:#d97706;}
+
+/* 테이블 */
+.results-table-wrap{overflow-x:auto;}
+.results-table{width:100%;border-collapse:collapse;font-size:.8rem;min-width:700px;}
+.results-table th{background:#1e293b;color:#fff;padding:.45rem .6rem;text-align:left;
+  white-space:nowrap;font-weight:600;cursor:pointer;user-select:none;}
+.results-table th:hover{background:#334155;}
+.results-table th.sorted-asc::after{content:' ↑';}
+.results-table th.sorted-desc::after{content:' ↓';}
+.results-table td{padding:.4rem .6rem;border-bottom:1px solid #f3f4f6;vertical-align:middle;}
+.results-table tr:hover td{background:#f9fafb;}
+.gp-chip{display:inline-block;padding:.1rem .45rem;border-radius:.25rem;font-size:.72rem;font-weight:700;}
+.gp-chip.up{background:#dcfce7;color:#166534;}
+.gp-chip.mid{background:#fef3c7;color:#92400e;}
+.gp-chip.down{background:#fee2e2;color:#991b1b;}
+
+/* 차트 영역 */
+.results-chart-wrap{margin-top:1.5rem;}
+.results-chart-wrap h3{font-size:.95rem;font-weight:700;color:#111;margin:0 0 .5rem;}
+.bar-chart-grid{display:grid;gap:.35rem;}
+.bar-chart-row{display:grid;grid-template-columns:160px 1fr 80px;gap:.5rem;align-items:center;font-size:.78rem;}
+.bar-chart-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#374151;}
+.bar-chart-track{height:14px;background:#f3f4f6;border-radius:999px;overflow:hidden;}
+.bar-chart-fill{height:100%;border-radius:999px;background:linear-gradient(90deg,#16a34a,#22d3ee);transition:width .4s;}
+.bar-chart-val{text-align:right;color:#111;font-weight:600;}
+
+.empty-state{text-align:center;padding:3rem;color:#9ca3af;font-size:.9rem;}
+.empty-state b{display:block;font-size:1.1rem;color:#6b7280;margin-bottom:.5rem;}
+</style>
+
+<div class="portal-heading">
+  <div><p class="eyebrow">ACTION RESULTS</p><h1>액션 실적</h1>
+    <p>판가설정 후 DM 발송 이후, 해당 가맹점의 매출·GP 누적 실적입니다.</p></div>
+</div>
+
+<!-- 필터 바 -->
+<form method="get" action="/portal/brand-report/results" class="results-filter-bar">
+  <label>브랜드
+    <select name="brand_code">
+      <option value="">전체</option>
+      {% for b in brands %}
+      <option value="{{ b.brand_code }}" {% if b.brand_code == sel_brand_code %}selected{% endif %}>{{ b.brand_name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>액션월(부터)
+    <input type="text" name="action_ym" value="{{ sel_action_ym }}" placeholder="예: 202601" maxlength="6" size="8">
+  </label>
+  <button type="submit">조회</button>
+  <a href="/portal/brand-report/results" style="font-size:.82rem;color:#6b7280;text-decoration:none;">초기화</a>
+</form>
+
+<!-- 요약 배지 -->
+<div class="results-summary">
+  <div class="rs-badge"><b>{{ summary.count }}</b><span>총 액션건수</span></div>
+  <div class="rs-badge green"><b>{{ '{:,}'.format(summary.total_sales_after_m) }}백만</b><span>누적 매출</span></div>
+  <div class="rs-badge blue"><b>{{ '{:,}'.format(summary.total_gp_after_m) }}백만</b><span>누적 GP</span></div>
+  <div class="rs-badge amber"><b>{{ summary.avg_gp_rate }}%</b><span>평균 GP율</span></div>
+  <div class="rs-badge"><b>{{ '{:,}'.format(summary.total_generic_after_m) }}백만</b><span>범용 추가매출</span></div>
+</div>
+
+{% if rows %}
+<!-- 실적 테이블 -->
+<div class="portal-panel" style="padding:1.25rem;">
+  <div class="results-table-wrap">
+    <table class="results-table" id="resultsTable">
+      <thead>
+        <tr>
+          <th onclick="sortTable(0)">가맹점명</th>
+          <th onclick="sortTable(1)">가맹점코드</th>
+          <th onclick="sortTable(2)">브랜드</th>
+          <th onclick="sortTable(3)">액션월</th>
+          <th onclick="sortTable(4)" style="text-align:center;">설정품목</th>
+          <th onclick="sortTable(5)" style="text-align:right;">이후누적매출(백만)</th>
+          <th onclick="sortTable(6)" style="text-align:right;">이후GP(백만)</th>
+          <th onclick="sortTable(7)" style="text-align:right;">GP율(%)</th>
+          <th onclick="sortTable(8)" style="text-align:right;">범용추가매출(백만)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td><b>{{ r.customer_name }}</b></td>
+          <td style="color:#9ca3af;font-size:.75rem;">{{ r.customer_code }}</td>
+          <td style="font-size:.78rem;">{{ r.brand_name }}</td>
+          <td>{{ r.action_ym }}</td>
+          <td style="text-align:center;">{{ r.action_item_count }}품목</td>
+          <td style="text-align:right;">{{ '{:,}'.format(r.sales_after_m) }}</td>
+          <td style="text-align:right;">{{ '{:,}'.format(r.gp_after_m) }}</td>
+          <td style="text-align:right;">
+            {% set gp = r.gp_rate_after %}
+            <span class="gp-chip {% if gp >= 20 %}up{% elif gp >= 10 %}mid{% else %}down{% endif %}">{{ gp }}%</span>
+          </td>
+          <td style="text-align:right;">{{ '{:,}'.format(r.generic_sales_after_m) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- 브랜드별 누적 매출 바 차트 -->
+  {% set brand_totals = {} %}
+  {% for r in rows %}
+    {% if r.brand_name not in brand_totals %}
+      {% set _ = brand_totals.update({r.brand_name: {'sales': 0, 'gp': 0}}) %}
+    {% endif %}
+    {% set _ = brand_totals[r.brand_name].update({'sales': brand_totals[r.brand_name]['sales'] + r.sales_after_m, 'gp': brand_totals[r.brand_name]['gp'] + r.gp_after_m}) %}
+  {% endfor %}
+  {% set max_sales = brand_totals.values() | map(attribute='sales') | max | default(1) %}
+  {% if brand_totals | length > 1 %}
+  <div class="results-chart-wrap">
+    <h3>📊 브랜드별 누적 매출 (이후)</h3>
+    <div class="bar-chart-grid">
+      {% for bname, vals in brand_totals.items() | sort(attribute='1.sales', reverse=True) %}
+      <div class="bar-chart-row">
+        <div class="bar-chart-label" title="{{ bname }}">{{ bname }}</div>
+        <div class="bar-chart-track">
+          <div class="bar-chart-fill" style="width:{{ [((vals.sales / max_sales) * 100) | round | int, 2] | max }}%"></div>
+        </div>
+        <div class="bar-chart-val">{{ '{:,}'.format(vals.sales) }}백만</div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+{% else %}
+<div class="portal-panel">
+  <div class="empty-state">
+    <b>액션 실적 데이터가 없습니다</b>
+    아직 판가설정 후 DM 발송 액션이 없거나, 필터 조건에 맞는 데이터가 없습니다.<br>
+    <a href="/portal/brand-report/action" style="color:#16a34a;margin-top:.75rem;display:inline-block;">⚡ 액션 실행 바로가기</a>
+  </div>
+</div>
+{% endif %}
+
+<script>
+(function(){
+  var sortDir = {};
+  window.sortTable = function(colIdx) {
+    var table = document.getElementById('resultsTable');
+    if (!table) return;
+    var tbody = table.querySelector('tbody');
+    var rows  = Array.from(tbody.querySelectorAll('tr'));
+    var ths   = table.querySelectorAll('th');
+    var dir   = sortDir[colIdx] === 'asc' ? 'desc' : 'asc';
+    sortDir = {};
+    sortDir[colIdx] = dir;
+    ths.forEach(function(th, i) {
+      th.classList.remove('sorted-asc', 'sorted-desc');
+      if (i === colIdx) th.classList.add('sorted-' + dir);
+    });
+    rows.sort(function(a, b) {
+      var av = a.cells[colIdx]?.textContent?.trim() || '';
+      var bv = b.cells[colIdx]?.textContent?.trim() || '';
+      var an = parseFloat(av.replace(/,/g, ''));
+      var bn = parseFloat(bv.replace(/,/g, ''));
+      var cmp = (!isNaN(an) && !isNaN(bn)) ? an - bn : av.localeCompare(bv, 'ko');
+      return dir === 'desc' ? -cmp : cmp;
+    });
+    rows.forEach(function(r) { tbody.appendChild(r); });
+  };
+  // 기본 정렬: 이후누적매출 내림차순
+  window.sortTable(5);
+})();
+</script>
+{% endblock %}

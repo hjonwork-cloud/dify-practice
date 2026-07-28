@@ -9,7 +9,36 @@
   <link href="/static/admin.css?v={{ asset_v }}" rel="stylesheet">
   <style>
   /* ── 사이드바 접기/펼치기 ── */
-  .portal-sidebar{transition:width .22s cubic-bezier(.4,0,.2,1);}
+  .portal-sidebar { transition: width .22s cubic-bezier(.4,0,.2,1); overflow: hidden; }
+  .portal-main    { transition: margin-left .22s, width .22s; }
+  .sb-top { display:flex; align-items:center; justify-content:space-between; gap:8px;
+            padding-bottom:20px; border-bottom:1px solid rgba(255,255,255,.12); margin-bottom:4px; }
+  .sb-brand { display:flex; gap:10px; align-items:center; text-decoration:none; color:#fff; min-width:0; }
+  .sb-brand img { width:108px; filter:brightness(0) invert(1); flex-shrink:0; transition:width .2s; }
+  .sb-brand-text { border-left:1px solid rgba(255,255,255,.25); padding-left:10px;
+                   transition:opacity .18s,max-width .22s; opacity:1; max-width:180px;
+                   overflow:hidden; white-space:nowrap; }
+  .sb-brand-text strong { display:block; font-size:13px; letter-spacing:-.3px; }
+  .sb-brand-text small  { display:block; color:var(--portal-coral,#18b9c7); font-size:9px;
+                           font-weight:900; letter-spacing:1.4px; margin-top:3px; }
+  .sb-toggle { flex-shrink:0; width:30px; height:30px; border-radius:50%;
+               background:rgba(255,255,255,.14); border:none; color:#fff;
+               cursor:pointer; font-size:15px; display:flex; align-items:center; justify-content:center;
+               transition:background .15s; }
+  .sb-toggle:hover { background:rgba(255,255,255,.26); }
+  .portal-nav a, .portal-nav .nav-parent { display:flex; align-items:center; gap:10px; }
+  .nav-icon  { flex-shrink:0; font-size:15px; width:20px; text-align:center; }
+  .nav-label { transition:opacity .18s,max-width .22s; opacity:1; max-width:200px; overflow:hidden; white-space:nowrap; }
+  .nav-parent { padding:14px 15px; border-radius:14px; color:#b7c0cc; cursor:pointer; font-weight:750; user-select:none; }
+  .nav-parent:hover,.nav-parent.active { background:linear-gradient(135deg,#fff,var(--portal-coral-soft,#e8fdf5)); color:#071015; }
+  .nav-sub { display:grid; gap:2px; margin:2px 0 4px 28px;
+             overflow:hidden; transition:max-height .22s cubic-bezier(.4,0,.2,1); max-height:200px; }
+  .nav-sub.closed { max-height:0; }
+  .nav-sub a { padding:9px 12px; border-radius:10px; color:#8b99a8; font-size:.85rem; font-weight:600; }
+  .nav-sub a.active,.nav-sub a:hover { background:rgba(255,255,255,.1); color:#fff; }
+  .nav-arrow { margin-left:auto; font-size:11px; transition:transform .2s; }
+  .nav-parent.open .nav-arrow { transform:rotate(180deg); }
+  /* --- 기존 portal-sidebar 너비 유지 --- */
   .portal-main{transition:margin-left .22s cubic-bezier(.4,0,.2,1),width .22s cubic-bezier(.4,0,.2,1);}
   .sidebar-toggle-btn{display:flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:50%;background:rgba(255,255,255,.12);border:none;color:#fff;cursor:pointer;font-size:16px;flex-shrink:0;transition:background .15s;}
   .sidebar-toggle-btn:hover{background:rgba(255,255,255,.22);}
@@ -18,32 +47,60 @@
   .portal-nav a,.portal-nav span{display:flex;align-items:center;gap:10px;}
   .nav-icon{flex-shrink:0;font-size:16px;}
   /* collapsed 상태 */
-  body.sidebar-collapsed .portal-sidebar{width:60px!important;}
-  body.sidebar-collapsed .portal-main{margin-left:60px!important;width:calc(100% - 60px)!important;}
-  body.sidebar-collapsed .nav-label{opacity:0;max-width:0;}
-  body.sidebar-collapsed .portal-brand span{opacity:0;max-width:0;padding:0;border:none;}
-  body.sidebar-collapsed .portal-brand img{width:28px;}
-  body.sidebar-collapsed .portal-user-card>div{display:none;}
-  body.sidebar-collapsed .portal-user-card{justify-content:center;}
-  body.sidebar-collapsed .portal-brand{justify-content:center;padding:0 0 0 0;}
-  body.sidebar-collapsed .portal-nav a,.portal-sidebar.collapsed .portal-nav span{justify-content:center;padding:14px 8px;}
-  @media(max-width:760px){body.sidebar-collapsed .portal-sidebar{width:280px!important;}body.sidebar-collapsed .portal-main{margin-left:0!important;width:100%!important;}}
+  body.sidebar-collapsed .portal-sidebar  { width:58px!important; }
+  body.sidebar-collapsed .portal-main     { margin-left:58px!important; width:calc(100% - 58px)!important; }
+  body.sidebar-collapsed .sb-brand-text   { opacity:0; max-width:0; padding:0; border:none; }
+  body.sidebar-collapsed .sb-brand img    { width:26px; }
+  body.sidebar-collapsed .nav-label        { opacity:0; max-width:0; }
+  body.sidebar-collapsed .nav-sub          { max-height:0!important; }
+  body.sidebar-collapsed .nav-arrow        { display:none; }
+  body.sidebar-collapsed .portal-nav a,
+  body.sidebar-collapsed .nav-parent       { justify-content:center; padding:13px 8px; }
+  body.sidebar-collapsed .portal-user-card>div { display:none; }
+  body.sidebar-collapsed .portal-user-card { justify-content:center; }
+  @media(max-width:760px){
+    body.sidebar-collapsed .portal-sidebar { width:280px!important; }
+    body.sidebar-collapsed .portal-main    { margin-left:0!important; width:100%!important; }
+  }
   </style>
 </head>
 <body class="portal-body">
 <div class="portal-shell">
   <aside class="portal-sidebar">
-    <div class="portal-brand-row-wrap">
-      <a class="portal-brand" href="/portal" aria-label="세일즈 액션 플랫폼 홈" style="border-bottom:none;padding-bottom:0;">
+    <div class="sb-top">
+      <a class="sb-brand" href="/portal" aria-label="홈">
         <img src="/static/dongwon-homefood-logo.png" alt="동원홈푸드">
-        <span style="transition:opacity .18s,max-width .22s;max-width:200px;overflow:hidden;white-space:nowrap;"><strong>세일즈 액션 플랫폼</strong><small>SALES ACTION</small></span>
+        <span class="sb-brand-text"><strong>세일즈 액션 플랫폼</strong><small>SALES ACTION</small></span>
       </a>
-      <button class="sidebar-toggle-btn" id="sidebarToggleBtn" onclick="toggleSidebar()" title="메뉴 접기/펼치기">☰</button>
+      <button class="sb-toggle" id="sbToggleBtn" onclick="sbToggle()" title="메뉴 접기/펼치기">☰</button>
     </div>
     <nav class="portal-nav">
-      <a class="{% if request.url.path == '/portal' or request.url.path == '/portal/' %}active{% endif %}" href="/portal"><span class="nav-icon">📊</span><span class="nav-label">대시보드</span></a>
-      <a class="{% if '/portal/brand-report' in request.url.path %}active{% endif %}" href="/portal/brand-report"><span class="nav-icon">🎯</span><span class="nav-label">범용상품 제안 솔루션</span></a>
-      {% if user and user.is_admin %}<a class="{% if '/portal/admin' in request.url.path %}active{% endif %}" href="/portal/admin"><span class="nav-icon">⚙️</span><span class="nav-label">관리자 기능</span></a>{% endif %}
+      <a class="{% if request.url.path == '/portal' or request.url.path == '/portal/' %}active{% endif %}" href="/portal">
+        <span class="nav-icon">📊</span><span class="nav-label">대시보드</span>
+      </a>
+      {% set brand_active = '/portal/brand-report' in request.url.path %}
+      <div class="nav-parent {% if brand_active %}active open{% endif %}"
+           id="navBrandParent" onclick="sbSubToggle('navBrandSub','navBrandParent')">
+        <span class="nav-icon">🎯</span>
+        <span class="nav-label">범용상품 제안 솔루션</span>
+        <span class="nav-arrow">▾</span>
+      </div>
+      <div class="nav-sub {% if not brand_active %}closed{% endif %}" id="navBrandSub">
+        <a class="{% if request.url.path == '/portal/brand-report' %}active{% endif %}" href="/portal/brand-report">
+          <span class="nav-icon">📈</span><span class="nav-label">분포 분석</span>
+        </a>
+        <a class="{% if '/brand-report/action' in request.url.path %}active{% endif %}" href="/portal/brand-report/action">
+          <span class="nav-icon">⚡</span><span class="nav-label">액션 실행</span>
+        </a>
+        <a class="{% if '/brand-report/results' in request.url.path %}active{% endif %}" href="/portal/brand-report/results">
+          <span class="nav-icon">📊</span><span class="nav-label">액션 실적</span>
+        </a>
+      </div>
+      {% if user and user.is_admin %}
+      <a class="{% if '/portal/admin' in request.url.path %}active{% endif %}" href="/portal/admin">
+        <span class="nav-icon">⚙️</span><span class="nav-label">관리자 기능</span>
+      </a>
+      {% endif %}
     </nav>
     <div class="portal-user-card">
       <span class="portal-avatar">{{ user.name[:1] if user else 'U' }}</span>
@@ -62,16 +119,30 @@
 <script src="/static/admin.js?v={{ asset_v }}"></script>
 <script>
 (function(){
-  var KEY = 'sidebar_collapsed';
-  function applyState(collapsed){
-    document.body.classList.toggle('sidebar-collapsed', collapsed);
+  var SB_KEY  = 'sb_collapsed';
+  var SUB_KEY = 'sb_brand_open';
+  function applyCollapsed(c) { document.body.classList.toggle('sidebar-collapsed', c); }
+  function applySubOpen(open) {
+    var sub = document.getElementById('navBrandSub');
+    var par = document.getElementById('navBrandParent');
+    if (!sub) return;
+    if (open) { sub.classList.remove('closed'); if (par) par.classList.add('open'); }
+    else      { sub.classList.add('closed');    if (par) par.classList.remove('open'); }
   }
-  // 저장된 상태 복원
-  applyState(localStorage.getItem(KEY) === '1');
-  window.toggleSidebar = function(){
-    var collapsed = !document.body.classList.contains('sidebar-collapsed');
-    applyState(collapsed);
-    localStorage.setItem(KEY, collapsed ? '1' : '0');
+  applyCollapsed(localStorage.getItem(SB_KEY) === '1');
+  var pathIsBrand = location.pathname.indexOf('/portal/brand-report') === 0;
+  applySubOpen(pathIsBrand || localStorage.getItem(SUB_KEY) === '1');
+  window.sbToggle = function() {
+    var c = !document.body.classList.contains('sidebar-collapsed');
+    applyCollapsed(c);
+    localStorage.setItem(SB_KEY, c ? '1' : '0');
+  };
+  window.sbSubToggle = function(subId, parentId) {
+    var sub = document.getElementById(subId);
+    if (!sub) return;
+    var isOpen = !sub.classList.contains('closed');
+    applySubOpen(!isOpen);
+    localStorage.setItem(SUB_KEY, (!isOpen) ? '1' : '0');
   };
 })();
 </script>
