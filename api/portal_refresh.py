@@ -16,9 +16,10 @@ logger = logging.getLogger(__name__)
 
 T_DASH          = "h_hmfo_fsi_dm.gd_rst_ing.portal_emp_dashboard"
 T_BRANDS        = "h_hmfo_fsi_dm.gd_rst_ing.portal_emp_brands"
-T_BRAND_MONTHLY = "h_hmfo_fsi_dm.gd_rst_ing.portal_brand_monthly"
-T_BRAND_SUMMARY = "h_hmfo_fsi_dm.gd_rst_ing.portal_brand_summary"
-T_BRAND_CUST    = "h_hmfo_fsi_dm.gd_rst_ing.portal_brand_customer_stats"
+T_BRAND_MONTHLY  = "h_hmfo_fsi_dm.gd_rst_ing.portal_brand_monthly"
+T_BRAND_SUMMARY  = "h_hmfo_fsi_dm.gd_rst_ing.portal_brand_summary"
+T_BRAND_CUST     = "h_hmfo_fsi_dm.gd_rst_ing.portal_brand_customer_stats"
+T_ACTION_RESULTS = "h_hmfo_fsi_dm.gd_rst_ing.portal_action_results"
 
 
 def _shift_ym(ym: str, months: int) -> str:
@@ -440,6 +441,13 @@ def run_refresh(force: bool = False) -> dict:
     except Exception as e:
         logger.warning(f"[refresh] {T_BRAND_CUST} 생성 실패 (무시): {e}")
 
+    # ── Step 6: 판가설정 액션 이후 실적 집계 (T_ACTION_RESULTS) ──────────────
+    try:
+        ar_result = run_action_results_refresh()
+        logger.info(f"[refresh] {T_ACTION_RESULTS} 갱신 완료: {ar_result}")
+    except Exception as e:
+        logger.warning(f"[refresh] {T_ACTION_RESULTS} 갱신 실패 (무시): {e}")
+
     try:
         import portal_router
         portal_router._cache_clear_all()
@@ -649,3 +657,148 @@ def read_brand_report_from_table(
     except Exception as e:
         logger.warning(f"[refresh] brand_report 사전계산 조회 실패 ({emp_code}, {brand_name}): {e}")
         return None
+
+
+def run_action_results_refresh() -> dict:
+    """
+    판가설정 액션 이후 실적 집계 테이블 갱신.
+    SQLite dm_send_logs → Databricks T_MAIN JOIN → T_ACTION_RESULTS CREATE OR REPLACE
+    """
+    import json as _json
+    from collections import defaultdict
+    try:
+        from portal_db import list_dm_logs
+        logs = list_dm_logs(limit=5000)
+    except Exception as e:
+        return {"status": "error", "reason": str(e), "step": "read_logs"}
+
+    # 판가설정 있는 로그만, (emp, customer, brand) 기준으로 가장 이른 action_ym 추출
+    agg: dict = {}
+    for log in logs:
+        pj = log.get("price_items_json") or ""
+        if not pj:
+            continue
+        try:
+            items = _json.loads(pj)
+            if not items:
+                continue
+            dates = [str(it.get("date_from") or "")[:6] for it in items if it.get("date_from")]
+            action_ym = min((d for d in dates if len(d) == 6), default="")
+            if not action_ym:
+                continue
+        except Exception:
+            continue
+
+        key = (
+            str(log.get("emp_code") or ""),
+            str(log.get("customer_code") or ""),
+            str(log.get("brand_code") or ""),
+        )
+        entry = {
+            "emp_code":      key[0],
+            "customer_code": key[1],
+            "customer_name": str(log.get("customer_name") or "").replace("'", "''"),
+            "brand_code":    key[2],
+            "brand_name":    str(log.get("brand_name") or "").replace("'", "''"),
+            "action_ym":     action_ym,
+            "item_count":    len(items),
+        }
+        if key not in agg or action_ym < agg[key]["action_ym"]:
+            agg[key] = entry
+
+    import main
+    if not agg:
+        # 데이터 없으면 빈 테이블 생성
+        empty_sql = f"""
+        CREATE OR REPLACE TABLE {T_ACTION_RESULTS} AS
+        SELECT '' AS emp_code, '' AS customer_code, '' AS customer_name,
+               '' AS brand_code, '' AS brand_name, '' AS action_ym,
+               0 AS action_item_count,
+               CAST(0 AS BIGINT) AS sales_after_m, CAST(0 AS BIGINT) AS gp_after_m,
+               CAST(0.0 AS DOUBLE) AS gp_rate_after, CAST(0 AS BIGINT) AS generic_sales_after_m,
+               CURRENT_TIMESTAMP() AS updated_at
+        WHERE 1=0
+        """
+        try:
+            main._safe_query(empty_sql, raw=True)
+        except Exception as e:
+            logger.warning(f"[refresh] {T_ACTION_RESULTS} 빈 테이블 생성 실패: {e}")
+        return {"status": "ok", "action_rows": 0}
+
+    rows = list(agg.values())
+    values_parts = ", ".join(
+        f"('{r['emp_code']}', '{r['customer_code']}', '{r['customer_name']}', "
+        f"'{r['brand_code']}', '{r['brand_name']}', '{r['action_ym']}', {r['item_count']})"
+        for r in rows
+    )
+
+    sql = f"""
+    CREATE OR REPLACE TABLE {T_ACTION_RESULTS} AS
+    WITH actions AS (
+      SELECT column1 AS emp_code, column2 AS customer_code, column3 AS customer_name,
+             column4 AS brand_code, column5 AS brand_name,
+             column6 AS action_ym,  column7 AS action_item_count
+      FROM VALUES {values_parts}
+    )
+    SELECT
+      a.emp_code, a.customer_code, a.customer_name,
+      a.brand_code, a.brand_name, a.action_ym, a.action_item_count,
+      ROUND(SUM(COALESCE(m.`매출액`, 0)) / 10000)    AS sales_after_m,
+      ROUND((SUM(COALESCE(m.`매출액`, 0)) - SUM(COALESCE(m.`매출원가`, 0))) / 10000) AS gp_after_m,
+      CASE WHEN SUM(COALESCE(m.`매출액`, 0)) = 0 THEN 0.0
+           ELSE ROUND((SUM(COALESCE(m.`매출액`, 0)) - SUM(COALESCE(m.`매출원가`, 0)))
+                      / SUM(COALESCE(m.`매출액`, 0)) * 100, 1)
+      END AS gp_rate_after,
+      ROUND(SUM(CASE WHEN m.`자재그룹명` IS NOT NULL
+                     AND COALESCE(m.`자재그룹명`, '') <> 'FC전용상품'
+                     THEN COALESCE(m.`매출액`, 0) ELSE 0 END) / 10000) AS generic_sales_after_m,
+      CURRENT_TIMESTAMP() AS updated_at
+    FROM actions a
+    LEFT JOIN {main.T_MAIN} m
+           ON m.`거래처`  = a.customer_code
+          AND m.`ZC본부`  = a.brand_code
+          AND m.`년월`    >= a.action_ym
+    GROUP BY a.emp_code, a.customer_code, a.customer_name,
+             a.brand_code, a.brand_name, a.action_ym, a.action_item_count
+    """
+    try:
+        main._safe_query(sql, raw=True)
+        logger.info(f"[refresh] {T_ACTION_RESULTS} 생성 완료 ({len(rows)}건)")
+        return {"status": "ok", "action_rows": len(rows)}
+    except Exception as e:
+        logger.warning(f"[refresh] {T_ACTION_RESULTS} 생성 실패: {e}")
+        return {"status": "error", "reason": str(e), "step": "create_table"}
+
+
+def read_action_results(emp_code: str, brand_code: str = "", action_ym: str = "") -> list[dict]:
+    """T_ACTION_RESULTS에서 액션 실적 조회."""
+    import main
+    conds = [f"emp_code = '{emp_code}'"]
+    if brand_code:
+        conds.append(f"brand_code = '{brand_code}'")
+    if action_ym:
+        conds.append(f"action_ym >= '{action_ym}'")
+    where = " AND ".join(conds)
+    try:
+        rows = main._safe_query(
+            f"SELECT * FROM {T_ACTION_RESULTS} WHERE {where} ORDER BY action_ym DESC LIMIT 200",
+            raw=True,
+        ) or []
+        return [
+            {
+                "customer_code":       str(r.get("customer_code") or ""),
+                "customer_name":       str(r.get("customer_name") or ""),
+                "brand_code":          str(r.get("brand_code") or ""),
+                "brand_name":          str(r.get("brand_name") or ""),
+                "action_ym":           str(r.get("action_ym") or ""),
+                "action_item_count":   int(r.get("action_item_count") or 0),
+                "sales_after_m":       int(r.get("sales_after_m") or 0),
+                "gp_after_m":          int(r.get("gp_after_m") or 0),
+                "gp_rate_after":       float(r.get("gp_rate_after") or 0),
+                "generic_sales_after_m": int(r.get("generic_sales_after_m") or 0),
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        logger.warning(f"[refresh] read_action_results 실패: {e}")
+        return []

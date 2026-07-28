@@ -37,45 +37,13 @@
   <article><span>제안 대상</span><strong>{{ report.target_count }}</strong><small>기준 미만 전체 가맹점</small></article>
 </section>
 
-<section class="portal-summary-grid">
-  <article class="portal-panel">
-    <div class="portal-panel-head"><div><p class="eyebrow">MONTHLY SALES</p><h2>브랜드 전체 매출 — 최근 3개월</h2><p>전체 가맹점 기준, 단위는 백만원입니다.</p></div></div>
-    <div class="portal-brand-list">
-      {% for m in report.monthly_sales %}
-      <div class="portal-brand-row"><div><b>{{ m.ym }}</b><small>{{ report.brand.brand_name }} 전체 매출</small></div><strong>{{ '{:,}'.format(m.sales_m) }}백만</strong></div>
-      {% else %}<div class="empty"><b>월별 매출 데이터가 없습니다.</b></div>{% endfor %}
-    </div>
-  </article>
-
-  <article class="portal-panel proposal-panel">
-    <div class="portal-panel-head"><div><p class="eyebrow">PROPOSAL IMPACT</p><h2>범용상품 제안 효과</h2><p>제안 대상이 브랜드 평균 범용상품 비율에 도달한다고 가정합니다.</p></div></div>
-    <div class="proposal-kpis">
-      <div><span>제안가능 범용상품 매출액</span><strong>{{ '{:,}'.format(report.proposal_possible_sales_m) }}백만</strong><small>{{ report.prev_ym }} 제안대상 역산</small></div>
-      <div><span>브랜드 범용상품 매출이익률</span><strong>{{ report.generic_gp_rate }}%</strong><small>{{ report.prev_ym }} 범용상품 기준</small></div>
-      <div><span>100% 발주전환 시 기대 이익액 증가분</span><strong>{{ '{:,}'.format(report.expected_profit_increase_m) }}백만</strong><small>제안가능 매출 × GP율</small></div>
-    </div>
-    <form method="get" action="/portal/brand-report" class="threshold-form">
-      <input type="hidden" name="brand" value="{{ report.brand.brand_name }}">
-      <input type="hidden" name="customer_page" value="1">
-      <input type="hidden" name="target_page" value="1">
-      <div class="threshold-head"><b>제안 기준 슬라이더</b><span><output id="thresholdValue">{{ report.threshold }}</output>% 미만</span></div>
-      <input type="range" name="threshold" min="0" max="{{ report.threshold_max }}" step="0.1" value="{{ report.threshold }}" oninput="document.getElementById('thresholdValue').value=this.value">
-      <div class="threshold-actions">
-        <button class="btn portal-primary" type="submit">제안 기준 적용</button>
-        <span>적용 후 제안대상과 우측 KPI가 함께 갱신됩니다.</span>
-      </div>
-      <small>최대값은 브랜드 평균 범용상품 비중({{ report.threshold_max }}%)으로 고정됩니다.</small>
-    </form>
-  </article>
-</section>
-
 <section class="portal-panel portal-scatter-section">
   <div class="scatter-header">
     <div><p class="eyebrow">DISTRIBUTION</p><h2>가맹점 범용상품 비중 분포</h2>
-    <p>X: 매출액(백만) &nbsp;·&nbsp; Y: 범용비중(%) &nbsp;·&nbsp; <span style="color:#dc2626;">●</span> 제안대상 &nbsp; <span style="color:#16a34a;">●</span> 기준충족 &nbsp;· 회색점선: 브랜드평균</p></div>
+    <p>X: 범용비중(%) &nbsp;·&nbsp; Y: 매출액(백만) &nbsp;·&nbsp; <span style="color:#dc2626;">●</span> 제안대상 &nbsp; <span style="color:#16a34a;">●</span> 기준충족 &nbsp;· 수직점선: 브랜드평균/기준</p></div>
     <div class="scatter-stats-grid" id="scatterStats"></div>
   </div>
-  <div class="scatter-canvas-wrap"><canvas id="scatterChart"></canvas></div>
+  <div class="scatter-canvas-wrap" style="height:480px;"><canvas id="scatterChart"></canvas></div>
 </section>
 
 <div class="portal-tabs"><span class="active">고객 프로모션 제안</span><span>매출 분석</span><span>CM</span><span>채권</span><span>마스터</span></div>
@@ -255,7 +223,7 @@
   const brandAvg  = {{ report.brand_avg }};
   const threshold = {{ report.threshold }};
 
-  // ── 통계 계산 ────────────────────────────────────────
+  // ── 통계 계산 (X축=범용비중) ──────────────────────────
   const ratios = customers.map(c => c.generic_ratio).sort((a,b) => a-b);
   const n = ratios.length;
   function pct(arr, p){ const idx = Math.max(0, Math.min(arr.length-1, Math.round(p/100*(arr.length-1)))); return arr[idx]; }
@@ -298,13 +266,13 @@
       datasets: [
         {
           label: '기준 미달 (제안대상)',
-          data: targets.map(c => ({ x: c.sales_m, y: c.generic_ratio, name: c.customer_name })),
+          data: targets.map(c => ({ x: c.generic_ratio, y: c.sales_m, name: c.customer_name })),
           backgroundColor: 'rgba(220,38,38,.65)',
           pointRadius: 5, pointHoverRadius: 7,
         },
         {
           label: '기준 충족',
-          data: normals.map(c => ({ x: c.sales_m, y: c.generic_ratio, name: c.customer_name })),
+          data: normals.map(c => ({ x: c.generic_ratio, y: c.sales_m, name: c.customer_name })),
           backgroundColor: 'rgba(22,163,74,.55)',
           pointRadius: 4, pointHoverRadius: 6,
         },
@@ -330,36 +298,36 @@
           callbacks: {
             label: ctx => {
               const d = ctx.raw;
-              return (d.name || '') + '  |  매출 ' + d.x + '백만  범용 ' + d.y + '%';
+              return (d.name || '') + '  |  범용 ' + d.x + '%  매출 ' + d.y + '백만';
             }
           }
         },
       },
       scales: {
-        x: { title: { display: true, text: '매출액 (백만원)' }, ticks: { font: { size: 10 } } },
-        y: { title: { display: true, text: '범용상품 비중 (%)' }, min: 0, max: 100, ticks: { font: { size: 10 } } },
+        x: { title: { display: true, text: '범용상품 비중 (%)' }, min: 0, max: 100, ticks: { font: { size: 10 } } },
+        y: { title: { display: true, text: '매출액 (백만원)' }, ticks: { font: { size: 10 } } },
       },
     },
     plugins: [{
       id: 'refLines',
       afterDraw(chart) {
         const { ctx, chartArea: ca, scales: { x: xS, y: yS } } = chart;
-        const drawHLine = (yVal, color, dash, label) => {
-          const yPx = yS.getPixelForValue(yVal);
-          if (yPx < ca.top || yPx > ca.bottom) return;
+        const drawVLine = (xVal, color, dash, label) => {
+          const xPx = xS.getPixelForValue(xVal);
+          if (xPx < ca.left || xPx > ca.right) return;
           ctx.save();
           ctx.strokeStyle = color;
           ctx.lineWidth = 1.5;
           ctx.setLineDash(dash);
-          ctx.beginPath(); ctx.moveTo(ca.left, yPx); ctx.lineTo(ca.right, yPx); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(xPx, ca.top); ctx.lineTo(xPx, ca.bottom); ctx.stroke();
           if (label) {
             ctx.fillStyle = color; ctx.font = '10px sans-serif'; ctx.setLineDash([]);
-            ctx.fillText(label, ca.left + 4, yPx - 3);
+            ctx.fillText(label, xPx + 3, ca.top + 14);
           }
           ctx.restore();
         };
-        drawHLine(brandAvg,  '#9ca3af', [5,4], '평균 ' + brandAvg + '%');
-        drawHLine(threshold, '#f59e0b', [4,3], '기준 ' + threshold + '%');
+        drawVLine(brandAvg,  '#9ca3af', [5,4], '평균 ' + brandAvg + '%');
+        drawVLine(threshold, '#f59e0b', [4,3], '기준 ' + threshold + '%');
       }
     }]
   });

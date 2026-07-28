@@ -493,5 +493,89 @@
 
 })();
 </script>
+
+<!-- ── 📊 액션 실적 섹션 ─────────────────────────────────────────── -->
+<section class="portal-panel" style="margin-top:1.25rem;" id="actionResultsSection">
+  <div class="portal-panel-head" style="padding-bottom:.5rem;">
+    <div>
+      <p class="eyebrow">ACTION RESULTS</p>
+      <h2>📊 액션 실적</h2>
+      <p style="font-size:.82rem;color:#6b7280;">판가설정 후 DM 발송 이후 해당 가맹점의 누적 매출·GP 실적입니다.</p>
+    </div>
+    <div id="actionResultsSummary" style="display:flex;gap:.75rem;flex-wrap:wrap;align-items:center;font-size:.82rem;"></div>
+  </div>
+  <div id="actionResultsBody" style="padding:0 1.25rem 1.25rem;">
+    <div style="color:#9ca3af;font-size:.85rem;">불러오는 중...</div>
+  </div>
+</section>
+
+<style>
+.ar-table{width:100%;border-collapse:collapse;font-size:.78rem;}
+.ar-table th{background:#e5e7eb;padding:.3rem .5rem;text-align:center;font-weight:600;white-space:nowrap;}
+.ar-table td{padding:.3rem .5rem;border-bottom:1px solid #f3f4f6;text-align:right;vertical-align:middle;}
+.ar-table td:first-child,.ar-table td:nth-child(2){text-align:left;}
+.ar-badge{display:inline-block;background:#f0fdf4;color:#166534;border:1px solid #bbf7d0;border-radius:.35rem;padding:.1rem .45rem;font-size:.72rem;font-weight:700;}
+.ar-badge.blue{background:#eff6ff;color:#1e40af;border-color:#bfdbfe;}
+.ar-badge.gray{background:#f3f4f6;color:#374151;border-color:#d1d5db;}
+</style>
+
+<script>
+(function(){
+  const brandCode = {{ report.brand.brand_code | tojson }};
+  const apiUrl = `/portal/action-results?brand_code=${encodeURIComponent(brandCode)}`;
+
+  fetch(apiUrl, { headers: { Accept: 'application/json' } })
+    .then(r => r.json())
+    .then(data => {
+      const body    = document.getElementById('actionResultsBody');
+      const summary = document.getElementById('actionResultsSummary');
+      const rows    = data.rows  || [];
+      const sum     = data.summary || {};
+
+      // ── 요약 배지 ─────────────────────────────────
+      summary.innerHTML = [
+        `<span class="ar-badge gray">총 액션 <b>${sum.count || 0}</b>건</span>`,
+        `<span class="ar-badge">누적 매출 <b>${(sum.total_sales_after_m || 0).toLocaleString()}</b>백만</span>`,
+        `<span class="ar-badge">누적 GP <b>${(sum.total_gp_after_m || 0).toLocaleString()}</b>백만</span>`,
+        `<span class="ar-badge blue">범용 추가 <b>${(sum.total_generic_after_m || 0).toLocaleString()}</b>백만</span>`,
+      ].join('');
+
+      if (!rows.length) {
+        body.innerHTML = '<div style="color:#9ca3af;font-size:.85rem;padding:.5rem 0;">아직 판가설정 액션 실적이 없습니다.</div>';
+        return;
+      }
+
+      const tbl = document.createElement('table');
+      tbl.className = 'ar-table';
+      tbl.innerHTML = `<thead><tr>
+        <th>가맹점명</th><th>가맹점코드</th><th>액션월</th><th>설정품목</th>
+        <th>이후누적매출(백만)</th><th>이후누적GP(백만)</th><th>GP율(%)</th><th>범용추가매출(백만)</th>
+      </tr></thead>`;
+      const tbody = document.createElement('tbody');
+      rows.forEach(r => {
+        const tr = document.createElement('tr');
+        const gpClass = r.gp_rate_after >= 20 ? 'up' : r.gp_rate_after >= 10 ? 'neutral' : 'down';
+        tr.innerHTML = `
+          <td><b>${r.customer_name || ''}</b></td>
+          <td style="color:#9ca3af;">${r.customer_code || ''}</td>
+          <td>${r.action_ym || ''}</td>
+          <td style="text-align:center;">${r.action_item_count || 0}품목</td>
+          <td>${(r.sales_after_m || 0).toLocaleString()}</td>
+          <td>${(r.gp_after_m || 0).toLocaleString()}</td>
+          <td><span class="gp-chip ${gpClass}">${r.gp_rate_after || 0}%</span></td>
+          <td>${(r.generic_sales_after_m || 0).toLocaleString()}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+      tbl.appendChild(tbody);
+      body.innerHTML = '';
+      body.appendChild(tbl);
+    })
+    .catch(() => {
+      document.getElementById('actionResultsBody').innerHTML =
+        '<div style="color:#ef4444;font-size:.82rem;">실적 데이터를 불러오지 못했습니다.</div>';
+    });
+})();
+</script>
 {% endif %}
 {% endblock %}

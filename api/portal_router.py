@@ -702,9 +702,10 @@ def _recommend_products(brand_name: str, customer_code: str, months: list[str], 
         sales      = float(r.get("sales") or 0)
         total_qty  = float(r.get("total_qty") or 0)
         total_cost = float(r.get("total_cost") or 0)
-        # 단가/원가 단위 계산 (수량 기준)
-        unit_price = round(sales / total_qty)       if total_qty > 0 else 0
-        unit_cost  = round(total_cost / total_qty)  if total_qty > 0 else 0
+        # 단가/원가 단위 계산: raw 매출액 1단위 = 100원 (SUM/10,000 = 백만원 기준)
+        # → 원(₩) 단위로 변환하려면 ×100 필요
+        unit_price = round(sales / total_qty * 100)       if total_qty > 0 else 0
+        unit_cost  = round(total_cost / total_qty * 100)  if total_qty > 0 else 0
         result.append({
             **r,
             "sales_m":    _money_m(sales),
@@ -1340,6 +1341,33 @@ async def brand_report_action_page(
     report = brand_report(brand or None, emp_code=user["emp_code"],
                           threshold_pct=threshold, customer_page=customer_page, target_page=target_page)
     return _render(request, "portal_brand_report_action.html", report=report)
+
+
+@router.get("/action-results")
+async def action_results(
+    request: Request,
+    brand_code: str = "",
+    action_ym: str = "",
+):
+    """판가설정 액션 이후 실적 조회 (T_ACTION_RESULTS)."""
+    user = _require_user(request)
+    try:
+        from portal_refresh import read_action_results
+        rows = read_action_results(user["emp_code"], brand_code=brand_code, action_ym=action_ym)
+    except Exception as e:
+        rows = []
+    total_sales = sum(r.get("sales_after_m", 0) for r in rows)
+    total_gp    = sum(r.get("gp_after_m", 0) for r in rows)
+    total_generic = sum(r.get("generic_sales_after_m", 0) for r in rows)
+    return JSONResponse(_json_safe({
+        "rows": rows,
+        "summary": {
+            "count":             len(rows),
+            "total_sales_after_m":   total_sales,
+            "total_gp_after_m":      total_gp,
+            "total_generic_after_m": total_generic,
+        },
+    }))
 
 
 @router.post("/dm-log")
