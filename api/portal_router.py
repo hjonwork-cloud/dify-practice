@@ -1444,6 +1444,16 @@ async def dm_send_with_price(request: Request, body: _DmSendPayload):
         status="price_applied_dm_sent" if body.action_type == "price_and_dm" else "dm_only_sent",
     )
 
+    # ── 판가설정 액션이면 실적 테이블 백그라운드 갱신 ─────────────────
+    if body.action_type == "price_and_dm":
+        def _refresh_action_results():
+            try:
+                from portal_refresh import run_action_results_refresh
+                run_action_results_refresh()
+            except Exception as e:
+                logger.warning(f"[dm-send] action_results 백그라운드 갱신 실패: {e}")
+        threading.Thread(target=_refresh_action_results, daemon=True, name="action-results-refresh").start()
+
     return JSONResponse({
         "success": True,
         "action_type": body.action_type,
