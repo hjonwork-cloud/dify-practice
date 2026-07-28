@@ -1,0 +1,497 @@
+{% extends 'portal_base.html' %}{% block title %}상세·액션 — {{ report.brand.brand_name if report.brand else '브랜드 없음' }}{% endblock %}{% block content %}
+<style>
+/* ── 컴팩트 헤더 ── */
+.action-page-header{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;padding:.75rem 0 .5rem;border-bottom:1px solid #e5e7eb;margin-bottom:.75rem;}
+.action-page-header a{font-size:.85rem;color:#6b7280;text-decoration:none;}
+.action-page-header a:hover{color:#16a34a;}
+.action-compact-bar{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;background:#f9fafb;border:1px solid #e5e7eb;border-radius:.6rem;padding:.6rem 1rem;margin-bottom:1rem;font-size:.85rem;}
+.action-compact-bar strong{font-size:1rem;color:#111;}
+.action-compact-bar .acb-kpi{display:flex;flex-direction:column;align-items:center;min-width:70px;}
+.action-compact-bar .acb-kpi span{font-size:.7rem;color:#6b7280;}
+.action-compact-slider{display:flex;align-items:center;gap:.5rem;flex:1;min-width:200px;}
+.action-compact-slider input[type=range]{flex:1;}
+/* ── 그리드 ── */
+.action-grid{display:grid;grid-template-columns:1fr 1fr;gap:1rem;}
+@media(max-width:900px){.action-grid{grid-template-columns:1fr;}}
+/* ── ACTION TARGET 행 ── */
+.action-target-row{border:1px solid #e5e7eb;border-radius:.5rem;overflow:hidden;margin-bottom:.5rem;}
+.action-target-summary{display:flex;align-items:center;justify-content:space-between;padding:.55rem .75rem;cursor:pointer;background:#fff;gap:.5rem;}
+.action-target-summary:hover{background:#f9fafb;}
+.action-target-summary b{font-size:.9rem;}
+.action-target-summary small{display:block;font-size:.75rem;color:#6b7280;}
+.action-toggle-btn{flex-shrink:0;font-size:.8rem;padding:.25rem .6rem;border:1px solid #d1d5db;border-radius:.35rem;background:#fff;cursor:pointer;white-space:nowrap;}
+.action-toggle-btn:hover{background:#f3f4f6;}
+/* ── 확장 패널 ── */
+.action-panel{padding:.75rem;background:#f9fafb;border-top:1px solid #e5e7eb;}
+.action-radio-group{display:flex;gap:1.25rem;margin-bottom:.75rem;font-size:.88rem;}
+.action-radio-group label{display:flex;align-items:center;gap:.3rem;cursor:pointer;}
+.action-section{margin-top:.75rem;}
+.action-section-title{font-size:.8rem;font-weight:600;color:#374151;margin-bottom:.4rem;text-transform:uppercase;letter-spacing:.04em;}
+/* ── DM 미리보기 ── */
+.dm-preview-area{width:100%;border:1px solid #d1d5db;border-radius:.4rem;padding:.5rem;font-size:.82rem;line-height:1.5;resize:vertical;background:#fff;min-height:90px;}
+/* ── 가격 설정 테이블 ── */
+.price-table{width:100%;border-collapse:collapse;font-size:.78rem;margin-bottom:.5rem;}
+.price-table th{background:#e5e7eb;padding:.3rem .4rem;text-align:center;font-weight:600;white-space:nowrap;}
+.price-table td{padding:.3rem .4rem;border-bottom:1px solid #f3f4f6;text-align:center;vertical-align:middle;}
+.price-table input[type=number]{width:72px;border:1px solid #d1d5db;border-radius:.3rem;padding:.2rem .3rem;font-size:.78rem;text-align:right;}
+.price-table input[type=number]:focus{outline:2px solid #16a34a;border-color:#16a34a;}
+.price-table input.derived{background:#f0fdf4;}
+.price-table input.stale{background:#fff7ed;}
+.price-date-row{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;font-size:.82rem;margin-bottom:.5rem;}
+.price-date-row label{display:flex;align-items:center;gap:.3rem;}
+.price-date-row input[type=date]{border:1px solid #d1d5db;border-radius:.3rem;padding:.2rem .4rem;font-size:.82rem;}
+.gp-chip{display:inline-block;padding:.1rem .4rem;border-radius:.25rem;font-size:.72rem;font-weight:600;}
+.gp-chip.up{background:#dcfce7;color:#166534;}
+.gp-chip.down{background:#fee2e2;color:#991b1b;}
+.gp-chip.neutral{background:#f3f4f6;color:#374151;}
+/* ── 버튼 ── */
+.action-send-btn{display:inline-flex;align-items:center;gap:.4rem;background:#16a34a;color:#fff;border:none;border-radius:.45rem;padding:.45rem 1rem;font-size:.85rem;cursor:pointer;font-weight:600;}
+.action-send-btn:hover{background:#15803d;}
+.action-send-btn:disabled{background:#9ca3af;cursor:not-allowed;}
+.action-send-btn.price-send{background:#0369a1;}
+.action-send-btn.price-send:hover{background:#0284c7;}
+.send-result{font-size:.82rem;margin-top:.4rem;padding:.35rem .6rem;border-radius:.35rem;}
+.send-result.ok{background:#dcfce7;color:#166534;}
+.send-result.err{background:#fee2e2;color:#991b1b;}
+</style>
+
+{% if not report.brand %}
+<div class="portal-heading"><div><p class="eyebrow">ACTION</p><h1>브랜드 데이터 없음</h1></div></div>
+{% else %}
+
+<div class="action-page-header">
+  <a href="/portal/brand-report?brand={{ report.brand.brand_name|urlencode }}">← 범용상품 제안 솔루션</a>
+  <strong style="font-size:1.1rem;">{{ report.brand.brand_name }}</strong>
+  <span style="color:#9ca3af;font-size:.82rem;">{{ report.prev_ym }} 기준</span>
+  <form method="get" action="/portal/brand-report/action" style="margin-left:auto;">
+    <select name="brand" onchange="this.form.submit()" style="font-size:.82rem;padding:.2rem .4rem;border:1px solid #d1d5db;border-radius:.35rem;">
+      {% for b in report.brands %}<option value="{{ b.brand_name }}" {% if b.brand_name == report.brand.brand_name %}selected{% endif %}>{{ b.brand_name }}</option>{% endfor %}
+    </select>
+  </form>
+</div>
+
+<!-- 컴팩트 요약 바 -->
+<form method="get" action="/portal/brand-report/action" class="action-compact-bar">
+  <input type="hidden" name="brand" value="{{ report.brand.brand_name }}">
+  <div class="acb-kpi"><strong>{{ report.brand_avg }}%</strong><span>브랜드 평균</span></div>
+  <div class="acb-kpi"><strong>{{ report.target_count }}</strong><span>제안 대상</span></div>
+  <div class="acb-kpi"><strong>{{ report.threshold }}%</strong><span>현재 기준</span></div>
+  <div class="acb-kpi"><strong>{{ report.generic_gp_rate }}%</strong><span>범용GP율</span></div>
+  <div class="acb-kpi"><strong>{{ '{:,}'.format(report.proposal_possible_sales_m) }}백만</strong><span>제안효과</span></div>
+  <div class="action-compact-slider">
+    <span style="font-size:.75rem;color:#6b7280;">기준 슬라이더</span>
+    <input type="range" name="threshold" min="0" max="{{ report.threshold_max }}" step="0.1" value="{{ report.threshold }}"
+           oninput="document.getElementById('acbThreshVal').textContent=this.value">
+    <output id="acbThreshVal">{{ report.threshold }}</output>%
+    <button class="btn portal-primary" type="submit" style="padding:.25rem .6rem;font-size:.8rem;">적용</button>
+  </div>
+</form>
+
+<!-- 메인 그리드: CUSTOMER MIX + ACTION TARGETS -->
+<div class="action-grid">
+
+  <!-- ── CUSTOMER MIX ─────────────────────────────── -->
+  <article class="portal-panel">
+    <div class="portal-panel-head">
+      <div><p class="eyebrow">CUSTOMER MIX</p><h2>가맹점별 범용비중</h2>
+      <p>{{ report.prev_ym }} 기준. 전체 매출 내림차순. {{ report.customers|length }}개 가맹점</p></div>
+    </div>
+    <div class="portal-bars" id="mixBars">
+      {% for c in report.customers %}
+      <div class="portal-bar-row {% if c.is_target %}target{% endif %}"
+           style="cursor:pointer;" title="{{ c.customer_code }}"
+           onclick="selectTarget('{{ c.customer_code }}','{{ c.customer_name|e }}')">
+        <div class="bar-label">
+          <b>{{ c.customer_name }}</b>
+          <small>{{ c.customer_code }} · {{ '{:,}'.format(c.sales_m) }}백만 · 범용 {{ '{:,}'.format(c.generic_sales_m) }}백만</small>
+        </div>
+        <div class="bar-track"><i style="width:{{ c.generic_ratio }}%"></i><em style="left:{{ report.brand_avg }}%"></em></div>
+        <strong>{{ c.generic_ratio }}%</strong>
+      </div>
+      {% else %}<div class="empty"><b>데이터 없음</b></div>{% endfor %}
+    </div>
+    {% if report.customers|length > 10 %}
+    <nav class="portal-pagination" id="mixPager">
+      <button type="button" onclick="mixPage(-1)">이전</button>
+      <b><span id="mixCur">1</span> / <span id="mixTot">1</span></b>
+      <button type="button" onclick="mixPage(1)">다음</button>
+    </nav>
+    {% endif %}
+  </article>
+
+  <!-- ── ACTION TARGETS ─────────────────────────────── -->
+  <aside class="portal-panel">
+    <div class="portal-panel-head">
+      <div><p class="eyebrow">ACTION TARGETS</p><h2>제안 대상 · 액션 실행</h2>
+      <p>범용비중 {{ report.threshold }}% 미만. {{ report.target_count }}건</p></div>
+      <div style="display:flex;gap:.4rem;">
+        <button type="button" onclick="sortTargets('sales')" style="font-size:.75rem;padding:.2rem .5rem;border:1px solid #d1d5db;border-radius:.3rem;background:#fff;cursor:pointer;">매출↓</button>
+        <button type="button" onclick="sortTargets('ratio')" style="font-size:.75rem;padding:.2rem .5rem;border:1px solid #d1d5db;border-radius:.3rem;background:#fff;cursor:pointer;">범용↓</button>
+      </div>
+    </div>
+
+    <div id="targetList">
+      {% for c in report.targets %}
+      <div class="action-target-row js-target-row"
+           data-code="{{ c.customer_code }}"
+           data-name="{{ c.customer_name|e }}"
+           data-sales="{{ c.sales_m }}"
+           data-ratio="{{ c.generic_ratio }}"
+           data-gap="{{ c.gap }}"
+           data-detail-url="/portal/target-detail?brand={{ report.brand.brand_name|urlencode }}&customer_code={{ c.customer_code|urlencode }}"
+           data-open="0" data-loaded="0">
+        <div class="action-target-summary" onclick="toggleTarget(this.closest('.action-target-row'))">
+          <div>
+            <b>{{ c.customer_name }}</b>
+            <small>{{ c.customer_code }} · 범용 {{ c.generic_ratio }}% · Gap {{ c.gap }}%p · 효과 {{ '{:,}'.format(c.proposal_possible_sales_m) }}백만</small>
+          </div>
+          <button type="button" class="action-toggle-btn">▶ 액션</button>
+        </div>
+        <div class="action-panel" hidden data-target-body>
+          <div class="empty" style="font-size:.82rem;">추천상품과 액션 옵션을 불러오는 중...</div>
+        </div>
+      </div>
+      {% else %}
+      <div class="empty"><b>제안 대상 없음</b><span>슬라이더 기준 미만의 가맹점이 없습니다.</span></div>
+      {% endfor %}
+    </div>
+
+    {% if report.target_count > 10 %}
+    <nav class="portal-pagination" id="targetPager">
+      <button type="button" onclick="targetPage(-1)">이전</button>
+      <b><span id="targetCur">1</span> / <span id="targetTot">1</span></b>
+      <button type="button" onclick="targetPage(1)">다음</button>
+    </nav>
+    {% endif %}
+  </aside>
+</div><!-- /action-grid -->
+
+<script>
+(function(){
+  const brandName   = {{ report.brand.brand_name | tojson }};
+  const brandCode   = {{ report.brand.brand_code  | tojson }};
+  const brandAvg    = {{ report.brand_avg }};
+  const threshold   = {{ report.threshold }};
+
+  // ─── CUSTOMER MIX 페이저 ───────────────────────────
+  const perPage = 10;
+  let mixCurrentPage = 1;
+  function mixPage(delta) {
+    const rows = Array.from(document.querySelectorAll('#mixBars .portal-bar-row'));
+    const total = Math.max(1, Math.ceil(rows.length / perPage));
+    mixCurrentPage = Math.min(Math.max(1, mixCurrentPage + delta), total);
+    const start = (mixCurrentPage - 1) * perPage;
+    rows.forEach((r, i) => { r.style.display = (i >= start && i < start + perPage) ? '' : 'none'; });
+    const cur = document.getElementById('mixCur'), tot = document.getElementById('mixTot');
+    if (cur) cur.textContent = mixCurrentPage;
+    if (tot) tot.textContent = total;
+  }
+  mixPage(0);
+
+  // ─── ACTION TARGETS 페이저 ─────────────────────────
+  let targetCurrentPage = 1;
+  function targetPage(delta) {
+    const rows = Array.from(document.querySelectorAll('.js-target-row'));
+    const total = Math.max(1, Math.ceil(rows.length / perPage));
+    targetCurrentPage = Math.min(Math.max(1, targetCurrentPage + delta), total);
+    const start = (targetCurrentPage - 1) * perPage;
+    rows.forEach((r, i) => { r.style.display = (i >= start && i < start + perPage) ? '' : 'none'; });
+    const cur = document.getElementById('targetCur'), tot = document.getElementById('targetTot');
+    if (cur) cur.textContent = targetCurrentPage;
+    if (tot) tot.textContent = total;
+  }
+  targetPage(0);
+  window.targetPage = targetPage;
+  window.mixPage = mixPage;
+
+  // ─── 정렬 ──────────────────────────────────────────
+  window.sortTargets = function(key) {
+    const list = document.getElementById('targetList');
+    const rows = Array.from(document.querySelectorAll('.js-target-row'));
+    rows.sort((a, b) => Number(b.dataset[key] || 0) - Number(a.dataset[key] || 0));
+    rows.forEach(r => list.appendChild(r));
+    targetPage(0);
+  };
+
+  // ─── CUSTOMER MIX 클릭 → 해당 TARGET 스크롤 ───────
+  window.selectTarget = function(code, name) {
+    const row = document.querySelector(`.js-target-row[data-code="${code}"]`);
+    if (!row) return;
+    row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    row.style.outline = '2px solid #16a34a';
+    setTimeout(() => { row.style.outline = ''; }, 2000);
+  };
+
+  // ─── 토글 ──────────────────────────────────────────
+  window.toggleTarget = async function(row) {
+    const isOpen = row.dataset.open === '1';
+    const body = row.querySelector('[data-target-body]');
+    const btn  = row.querySelector('.action-toggle-btn');
+    if (isOpen) {
+      body.hidden = true; row.dataset.open = '0';
+      btn.textContent = '▶ 액션';
+      return;
+    }
+    body.hidden = false; row.dataset.open = '1';
+    btn.textContent = '▼ 닫기';
+    if (row.dataset.loaded === '1') return;
+    try {
+      const res = await fetch(row.dataset.detailUrl, { headers: { Accept: 'application/json' } });
+      if (!res.ok) throw new Error('fetch fail');
+      const data = await res.json();
+      renderActionPanel(row, body, data);
+      row.dataset.loaded = '1';
+    } catch (e) {
+      body.innerHTML = '<div class="empty"><b>정보를 불러오지 못했습니다.</b></div>';
+    }
+  };
+
+  // ─── 액션 패널 렌더링 ──────────────────────────────
+  function renderActionPanel(row, body, data) {
+    const custCode = row.dataset.code;
+    const custName = row.dataset.name;
+    const plantCode = data.plant_code || '';
+    const products = data.products || [];
+    const dmMsg    = data.dm_message || '';
+
+    // 오늘 / 1개월 후 기본 날짜
+    const today = new Date();
+    const dateStr = d => d.toISOString().slice(0, 10);
+    const d1 = dateStr(today);
+    const d2 = dateStr(new Date(today.getFullYear(), today.getMonth() + 1, today.getDate()));
+
+    body.innerHTML = '';
+
+    // ── 라디오 선택 ────────────────────────────────────
+    const radioGroup = document.createElement('div');
+    radioGroup.className = 'action-radio-group';
+    const uid = custCode;
+    radioGroup.innerHTML = `
+      <label><input type="radio" name="act_${uid}" value="dm_only" checked> 💬 단순 DM 발송</label>
+      <label><input type="radio" name="act_${uid}" value="price_dm"> 💰 고객별판가 설정 후 DM 발송</label>
+    `;
+    body.appendChild(radioGroup);
+
+    // ── 단순 DM 패널 ───────────────────────────────────
+    const dmPanel = document.createElement('div');
+    dmPanel.className = 'action-section';
+    dmPanel.id = `dmPanel_${uid}`;
+    dmPanel.innerHTML = `
+      <div class="action-section-title">DM 메시지</div>
+      <textarea class="dm-preview-area" id="dmText_${uid}" rows="7">${dmMsg}</textarea>
+      <div style="margin-top:.5rem;display:flex;gap:.5rem;align-items:center;">
+        <button class="action-send-btn" onclick="sendDmOnly('${custCode}','${custName.replace(/'/g,"\\'")}','${brandCode}','${brandName.replace(/'/g,"\\'")}',this)">
+          💬 DM 발송
+        </button>
+        <span id="dmResult_${uid}" class="send-result" style="display:none;"></span>
+      </div>
+    `;
+    body.appendChild(dmPanel);
+
+    // ── 판가설정 패널 ──────────────────────────────────
+    const pricePanel = document.createElement('div');
+    pricePanel.className = 'action-section';
+    pricePanel.id = `pricePanel_${uid}`;
+    pricePanel.style.display = 'none';
+
+    // 날짜 행
+    const dateRow = document.createElement('div');
+    dateRow.className = 'price-date-row';
+    dateRow.innerHTML = `
+      <div class="action-section-title" style="margin:0 .5rem 0 0;">적용기간</div>
+      <label>시작 <input type="date" id="dateFrom_${uid}" value="${d1}"></label>
+      <label>종료 <input type="date" id="dateTo_${uid}"   value="${d2}"></label>
+      <span style="font-size:.75rem;color:#6b7280;">플랜트: ${plantCode || '미확인'}</span>
+    `;
+    pricePanel.appendChild(dateRow);
+
+    // 가격 테이블
+    const tbl = document.createElement('table');
+    tbl.className = 'price-table';
+    tbl.innerHTML = `<thead><tr>
+      <th>상품코드</th><th>상품명</th><th>현재GP%</th>
+      <th>현재단가(₩)</th><th>원가(₩)</th><th>설정판가(₩)</th><th>목표GP%</th>
+    </tr></thead>`;
+    const tbody = document.createElement('tbody');
+
+    products.forEach((p, i) => {
+      const pid       = `${uid}_${i}`;
+      const gp        = parseFloat(p.gp_pct    || 0).toFixed(1);
+      const unitPrice = parseInt(p.unit_price  || 0, 10);
+      const unitCost  = parseInt(p.unit_cost   || 0, 10);
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td style="font-size:.72rem;color:#6b7280;">${p.product_code || ''}</td>
+        <td style="text-align:left;font-size:.78rem;">${p.product_name || p.product_code || ''}</td>
+        <td><span class="gp-chip neutral">${gp}%</span></td>
+        <td style="color:#6b7280;font-size:.78rem;">${unitPrice ? unitPrice.toLocaleString() : '-'}</td>
+        <td><input type="number" id="cost_${pid}" value="${unitCost || ''}" placeholder="원가" min="0" step="1"
+             oninput="recalcFromCost('${pid}')" class="${unitCost ? '' : 'stale'}"></td>
+        <td><input type="number" id="price_${pid}" value="${unitPrice || ''}" placeholder="판가" min="0" step="1"
+             oninput="recalcFromPrice('${pid}')" data-matnr="${p.product_code||''}"></td>
+        <td><input type="number" id="gptarget_${pid}" placeholder="GP%" min="0" max="99.9" step="0.1"
+             oninput="recalcFromGp('${pid}')" class="derived"></td>
+      `;
+      tbody.appendChild(tr);
+      // 단가/원가 모두 있으면 즉시 GP% 계산
+      if (unitCost > 0 && unitPrice > 0) {
+        setTimeout(() => window.recalcFromPrice(pid), 0);
+      }
+    });
+    tbl.appendChild(tbody);
+    pricePanel.appendChild(tbl);
+
+    // DM 메시지 미리보기 (판가 설정 모드)
+    pricePanel.innerHTML += `
+      <div class="action-section-title">DM 메시지</div>
+      <textarea class="dm-preview-area" id="priceDmText_${uid}" rows="5">${dmMsg}</textarea>
+      <div style="margin-top:.5rem;display:flex;gap:.5rem;align-items:center;">
+        <button class="action-send-btn price-send"
+            onclick="sendPriceDm('${uid}','${custCode}','${custName.replace(/'/g,"\\'")}','${brandCode}','${brandName.replace(/'/g,"\\'")}','${plantCode}',this)">
+          💰 판가 적용 + DM 발송
+        </button>
+        <span id="priceResult_${uid}" class="send-result" style="display:none;"></span>
+      </div>
+    `;
+    body.appendChild(pricePanel);
+
+    // 라디오 토글
+    radioGroup.querySelectorAll('input[type=radio]').forEach(radio => {
+      radio.addEventListener('change', () => {
+        const isDm = radio.value === 'dm_only';
+        dmPanel.style.display    = isDm ? '' : 'none';
+        pricePanel.style.display = isDm ? 'none' : '';
+      });
+    });
+  }
+
+  // ─── 상호계산 (판가 ↔ GP%, 원가 기준) ──────────────
+  window.recalcFromPrice = function(pid) {
+    const cost  = parseFloat(document.getElementById(`cost_${pid}`)?.value || '');
+    const price = parseFloat(document.getElementById(`price_${pid}`)?.value || '');
+    const gpEl  = document.getElementById(`gptarget_${pid}`);
+    if (!gpEl) return;
+    if (!isNaN(cost) && !isNaN(price) && price > 0) {
+      gpEl.value = ((price - cost) / price * 100).toFixed(1);
+      gpEl.className = 'derived';
+    } else {
+      gpEl.value = '';
+      gpEl.className = 'stale';
+    }
+  };
+
+  window.recalcFromGp = function(pid) {
+    const cost = parseFloat(document.getElementById(`cost_${pid}`)?.value || '');
+    const gp   = parseFloat(document.getElementById(`gptarget_${pid}`)?.value || '');
+    const priceEl = document.getElementById(`price_${pid}`);
+    if (!priceEl) return;
+    if (!isNaN(cost) && !isNaN(gp) && gp < 100) {
+      priceEl.value = Math.round(cost / (1 - gp / 100));
+      priceEl.className = 'derived';
+    } else {
+      priceEl.value = '';
+      priceEl.className = 'stale';
+    }
+  };
+
+  window.recalcFromCost = function(pid) {
+    // 원가가 바뀌면: 판가가 있으면 GP% 재계산, GP%가 있으면 판가 재계산
+    const cost  = parseFloat(document.getElementById(`cost_${pid}`)?.value || '');
+    const price = parseFloat(document.getElementById(`price_${pid}`)?.value || '');
+    const gp    = parseFloat(document.getElementById(`gptarget_${pid}`)?.value || '');
+    if (!isNaN(price) && price > 0 && !isNaN(cost)) {
+      window.recalcFromPrice(pid);
+    } else if (!isNaN(gp) && !isNaN(cost)) {
+      window.recalcFromGp(pid);
+    }
+  };
+
+  // ─── 단순 DM 발송 ──────────────────────────────────
+  window.sendDmOnly = async function(custCode, custName, brandCode, brandName, btn) {
+    const uid = custCode;
+    const message = document.getElementById(`dmText_${uid}`)?.value || '';
+    const resultEl = document.getElementById(`dmResult_${uid}`);
+    btn.disabled = true; btn.textContent = '발송 중...';
+    try {
+      const res = await fetch('/portal/dm-send-with-price', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customer_code: custCode, customer_name: custName,
+          brand_code: brandCode, brand_name: brandName,
+          action_type: 'dm_only', dm_message: message, price_items: [],
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        resultEl.textContent = '✅ DM 발송 완료';
+        resultEl.className = 'send-result ok';
+      } else {
+        resultEl.textContent = '❌ ' + (data.error || '발송 실패');
+        resultEl.className = 'send-result err';
+      }
+    } catch (e) {
+      resultEl.textContent = '❌ 네트워크 오류';
+      resultEl.className = 'send-result err';
+    }
+    resultEl.style.display = '';
+    btn.disabled = false; btn.textContent = '💬 DM 발송';
+  };
+
+  // ─── 판가 설정 + DM 발송 ──────────────────────────
+  window.sendPriceDm = async function(uid, custCode, custName, brandCode, brandName, plantCode, btn) {
+    const message  = document.getElementById(`priceDmText_${uid}`)?.value || '';
+    const dateFrom = document.getElementById(`dateFrom_${uid}`)?.value?.replace(/-/g,'') || '';
+    const dateTo   = document.getElementById(`dateTo_${uid}`)?.value?.replace(/-/g,'') || '';
+    const resultEl = document.getElementById(`priceResult_${uid}`);
+
+    // 판가 입력 행 수집
+    const priceItems = [];
+    document.querySelectorAll(`[id^="price_${uid}_"]`).forEach(el => {
+      const i   = el.id.replace(`price_${uid}_`, '');
+      const val = parseFloat(el.value || '');
+      const matnr = el.dataset.matnr || '';
+      if (!isNaN(val) && val > 0 && matnr) {
+        priceItems.push({ plant: plantCode, kunnr: custCode, matnr, price: val, date_from: dateFrom, date_to: dateTo });
+      }
+    });
+
+    if (priceItems.length === 0) {
+      resultEl.textContent = '❌ 설정판가를 1건 이상 입력하세요.';
+      resultEl.className = 'send-result err';
+      resultEl.style.display = '';
+      return;
+    }
+
+    btn.disabled = true; btn.textContent = '처리 중...';
+    try {
+      const res = await fetch('/portal/dm-send-with-price', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customer_code: custCode, customer_name: custName,
+          brand_code: brandCode, brand_name: brandName,
+          action_type: 'price_and_dm', dm_message: message,
+          price_items: priceItems,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        resultEl.textContent = `✅ 판가 ${data.sap_saved_count || 0}건 적용 + DM 발송 완료`;
+        resultEl.className = 'send-result ok';
+      } else {
+        resultEl.textContent = '❌ ' + (data.error || '처리 실패');
+        resultEl.className = 'send-result err';
+      }
+    } catch (e) {
+      resultEl.textContent = '❌ 네트워크 오류';
+      resultEl.className = 'send-result err';
+    }
+    resultEl.style.display = '';
+    btn.disabled = false; btn.textContent = '💰 판가 적용 + DM 발송';
+  };
+
+})();
+</script>
+{% endif %}
+{% endblock %}

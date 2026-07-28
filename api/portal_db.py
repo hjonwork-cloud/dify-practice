@@ -53,6 +53,9 @@ def init_db() -> None:
                 action_type TEXT,
                 product_names TEXT,
                 message TEXT,
+                price_items_json TEXT,
+                sap_saved_count INTEGER DEFAULT 0,
+                sap_result_json TEXT,
                 status TEXT NOT NULL DEFAULT 'test_logged',
                 created_at TEXT NOT NULL
             );
@@ -73,6 +76,16 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_action_created ON promotion_action_logs(created_at DESC);
             """
         )
+        # 기존 DB 하위호환 컬럼 마이그레이션 (없으면 추가)
+        for col, typedef in [
+            ("price_items_json", "TEXT"),
+            ("sap_saved_count",  "INTEGER DEFAULT 0"),
+            ("sap_result_json",  "TEXT"),
+        ]:
+            try:
+                conn.execute(f"ALTER TABLE dm_send_logs ADD COLUMN {col} {typedef}")
+            except Exception:
+                pass  # 이미 존재하면 무시
 
 
 def record_login(emp_code: str, emp_name: str = "", team: str = "", ip: str = "", user_agent: str = "", success: bool = True, reason: str = "") -> None:
@@ -104,6 +117,39 @@ def record_dm_log(*, emp_code: str, emp_name: str, team: str, brand_code: str, b
             (emp_code, emp_name, brand_name, customer_code, customer_name, action, detail, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (emp_code, emp_name, brand_name, customer_code, customer_name, "dm_test_logged", product_names, _now()),
+        )
+
+
+def record_dm_log_v2(
+    *, emp_code: str, emp_name: str, team: str,
+    brand_code: str, brand_name: str,
+    customer_code: str, customer_name: str,
+    action_type: str, product_names: str, message: str,
+    price_items_json: str = "",
+    sap_saved_count: int = 0,
+    sap_result_json: str = "",
+    status: str = "dm_only_sent",
+) -> None:
+    """판가 설정 정보 포함 DM 로그 저장 (v2)."""
+    init_db()
+    with _connect() as conn:
+        conn.execute(
+            """INSERT INTO dm_send_logs
+            (emp_code, emp_name, team, brand_code, brand_name, customer_code, customer_name,
+             action_type, product_names, message,
+             price_items_json, sap_saved_count, sap_result_json,
+             status, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (emp_code, emp_name, team, brand_code, brand_name, customer_code, customer_name,
+             action_type, product_names, message,
+             price_items_json, sap_saved_count, sap_result_json,
+             status, _now()),
+        )
+        conn.execute(
+            """INSERT INTO promotion_action_logs
+            (emp_code, emp_name, brand_name, customer_code, customer_name, action, detail, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (emp_code, emp_name, brand_name, customer_code, customer_name, action_type, product_names, _now()),
         )
 
 

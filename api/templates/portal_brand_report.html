@@ -7,17 +7,27 @@
 @keyframes spin{to{transform:rotate(360deg);}}
 .portal-loading-box p{font-size:1.1rem;color:#111;margin:.5rem 0;}
 .portal-loading-box small{color:#6b7280;line-height:1.6;}
+.portal-scatter-section{margin:1.25rem 0;}
+.scatter-header{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;flex-wrap:wrap;margin-bottom:.75rem;}
+.scatter-stats-grid{display:flex;flex-wrap:wrap;gap:.5rem .75rem;font-size:.8rem;align-items:center;}
+.scatter-stat{background:#f3f4f6;border-radius:.4rem;padding:.2rem .6rem;white-space:nowrap;}
+.scatter-stat b{color:#16a34a;}
+.scatter-stat.danger b{color:#dc2626;}
+.scatter-canvas-wrap{position:relative;height:240px;}
 </style>
 {% if not report.brand %}
 <div class="portal-heading"><div><p class="eyebrow">PROPOSAL SOLUTION</p><h1>브랜드 데이터 없음</h1><p>로그인 계정의 담당 브랜드 데이터를 찾을 수 없습니다.</p></div></div>
 {% else %}
 <div class="portal-heading">
   <div><p class="eyebrow">GENERIC PRODUCT PROPOSAL</p><h1>{{ report.brand.brand_name }}</h1><p>범용상품 제안 솔루션입니다. 브랜드 전체 매출은 최근 3개월, 가맹점별 상품 구성비는 전월({{ report.prev_ym }}) 기준입니다.</p></div>
-  <form method="get" action="/portal/brand-report" class="portal-brand-picker">
-    <select name="brand" onchange="this.form.submit()">
-      {% for b in report.brands %}<option value="{{ b.brand_name }}" {% if b.brand_name == report.brand.brand_name %}selected{% endif %}>{{ b.brand_name }}</option>{% endfor %}
-    </select>
-  </form>
+  <div style="display:flex;gap:.75rem;align-items:center;flex-wrap:wrap;">
+    <a href="/portal/brand-report/action?brand={{ report.brand.brand_name|urlencode }}" class="btn portal-primary">🎯 상세·액션 보기</a>
+    <form method="get" action="/portal/brand-report" class="portal-brand-picker">
+      <select name="brand" onchange="this.form.submit()">
+        {% for b in report.brands %}<option value="{{ b.brand_name }}" {% if b.brand_name == report.brand.brand_name %}selected{% endif %}>{{ b.brand_name }}</option>{% endfor %}
+      </select>
+    </form>
+  </div>
 </div>
 
 <section class="portal-metric-grid compact">
@@ -57,6 +67,15 @@
       <small>최대값은 브랜드 평균 범용상품 비중({{ report.threshold_max }}%)으로 고정됩니다.</small>
     </form>
   </article>
+</section>
+
+<section class="portal-panel portal-scatter-section">
+  <div class="scatter-header">
+    <div><p class="eyebrow">DISTRIBUTION</p><h2>가맹점 범용상품 비중 분포</h2>
+    <p>X: 매출액(백만) &nbsp;·&nbsp; Y: 범용비중(%) &nbsp;·&nbsp; <span style="color:#dc2626;">●</span> 제안대상 &nbsp; <span style="color:#16a34a;">●</span> 기준충족 &nbsp;· 회색점선: 브랜드평균</p></div>
+    <div class="scatter-stats-grid" id="scatterStats"></div>
+  </div>
+  <div class="scatter-canvas-wrap"><canvas id="scatterChart"></canvas></div>
 </section>
 
 <div class="portal-tabs"><span class="active">고객 프로모션 제안</span><span>매출 분석</span><span>CM</span><span>채권</span><span>마스터</span></div>
@@ -226,6 +245,123 @@
       sortDirections[key] = dir === 'desc' ? 'asc' : 'desc';
       targetPager.render(1);
     });
+  });
+})();
+</script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+<script>
+(function(){
+  const customers = {{ report.customers | tojson }};
+  const brandAvg  = {{ report.brand_avg }};
+  const threshold = {{ report.threshold }};
+
+  // ── 통계 계산 ────────────────────────────────────────
+  const ratios = customers.map(c => c.generic_ratio).sort((a,b) => a-b);
+  const n = ratios.length;
+  function pct(arr, p){ const idx = Math.max(0, Math.min(arr.length-1, Math.round(p/100*(arr.length-1)))); return arr[idx]; }
+  const avg = n ? (ratios.reduce((a,b)=>a+b,0)/n).toFixed(1) : 0;
+  const std = n ? Math.sqrt(ratios.reduce((s,v)=>s+(v-avg)**2,0)/n).toFixed(1) : 0;
+  const p25 = pct(ratios,25), p75 = pct(ratios,75);
+  const mn  = ratios[0] ?? 0, mx = ratios[n-1] ?? 0;
+  const targetCount = customers.filter(c => c.is_target).length;
+
+  // ── 통계 배지 렌더링 ────────────────────────────────
+  const statsEl = document.getElementById('scatterStats');
+  if (statsEl && n > 0) {
+    [
+      ['N', n + '개'],
+      ['평균', avg + '%'],
+      ['중위', pct(ratios,50) + '%'],
+      ['표준편차', '±' + std + '%'],
+      ['25%ile', p25 + '%'],
+      ['75%ile', p75 + '%'],
+      ['범위', mn + '~' + mx + '%'],
+      ['제안대상', targetCount + '개 (' + Math.round(targetCount/n*100) + '%)', true],
+    ].forEach(([label, val, danger]) => {
+      const d = document.createElement('div');
+      d.className = 'scatter-stat' + (danger ? ' danger' : '');
+      d.innerHTML = label + ' <b>' + val + '</b>';
+      statsEl.appendChild(d);
+    });
+  }
+
+  // ── Scatter 차트 ────────────────────────────────────────
+  const canvas = document.getElementById('scatterChart');
+  if (!canvas || typeof Chart === 'undefined' || !n) return;
+
+  const targets = customers.filter(c => c.is_target);
+  const normals = customers.filter(c => !c.is_target);
+
+  new Chart(canvas, {
+    type: 'scatter',
+    data: {
+      datasets: [
+        {
+          label: '기준 미달 (제안대상)',
+          data: targets.map(c => ({ x: c.sales_m, y: c.generic_ratio, name: c.customer_name })),
+          backgroundColor: 'rgba(220,38,38,.65)',
+          pointRadius: 5, pointHoverRadius: 7,
+        },
+        {
+          label: '기준 충족',
+          data: normals.map(c => ({ x: c.sales_m, y: c.generic_ratio, name: c.customer_name })),
+          backgroundColor: 'rgba(22,163,74,.55)',
+          pointRadius: 4, pointHoverRadius: 6,
+        },
+        {
+          label: '브랜드 평균 (' + brandAvg + '%)',
+          data: [],  // annotation via plugin-free workaround: constant-line dataset
+          type: 'line',
+          borderColor: '#6b7280',
+          borderDash: [5,4],
+          borderWidth: 1.5,
+          pointRadius: 0,
+          fill: false,
+          // 실제 선은 afterDraw 플러그인으로 대체
+        },
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'top', labels: { font: { size: 11 } } },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              const d = ctx.raw;
+              return (d.name || '') + '  |  매출 ' + d.x + '백만  범용 ' + d.y + '%';
+            }
+          }
+        },
+      },
+      scales: {
+        x: { title: { display: true, text: '매출액 (백만원)' }, ticks: { font: { size: 10 } } },
+        y: { title: { display: true, text: '범용상품 비중 (%)' }, min: 0, max: 100, ticks: { font: { size: 10 } } },
+      },
+    },
+    plugins: [{
+      id: 'refLines',
+      afterDraw(chart) {
+        const { ctx, chartArea: ca, scales: { x: xS, y: yS } } = chart;
+        const drawHLine = (yVal, color, dash, label) => {
+          const yPx = yS.getPixelForValue(yVal);
+          if (yPx < ca.top || yPx > ca.bottom) return;
+          ctx.save();
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 1.5;
+          ctx.setLineDash(dash);
+          ctx.beginPath(); ctx.moveTo(ca.left, yPx); ctx.lineTo(ca.right, yPx); ctx.stroke();
+          if (label) {
+            ctx.fillStyle = color; ctx.font = '10px sans-serif'; ctx.setLineDash([]);
+            ctx.fillText(label, ca.left + 4, yPx - 3);
+          }
+          ctx.restore();
+        };
+        drawHLine(brandAvg,  '#9ca3af', [5,4], '평균 ' + brandAvg + '%');
+        drawHLine(threshold, '#f59e0b', [4,3], '기준 ' + threshold + '%');
+      }
+    }]
   });
 })();
 </script>

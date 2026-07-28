@@ -1,17 +1,37 @@
-﻿"""
+"""
 대시보드 요약 테이블 사전 계산 모듈.
 - run_refresh(): Azure 서버에서 main._safe_query 사용
 - read_dashboard_from_table(): 요약 테이블 단순 SELECT
+- read_brand_report_from_table(): 브랜드 리포트 사전계산 데이터 조회
 테이블:
-  h_hmfo_fsi_dm.gd_rst_ing.portal_emp_dashboard   (직원별 지표)
-  h_hmfo_fsi_dm.gd_rst_ing.portal_emp_brands       (직원별 브랜드)
+  h_hmfo_fsi_dm.gd_rst_ing.portal_emp_dashboard          (직원별 지표)
+  h_hmfo_fsi_dm.gd_rst_ing.portal_emp_brands             (직원별 브랜드)
+  h_hmfo_fsi_dm.gd_rst_ing.portal_brand_monthly          (브랜드 월별 매출)
+  h_hmfo_fsi_dm.gd_rst_ing.portal_brand_summary          (브랜드 요약 통계)
+  h_hmfo_fsi_dm.gd_rst_ing.portal_brand_customer_stats   (가맹점별 범용비중)
 """
 from __future__ import annotations
 import logging, time
 logger = logging.getLogger(__name__)
 
-T_DASH   = "h_hmfo_fsi_dm.gd_rst_ing.portal_emp_dashboard"
-T_BRANDS = "h_hmfo_fsi_dm.gd_rst_ing.portal_emp_brands"
+T_DASH          = "h_hmfo_fsi_dm.gd_rst_ing.portal_emp_dashboard"
+T_BRANDS        = "h_hmfo_fsi_dm.gd_rst_ing.portal_emp_brands"
+T_BRAND_MONTHLY = "h_hmfo_fsi_dm.gd_rst_ing.portal_brand_monthly"
+T_BRAND_SUMMARY = "h_hmfo_fsi_dm.gd_rst_ing.portal_brand_summary"
+T_BRAND_CUST    = "h_hmfo_fsi_dm.gd_rst_ing.portal_brand_customer_stats"
+
+
+def _shift_ym(ym: str, months: int) -> str:
+    """YM 문자열 (예: '202606') 을 N개월 이동."""
+    if not ym or len(ym) < 6:
+        return ym
+    y, m = int(ym[:4]), int(ym[4:6])
+    m += months
+    while m > 12:
+        m -= 12; y += 1
+    while m < 1:
+        m += 12; y -= 1
+    return f"{y}{m:02d}"
 
 
 def run_refresh(force: bool = False) -> dict:
@@ -310,6 +330,116 @@ def run_refresh(force: bool = False) -> dict:
     except Exception as e:
         return {"status": "error", "reason": str(e), "step": "emp_brands"}
 
+    # ── Step 3: 브랜드 월별 매출 (T_BRAND_MONTHLY) ─────────────────────────
+    six_months_ago = _shift_ym(latest_ym, -5)  # 최근 6개월
+    brand_monthly_sql = f"""
+    CREATE OR REPLACE TABLE {T_BRAND_MONTHLY} AS
+    SELECT `ZC본부` AS brand_code, `ZC본부명` AS brand_name,
+           `년월` AS ym, ROUND(SUM(`매출액`)/10000) AS sales_m,
+           CURRENT_TIMESTAMP() AS updated_at
+    FROM {main.T_MAIN}
+    WHERE `사업부명` = '외식식재사업부'
+      AND `ZC본부` IS NOT NULL AND {_zc8}
+      AND `년월` >= '{six_months_ago}'
+    GROUP BY `ZC본부`, `ZC본부명`, `년월`
+    """
+    try:
+        main._safe_query(brand_monthly_sql, raw=True)
+        logger.info(f"[refresh] {T_BRAND_MONTHLY} 생성 완료")
+    except Exception as e:
+        logger.warning(f"[refresh] {T_BRAND_MONTHLY} 생성 실패 (무시): {e}")
+
+    # ── Step 4: 브랜드 요약 통계 (T_BRAND_SUMMARY) ─────────────────────────
+    brand_summary_sql = f"""
+    CREATE OR REPLACE TABLE {T_BRAND_SUMMARY} AS
+    SELECT
+        `ZC본부` AS brand_code,
+        `ZC본부명` AS brand_name,
+        '{prev_ym}' AS prev_ym,
+        COUNT(DISTINCT `거래처`) AS customer_count,
+        ROUND(SUM(`매출액`)/10000) AS brand_total_sales_m,
+        CASE WHEN SUM(CASE WHEN `자재그룹명` IS NOT NULL THEN `매출액` ELSE 0 END) = 0 THEN 0.0
+             ELSE ROUND(
+                 SUM(CASE WHEN `자재그룹명` IS NOT NULL AND COALESCE(`자재그룹명`,'') <> 'FC전용상품' THEN `매출액` ELSE 0 END)
+               / SUM(CASE WHEN `자재그룹명` IS NOT NULL THEN `매출액` ELSE 0 END) * 100, 1)
+        END AS brand_avg,
+        CASE WHEN SUM(CASE WHEN `자재그룹명` IS NOT NULL AND COALESCE(`자재그룹명`,'') <> 'FC전용상품' THEN `매출액` ELSE 0 END) = 0 THEN 0.0
+             ELSE ROUND((
+                 SUM(CASE WHEN `자재그룹명` IS NOT NULL AND COALESCE(`자재그룹명`,'') <> 'FC전용상품' THEN `매출액` ELSE 0 END)
+               - SUM(CASE WHEN `자재그룹명` IS NOT NULL AND COALESCE(`자재그룹명`,'') <> 'FC전용상품' THEN COALESCE(`매출원가`,0) ELSE 0 END)
+             ) / SUM(CASE WHEN `자재그룹명` IS NOT NULL AND COALESCE(`자재그룹명`,'') <> 'FC전용상품' THEN `매출액` ELSE 0 END) * 100, 1)
+        END AS generic_gp_rate,
+        CURRENT_TIMESTAMP() AS updated_at
+    FROM {main.T_MAIN}
+    WHERE `년월` = '{prev_ym}' AND `사업부명` = '외식식재사업부'
+      AND `ZC본부` IS NOT NULL AND {_zc8}
+    GROUP BY `ZC본부`, `ZC본부명`
+    """
+    try:
+        main._safe_query(brand_summary_sql, raw=True)
+        logger.info(f"[refresh] {T_BRAND_SUMMARY} 생성 완료")
+    except Exception as e:
+        logger.warning(f"[refresh] {T_BRAND_SUMMARY} 생성 실패 (무시): {e}")
+
+    # ── Step 5: 가맹점별 범용비중 (T_BRAND_CUST) ───────────────────────────
+    _generic_ratio_expr = """
+        CASE WHEN SUM(CASE WHEN `자재그룹명` IS NOT NULL THEN `매출액` ELSE 0 END) = 0 THEN 0.0
+             ELSE ROUND(
+                 SUM(CASE WHEN `자재그룹명` IS NOT NULL AND COALESCE(`자재그룹명`,'') <> 'FC전용상품' THEN `매출액` ELSE 0 END)
+               / SUM(CASE WHEN `자재그룹명` IS NOT NULL THEN `매출액` ELSE 0 END) * 100, 1)
+        END"""
+    _sales_exprs = f"""
+        SUM(`매출액`) AS sales,
+        SUM(CASE WHEN COALESCE(`자재그룹명`,'') = 'FC전용상품' THEN `매출액` ELSE 0 END) AS dedicated_sales,
+        SUM(CASE WHEN `자재그룹명` IS NOT NULL AND COALESCE(`자재그룹명`,'') <> 'FC전용상품' THEN `매출액` ELSE 0 END) AS generic_sales,
+        {_generic_ratio_expr} AS generic_ratio,
+        MAX(`플랜트`) AS plant_code"""
+    _where_brand = f"""
+        WHERE `년월` = '{prev_ym}' AND `사업부명` = '외식식재사업부'
+          AND `ZC본부` IS NOT NULL AND {_zc8}"""
+
+    brand_cust_sql = f"""
+    CREATE OR REPLACE TABLE {T_BRAND_CUST} AS
+    WITH
+    emp_data AS (
+        SELECT `영업사원` AS emp_code, `ZC본부` AS brand_code, `ZC본부명` AS brand_name,
+               `거래처` AS customer_code, MAX(`거래처명`) AS customer_name,
+               {_sales_exprs}
+        FROM {main.T_MAIN}
+        {_where_brand}
+        GROUP BY `영업사원`, `ZC본부`, `ZC본부명`, `거래처`
+        HAVING SUM(`매출액`) > 0
+    ),
+    leader_data AS (
+        SELECT {_leader_case} AS emp_code, `ZC본부` AS brand_code, `ZC본부명` AS brand_name,
+               `거래처` AS customer_code, MAX(`거래처명`) AS customer_name,
+               {_sales_exprs}
+        FROM {main.T_MAIN}
+        {_where_brand} AND `지점명` IN ({_leaders_in})
+        GROUP BY `지점명`, `ZC본부`, `ZC본부명`, `거래처`
+        HAVING SUM(`매출액`) > 0
+    ),
+    admin_data AS (
+        SELECT '{_admin_code}' AS emp_code, `ZC본부` AS brand_code, `ZC본부명` AS brand_name,
+               `거래처` AS customer_code, MAX(`거래처명`) AS customer_name,
+               {_sales_exprs}
+        FROM {main.T_MAIN}
+        {_where_brand}
+        GROUP BY `ZC본부`, `ZC본부명`, `거래처`
+        HAVING SUM(`매출액`) > 0
+    )
+    SELECT *, '{prev_ym}' AS prev_ym, CURRENT_TIMESTAMP() AS updated_at FROM emp_data
+    UNION ALL
+    SELECT *, '{prev_ym}' AS prev_ym, CURRENT_TIMESTAMP() AS updated_at FROM leader_data WHERE emp_code IS NOT NULL
+    UNION ALL
+    SELECT *, '{prev_ym}' AS prev_ym, CURRENT_TIMESTAMP() AS updated_at FROM admin_data
+    """
+    try:
+        main._safe_query(brand_cust_sql, raw=True)
+        logger.info(f"[refresh] {T_BRAND_CUST} 생성 완료")
+    except Exception as e:
+        logger.warning(f"[refresh] {T_BRAND_CUST} 생성 실패 (무시): {e}")
+
     try:
         import portal_router
         portal_router._cache_clear_all()
@@ -371,4 +501,151 @@ def read_dashboard_from_table(emp_code: str) -> dict | None:
         }
     except Exception as e:
         logger.warning(f"[refresh] 요약 테이블 조회 실패 ({emp_code}): {e}")
+        return None
+
+
+def read_brand_report_from_table(
+    emp_code: str,
+    brand_name: str,
+    threshold_pct: float | None = None,
+    customer_page: int = 1,
+    target_page: int = 1,
+) -> dict | None:
+    """
+    사전 계산 테이블에서 brand_report() 결과를 조회.
+    T_BRAND_SUMMARY + T_BRAND_CUST + T_BRAND_MONTHLY 조합.
+    데이터 없으면 None 반환 → brand_report() fallback 실시간 처리.
+    """
+    import main
+    try:
+        # ── 1. 브랜드 요약 ──────────────────────────────────────────
+        summary_rows = main._safe_query(
+            f"SELECT * FROM {T_BRAND_SUMMARY} WHERE brand_name = '{brand_name}' LIMIT 1",
+            raw=True,
+        )
+        if not summary_rows:
+            return None
+        s = summary_rows[0]
+        prev_ym = str(s.get("prev_ym") or "")
+        brand_avg = float(s.get("brand_avg") or 0)
+        generic_gp_rate = float(s.get("generic_gp_rate") or 0)
+        brand_total_sales_m = int(s.get("brand_total_sales_m") or 0)
+        brand_code = str(s.get("brand_code") or "")
+
+        # ── 2. 월별 매출 (최근 3개월) ──────────────────────────────
+        latest_ym = str((main._safe_query(
+            f"SELECT MAX(ym) AS ym FROM {T_BRAND_MONTHLY} WHERE brand_name = '{brand_name}'",
+            raw=True,
+        ) or [{}])[0].get("ym") or "")
+        months_3 = [latest_ym, _shift_ym(latest_ym, -1), _shift_ym(latest_ym, -2)]
+        months_3 = [m for m in months_3 if m]
+        in_months = ",".join(f"'{m}'" for m in months_3)
+        monthly_rows = main._safe_query(
+            f"SELECT ym, sales_m FROM {T_BRAND_MONTHLY}"
+            f" WHERE brand_name = '{brand_name}'"
+            f"   AND ym IN ({in_months})"
+            f" ORDER BY ym",
+            raw=True,
+        ) or []
+        monthly_sales = [{"ym": str(r.get("ym") or ""), "sales_m": int(r.get("sales_m") or 0)} for r in monthly_rows]
+        current_month_sales_m = next(
+            (int(r.get("sales_m") or 0) for r in monthly_sales if str(r.get("ym")) == latest_ym), 0
+        )
+
+        # ── 3. 가맹점별 범용비중 ────────────────────────────────────
+        cust_rows = main._safe_query(
+            f"SELECT customer_code, customer_name, plant_code,"
+            f"       sales, dedicated_sales, generic_sales, generic_ratio"
+            f" FROM {T_BRAND_CUST}"
+            f" WHERE emp_code = '{emp_code}' AND brand_name = '{brand_name}'"
+            f" ORDER BY sales DESC",
+            raw=True,
+        ) or []
+        if not cust_rows:
+            return None  # 해당 emp_code + brand_name 데이터 없음 → fallback
+
+        # ── 4. threshold 계산 ───────────────────────────────────────
+        threshold_max = round(max(0.0, brand_avg), 1)
+        threshold = round(min(threshold_max, max(0.0, brand_avg if threshold_pct is None else float(threshold_pct))), 1)
+        target_ratio = min(0.999, max(0.0, brand_avg / 100.0))
+
+        # ── 5. 고객 목록 조합 ────────────────────────────────────────
+        def _money_m(v) -> int:
+            return int(round(float(v or 0) / 10000))
+
+        customers = []
+        proposal_possible_raw = 0.0
+        for r in cust_rows:
+            sales = float(r.get("sales") or 0)
+            dedicated = float(r.get("dedicated_sales") or 0)
+            generic = float(r.get("generic_sales") or 0)
+            classified = max(0.0, dedicated + generic)
+            ratio = float(r.get("generic_ratio") or 0)
+            is_target = ratio < threshold
+            needed = 0.0
+            if is_target and target_ratio > 0 and classified > 0:
+                needed = max(0.0, (target_ratio * classified - generic) / (1.0 - target_ratio))
+                proposal_possible_raw += needed
+            customers.append({
+                "customer_code":          str(r.get("customer_code") or ""),
+                "customer_name":          str(r.get("customer_name") or ""),
+                "plant_code":             str(r.get("plant_code") or ""),
+                "sales_m":                _money_m(sales),
+                "dedicated_sales_m":      _money_m(dedicated),
+                "generic_sales_m":        _money_m(generic),
+                "generic_ratio":          ratio,
+                "dedicated_ratio":        round(max(0.0, 100.0 - ratio), 1),
+                "gap":                    round(ratio - brand_avg, 1),
+                "is_target":              is_target,
+                "proposal_possible_sales_m": _money_m(needed),
+            })
+
+        targets = [c for c in customers if c["is_target"]]
+        proposal_possible_sales_m = _money_m(proposal_possible_raw)
+        expected_profit_increase_m = int(round(proposal_possible_sales_m * (generic_gp_rate / 100.0)))
+
+        def _page(items, page, per=10):
+            total = len(items)
+            tp = max(1, (total + per - 1) // per)
+            p = min(max(1, int(page or 1)), tp)
+            s_ = (p - 1) * per
+            return items[s_:s_ + per], {
+                "page": p, "per_page": per, "total": total, "total_pages": tp,
+                "has_prev": p > 1, "has_next": p < tp,
+                "prev_page": max(1, p - 1), "next_page": min(tp, p + 1),
+                "start": s_ + 1 if total else 0, "end": min(total, s_ + per),
+            }
+
+        from portal_router import _is_team_leader, _leader_team, _brand_rows
+        customer_page_items, customer_pagination = _page(customers, customer_page)
+        target_page_items, target_pagination = _page(targets, target_page)
+
+        return {
+            "brand": {"brand_code": brand_code, "brand_name": brand_name},
+            "brands": _brand_rows(emp_code),
+            "latest_ym": latest_ym,
+            "prev_ym": prev_ym,
+            "period_months": months_3,
+            "monthly_sales": monthly_sales,
+            "brand_avg": brand_avg,
+            "brand_total_sales_m": current_month_sales_m or brand_total_sales_m,
+            "customers": customers,
+            "customer_page": customer_page_items,
+            "customer_pagination": customer_pagination,
+            "targets": targets,
+            "target_page": target_page_items,
+            "target_pagination": target_pagination,
+            "target_count": len(targets),
+            "is_fallback_targets": False,
+            "threshold": threshold,
+            "threshold_max": threshold_max,
+            "proposal_possible_sales_m": proposal_possible_sales_m,
+            "generic_gp_rate": generic_gp_rate,
+            "expected_profit_increase_m": expected_profit_increase_m,
+            "is_leader": _is_team_leader(emp_code),
+            "team_name": _leader_team(emp_code),
+            "_source": "precomputed",
+        }
+    except Exception as e:
+        logger.warning(f"[refresh] brand_report 사전계산 조회 실패 ({emp_code}, {brand_name}): {e}")
         return None

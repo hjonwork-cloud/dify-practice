@@ -17,6 +17,7 @@ from urllib.parse import parse_qs, quote
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+from pydantic import BaseModel
 
 import access_control
 import portal_db
@@ -680,6 +681,8 @@ def _recommend_products(brand_name: str, customer_code: str, months: list[str], 
                MAX(`자재명`) AS product_name,
                COUNT(DISTINCT `거래처`) AS adopter_count,
                SUM(`매출액`) AS sales,
+               SUM(COALESCE(`매출수량`, 0)) AS total_qty,
+               SUM(COALESCE(`매출원가`, 0)) AS total_cost,
                CASE WHEN SUM(`매출액`) = 0 THEN 0
                     ELSE (SUM(`매출액`) - SUM(COALESCE(`매출원가`, 0))) / SUM(`매출액`) END AS gp_rate
         FROM {main.T_MAIN}
@@ -694,7 +697,22 @@ def _recommend_products(brand_name: str, customer_code: str, months: list[str], 
         ORDER BY adopter_count DESC, gp_rate DESC, sales DESC
         LIMIT 5
     """)
-    return [{**r, "sales_m": _money_m(r.get("sales")), "gp_pct": _pct(r.get("gp_rate"))} for r in rows]
+    result = []
+    for r in rows:
+        sales      = float(r.get("sales") or 0)
+        total_qty  = float(r.get("total_qty") or 0)
+        total_cost = float(r.get("total_cost") or 0)
+        # 단가/원가 단위 계산 (수량 기준)
+        unit_price = round(sales / total_qty)       if total_qty > 0 else 0
+        unit_cost  = round(total_cost / total_qty)  if total_qty > 0 else 0
+        result.append({
+            **r,
+            "sales_m":    _money_m(sales),
+            "gp_pct":     _pct(r.get("gp_rate")),
+            "unit_price": unit_price,   # 평균 단가 (₩)
+            "unit_cost":  unit_cost,    # 평균 단가 원가 (₩)
+        })
+    return result
 
 
 def _dm_message(brand_name: str, customer: dict, brand_avg: float, products: list[dict]) -> str:
@@ -745,7 +763,23 @@ def brand_report(
     customer_page: int = 1,
     target_page: int = 1,
 ) -> dict:
+    # ── 사전계산 테이블 우선 조회 (hit 시 실시간 쿼리 생략) ──────────
     picked = _pick_brand(brand_name, emp_code)
+    if picked:
+        try:
+            from portal_refresh import read_brand_report_from_table
+            cached = read_brand_report_from_table(
+                emp_code,
+                str(picked.get("brand_name") or ""),
+                threshold_pct=threshold_pct,
+                customer_page=customer_page,
+                target_page=target_page,
+            )
+            if cached is not None:
+                return cached
+        except Exception:
+            pass  # fallback to live queries
+    # ── fallback: 실시간 쿼리 ─────────────────────────────────────────
     if not picked:
         return {
             "brand": None,
@@ -1269,13 +1303,42 @@ async def target_detail(request: Request, brand: str = "", customer_code: str = 
         raise HTTPException(status_code=404, detail="customer_not_found")
     bname = str((report.get("brand") or {}).get("brand_name") or brand)
     products = _recommend_products(bname, code, report.get("period_months") or [], user["emp_code"])
+
+    # plant_code: 사전계산 테이블 우선, fallback 실시간
+    plant_code = str(customer.get("plant_code") or "")
+    if not plant_code:
+        import main
+        prev_ym = report.get("prev_ym") or ""
+        _prows = _q(f"""
+            SELECT MAX(`플랜트`) AS plant_code
+            FROM {main.T_MAIN}
+            WHERE `거래처` = {_sql(code)} AND `년월` = {_sql(prev_ym)} LIMIT 1
+        """) if prev_ym else []
+        plant_code = str((_prows[0] or {}).get("plant_code") or "") if _prows else ""
+
     return JSONResponse(_json_safe({
         "customer_code": code,
         "customer_name": customer.get("customer_name") or "",
+        "plant_code": plant_code,
+        "brand_avg": float(report.get("brand_avg") or 0),
         "products": products,
         "product_names": ", ".join(str(p.get("product_name") or p.get("product_code") or "") for p in products),
         "dm_message": _dm_message(bname, customer, float(report.get("brand_avg") or 0), products),
     }))
+
+
+@router.get("/brand-report/action", response_class=HTMLResponse)
+async def brand_report_action_page(
+    request: Request,
+    brand: str = "",
+    threshold: float | None = None,
+    customer_page: int = 1,
+    target_page: int = 1,
+):
+    user = _require_user(request)
+    report = brand_report(brand or None, emp_code=user["emp_code"],
+                          threshold_pct=threshold, customer_page=customer_page, target_page=target_page)
+    return _render(request, "portal_brand_report_action.html", report=report)
 
 
 @router.post("/dm-log")
@@ -1284,6 +1347,80 @@ async def dm_log(request: Request):
     form = await _read_form(request)
     # DM 발송 기능 준비 중 - 로그 저장 제거
     return _redirect_msg("/portal/brand-report", brand=form.get("brand_name", ""))
+
+
+def _call_sap_upload(items: list[dict]) -> dict:
+    """SAP Bridge Agent (localhost:7788) 판가 등록 호출."""
+    import httpx, os
+    sap_url = os.getenv("SAP_BRIDGE_URL", "http://localhost:7788")
+    try:
+        r = httpx.post(
+            f"{sap_url}/sap/upload-price",
+            json={"items": items, "mode": "N"},
+            timeout=120,
+        )
+        return r.json()
+    except Exception as e:
+        return {"success": False, "error": str(e), "saved_count": 0}
+
+
+class _DmSendPayload(BaseModel):
+    customer_code: str
+    customer_name: str = ""
+    brand_code: str = ""
+    brand_name: str = ""
+    action_type: str = "dm_only"      # "dm_only" | "price_and_dm"
+    dm_message: str = ""
+    price_items: list[dict] = []      # [{plant,kunnr,matnr,price,date_from,date_to}]
+
+
+@router.post("/dm-send-with-price")
+async def dm_send_with_price(request: Request, body: _DmSendPayload):
+    import json as _json
+    user = _require_user(request)
+    emp = user["emp_code"]
+    emp_name = user.get("emp_name") or ""
+    team = user.get("team") or ""
+
+    sap_result: dict = {}
+    saved_count = 0
+
+    # ── SAP 판가 등록 ─────────────────────────────────
+    if body.action_type == "price_and_dm" and body.price_items:
+        sap_result = _call_sap_upload(body.price_items)
+        if not sap_result.get("success"):
+            return JSONResponse({
+                "success": False,
+                "error": f"SAP 판가 등록 실패: {sap_result.get('error') or sap_result.get('status_msg') or '알 수 없는 오류'}",
+                "sap_result": sap_result,
+            }, status_code=400)
+        saved_count = int(sap_result.get("saved_count") or 0)
+
+    # ── DM 로그 저장 ──────────────────────────────────
+    from portal_db import record_dm_log_v2
+    record_dm_log_v2(
+        emp_code=emp,
+        emp_name=emp_name,
+        team=team,
+        brand_code=body.brand_code,
+        brand_name=body.brand_name,
+        customer_code=body.customer_code,
+        customer_name=body.customer_name,
+        action_type=body.action_type,
+        product_names=", ".join(str(p.get("matnr") or "") for p in body.price_items) if body.price_items else "",
+        message=body.dm_message,
+        price_items_json=_json.dumps(body.price_items, ensure_ascii=False),
+        sap_saved_count=saved_count,
+        sap_result_json=_json.dumps(sap_result, ensure_ascii=False),
+        status="price_applied_dm_sent" if body.action_type == "price_and_dm" else "dm_only_sent",
+    )
+
+    return JSONResponse({
+        "success": True,
+        "action_type": body.action_type,
+        "sap_saved_count": saved_count,
+        "dm_status": "logged",
+    })
 
 
 # ── 서버 시작 시 백그라운드 캐시 워밍업 ──────────────────────────────
