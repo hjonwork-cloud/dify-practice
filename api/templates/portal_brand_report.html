@@ -1,5 +1,6 @@
-{% extends 'portal_base.html' %}{% block title %}범용상품 제안 솔루션{% endblock %}{% block content %}
+﻿{% extends 'portal_base.html' %}{% block title %}범용상품 제안 솔루션{% endblock %}{% block content %}
 <style>
+/* 로딩 오버레이 */
 .portal-loading-overlay{position:fixed;inset:0;background:rgba(255,255,255,.92);z-index:9999;display:flex;align-items:center;justify-content:center;}
 .portal-loading-overlay[hidden]{display:none!important;}
 .portal-loading-box{text-align:center;padding:2rem;}
@@ -7,24 +8,44 @@
 @keyframes spin{to{transform:rotate(360deg);}}
 .portal-loading-box p{font-size:1.1rem;color:#111;margin:.5rem 0;}
 .portal-loading-box small{color:#6b7280;line-height:1.6;}
-.portal-scatter-section{margin:1.25rem 0;}
-.scatter-header{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;flex-wrap:wrap;margin-bottom:.75rem;}
-.scatter-stats-grid{display:flex;flex-wrap:wrap;gap:.5rem .75rem;font-size:.8rem;align-items:center;}
+/* 산포도 섹션 */
+.portal-scatter-section{margin:1.25rem 0;overflow:visible;}
+.scatter-panel-inner{padding:20px 24px 24px;}
+.scatter-title-row{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;margin-bottom:.6rem;}
+.scatter-stats-grid{display:flex;flex-wrap:wrap;gap:.5rem .75rem;font-size:.8rem;align-items:center;margin-bottom:.75rem;}
 .scatter-stat{background:#f3f4f6;border-radius:.4rem;padding:.2rem .6rem;white-space:nowrap;}
 .scatter-stat b{color:#16a34a;}
 .scatter-stat.danger b{color:#dc2626;}
-.scatter-canvas-wrap{position:relative;height:240px;}
+.scatter-canvas-wrap{position:relative;height:480px;}
 </style>
+
+<!-- 로딩 오버레이 -->
+<div class="portal-loading-overlay" id="loadingOverlay" hidden>
+  <div class="portal-loading-box">
+    <div class="portal-spinner"></div>
+    <p>데이터 불러오는 중&hellip;</p>
+    <small>가맹점 범용비중 분포를 계산하고 있습니다.<br>잠시만 기다려 주세요.</small>
+  </div>
+</div>
+
 {% if not report.brand %}
 <div class="portal-heading"><div><p class="eyebrow">PROPOSAL SOLUTION</p><h1>브랜드 데이터 없음</h1><p>로그인 계정의 담당 브랜드 데이터를 찾을 수 없습니다.</p></div></div>
 {% else %}
+
 <div class="portal-heading">
-  <div><p class="eyebrow">GENERIC PRODUCT PROPOSAL</p><h1>{{ report.brand.brand_name }}</h1><p>범용상품 제안 솔루션. 가맹점별 상품 구성비는 전월({{ report.prev_ym }}) 기준입니다.</p></div>
-  <form method="get" action="/portal/brand-report" class="portal-brand-picker">
-    <select name="brand" onchange="this.form.submit()">
-      {% for b in report.brands %}<option value="{{ b.brand_name }}" {% if b.brand_name == report.brand.brand_name %}selected{% endif %}>{{ b.brand_name }}</option>{% endfor %}
-    </select>
-  </form>
+  <div>
+    <p class="eyebrow">GENERIC PRODUCT PROPOSAL</p>
+    <h1>{{ report.brand.brand_name }}</h1>
+    <p>범용상품 제안 솔루션. 가맹점별 상품 구성비는 전월({{ report.prev_ym }}) 기준입니다.</p>
+  </div>
+  <div style="display:flex;align-items:center;gap:.75rem;flex-shrink:0;">
+    <form method="get" action="/portal/brand-report" class="portal-brand-picker" id="brandPickerForm">
+      <select name="brand" id="brandSelect">
+        {% for b in report.brands %}<option value="{{ b.brand_name }}" {% if b.brand_name == report.brand.brand_name %}selected{% endif %}>{{ b.brand_name }}</option>{% endfor %}
+      </select>
+    </form>
+    <a href="/portal/brand-report/action?brand={{ report.brand.brand_name|urlencode }}" class="btn portal-primary" style="white-space:nowrap;font-size:.85rem;padding:.45rem 1rem;">&#9889; 액션 실행</a>
+  </div>
 </div>
 
 <section class="portal-metric-grid compact">
@@ -35,61 +56,90 @@
 </section>
 
 <section class="portal-panel portal-scatter-section">
-  <div class="scatter-header">
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:.5rem;">
-      <div><p class="eyebrow">DISTRIBUTION</p><h2>가맹점 범용상품 비중 분포</h2>
-      <p style="font-size:.82rem;color:#6b7280;margin:.25rem 0 0;">X: 범용비중(%) &nbsp;·&nbsp; Y: 매출액(백만) &nbsp;·&nbsp; <span style="color:#dc2626;">●</span> 제안대상 &nbsp;<span style="color:#16a34a;">●</span> 기준충족 &nbsp;· 수직점선: 브랜드평균/기준</p></div>
-      <a href="/portal/brand-report/action?brand={{ report.brand.brand_name|urlencode }}" class="btn portal-primary" style="font-size:.82rem;padding:.35rem .8rem;​">⚡ 액션 실행</a>
+  <div class="scatter-panel-inner">
+    <div class="scatter-title-row">
+      <div>
+        <p class="eyebrow">DISTRIBUTION</p>
+        <h2 style="margin:4px 0 6px;">가맹점 범용상품 비중 분포</h2>
+        <p style="font-size:.82rem;color:#6b7280;margin:0;">
+          X: 범용비중(%) &nbsp;&middot;&nbsp; Y: 매출액(백만) &nbsp;&middot;&nbsp;
+          <span style="color:#dc2626;">&#9679;</span> 제안대상 &nbsp;
+          <span style="color:#16a34a;">&#9679;</span> 기준충족 &nbsp;&middot;&nbsp;
+          수직점선: 브랜드평균 / 제안기준
+        </p>
+      </div>
     </div>
     <div class="scatter-stats-grid" id="scatterStats"></div>
+    <div class="scatter-canvas-wrap"><canvas id="scatterChart"></canvas></div>
   </div>
-  <div class="scatter-canvas-wrap"><canvas id="scatterChart"></canvas></div>
 </section>
 
 {% endif %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
 <script>
 (function(){
-  const customers = {{ report.customers | tojson }};
-  const brandAvg  = {{ report.brand_avg }};
-  const threshold = {{ report.threshold }};
+  // 브랜드 select → 로딩 오버레이 + 자동 submit
+  var sel = document.getElementById('brandSelect');
+  var overlay = document.getElementById('loadingOverlay');
+  if (sel) {
+    sel.addEventListener('change', function() {
+      if (overlay) overlay.removeAttribute('hidden');
+      document.getElementById('brandPickerForm').submit();
+    });
+  }
 
-  // ── 통계 계산 (X축=범용비중) ──────────────────────────
-  const ratios = customers.map(c => c.generic_ratio).sort((a,b) => a-b);
-  const n = ratios.length;
-  function pct(arr, p){ const idx = Math.max(0, Math.min(arr.length-1, Math.round(p/100*(arr.length-1)))); return arr[idx]; }
-  const avg = n ? (ratios.reduce((a,b)=>a+b,0)/n).toFixed(1) : 0;
-  const std = n ? Math.sqrt(ratios.reduce((s,v)=>s+(v-avg)**2,0)/n).toFixed(1) : 0;
-  const p25 = pct(ratios,25), p75 = pct(ratios,75);
-  const mn  = ratios[0] ?? 0, mx = ratios[n-1] ?? 0;
-  const targetCount = customers.filter(c => c.is_target).length;
+  var customers = {{ report.customers | tojson if report.brand else '[]' }};
+  var brandAvg  = {{ report.brand_avg if report.brand else 0 }};
+  var threshold = {{ report.threshold if report.brand else 0 }};
 
-  // ── 통계 배지 렌더링 ────────────────────────────────
-  const statsEl = document.getElementById('scatterStats');
-  if (statsEl && n > 0) {
+  if (!customers.length) return;
+
+  // 통계 계산
+  var ratios = customers.map(function(c){ return c.generic_ratio; }).sort(function(a,b){ return a-b; });
+  var n = ratios.length;
+  function pct(arr, p){ var idx = Math.max(0, Math.min(arr.length-1, Math.round(p/100*(arr.length-1)))); return arr[idx]; }
+  var sumR = ratios.reduce(function(a,b){return a+b;},0);
+  var avg = n ? (sumR/n).toFixed(1) : 0;
+  var variance = n ? ratios.reduce(function(s,v){return s+(v-avg)*(v-avg);},0)/n : 0;
+  var std = Math.sqrt(variance).toFixed(1);
+  var p25 = pct(ratios,25), p75 = pct(ratios,75);
+  var mn  = ratios[0], mx = ratios[n-1];
+  var targetCount = customers.filter(function(c){ return c.is_target; }).length;
+
+  // X축 범위: brandAvg 중앙 배치
+  var spread = Math.max(brandAvg * 0.9, 25);
+  var xMin = Math.max(0,   Math.floor(brandAvg - spread));
+  var xMax = Math.min(100, Math.ceil(brandAvg + spread));
+  xMin = Math.min(xMin, Math.max(0, mn - 3));
+  xMax = Math.max(xMax, Math.min(100, mx + 3));
+
+  // 통계 배지
+  var statsEl = document.getElementById('scatterStats');
+  if (statsEl) {
     [
       ['N', n + '개'],
       ['평균', avg + '%'],
       ['중위', pct(ratios,50) + '%'],
-      ['표준편차', '±' + std + '%'],
+      ['표준편차', '+/-' + std + '%'],
       ['25%ile', p25 + '%'],
       ['75%ile', p75 + '%'],
       ['범위', mn + '~' + mx + '%'],
       ['제안대상', targetCount + '개 (' + Math.round(targetCount/n*100) + '%)', true],
-    ].forEach(([label, val, danger]) => {
-      const d = document.createElement('div');
+    ].forEach(function(item){
+      var label = item[0], val = item[1], danger = item[2];
+      var d = document.createElement('div');
       d.className = 'scatter-stat' + (danger ? ' danger' : '');
       d.innerHTML = label + ' <b>' + val + '</b>';
       statsEl.appendChild(d);
     });
   }
 
-  // ── Scatter 차트 ────────────────────────────────────────
-  const canvas = document.getElementById('scatterChart');
-  if (!canvas || typeof Chart === 'undefined' || !n) return;
+  // Scatter 차트
+  var canvas = document.getElementById('scatterChart');
+  if (!canvas || typeof Chart === 'undefined') return;
 
-  const targets = customers.filter(c => c.is_target);
-  const normals = customers.filter(c => !c.is_target);
+  var targets = customers.filter(function(c){ return c.is_target; });
+  var normals = customers.filter(function(c){ return !c.is_target; });
 
   new Chart(canvas, {
     type: 'scatter',
@@ -97,26 +147,15 @@
       datasets: [
         {
           label: '기준 미달 (제안대상)',
-          data: targets.map(c => ({ x: c.generic_ratio, y: c.sales_m, name: c.customer_name })),
+          data: targets.map(function(c){ return { x: c.generic_ratio, y: c.sales_m, name: c.customer_name }; }),
           backgroundColor: 'rgba(220,38,38,.65)',
           pointRadius: 5, pointHoverRadius: 7,
         },
         {
           label: '기준 충족',
-          data: normals.map(c => ({ x: c.generic_ratio, y: c.sales_m, name: c.customer_name })),
+          data: normals.map(function(c){ return { x: c.generic_ratio, y: c.sales_m, name: c.customer_name }; }),
           backgroundColor: 'rgba(22,163,74,.55)',
           pointRadius: 4, pointHoverRadius: 6,
-        },
-        {
-          label: '브랜드 평균 (' + brandAvg + '%)',
-          data: [],  // annotation via plugin-free workaround: constant-line dataset
-          type: 'line',
-          borderColor: '#6b7280',
-          borderDash: [5,4],
-          borderWidth: 1.5,
-          pointRadius: 0,
-          fill: false,
-          // 실제 선은 afterDraw 플러그인으로 대체
         },
       ]
     },
@@ -124,42 +163,46 @@
       responsive: true,
       maintainAspectRatio: false,
       plugins: {
-        legend: { position: 'top', labels: { font: { size: 11 } } },
+        legend: { position: 'top', labels: { font: { size: 12 } } },
         tooltip: {
           callbacks: {
-            label: ctx => {
-              const d = ctx.raw;
+            label: function(ctx) {
+              var d = ctx.raw;
               return (d.name || '') + '  |  범용 ' + d.x + '%  매출 ' + d.y + '백만';
             }
           }
         },
       },
       scales: {
-        x: { title: { display: true, text: '범용상품 비중 (%)' }, min: 0,
-             max: Math.min(100, Math.max(brandAvg * 2.2, 60)),
-             ticks: { font: { size: 10 } } },
-        y: { title: { display: true, text: '매출액 (백만원)' }, ticks: { font: { size: 10 } } },
+        x: {
+          title: { display: true, text: '범용상품 비중 (%)' },
+          min: xMin, max: xMax,
+          ticks: { font: { size: 11 } }
+        },
+        y: {
+          title: { display: true, text: '매출액 (백만원)' },
+          ticks: { font: { size: 11 } }
+        },
       },
     },
     plugins: [{
       id: 'refLines',
-      afterDraw(chart) {
-        const { ctx, chartArea: ca, scales: { x: xS, y: yS } } = chart;
-        const drawVLine = (xVal, color, dash, label) => {
-          const xPx = xS.getPixelForValue(xVal);
+      afterDraw: function(chart) {
+        var ctx2 = chart.ctx, ca = chart.chartArea, xS = chart.scales.x;
+        function drawVLine(xVal, color, dash, lbl) {
+          var xPx = xS.getPixelForValue(xVal);
           if (xPx < ca.left || xPx > ca.right) return;
-          ctx.save();
-          ctx.strokeStyle = color;
-          ctx.lineWidth = 1.5;
-          ctx.setLineDash(dash);
-          ctx.beginPath(); ctx.moveTo(xPx, ca.top); ctx.lineTo(xPx, ca.bottom); ctx.stroke();
-          if (label) {
-            ctx.fillStyle = color; ctx.font = '10px sans-serif'; ctx.setLineDash([]);
-            ctx.fillText(label, xPx + 3, ca.top + 14);
+          ctx2.save();
+          ctx2.strokeStyle = color; ctx2.lineWidth = 1.8;
+          ctx2.setLineDash(dash);
+          ctx2.beginPath(); ctx2.moveTo(xPx, ca.top); ctx2.lineTo(xPx, ca.bottom); ctx2.stroke();
+          if (lbl) {
+            ctx2.fillStyle = color; ctx2.font = 'bold 11px sans-serif'; ctx2.setLineDash([]);
+            ctx2.fillText(lbl, xPx + 4, ca.top + 16);
           }
-          ctx.restore();
-        };
-        drawVLine(brandAvg,  '#9ca3af', [5,4], '평균 ' + brandAvg + '%');
+          ctx2.restore();
+        }
+        drawVLine(brandAvg,  '#6b7280', [6,4], '평균 ' + brandAvg + '%');
         drawVLine(threshold, '#f59e0b', [4,3], '기준 ' + threshold + '%');
       }
     }]

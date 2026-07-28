@@ -764,9 +764,9 @@ def brand_report(
     customer_page: int = 1,
     target_page: int = 1,
 ) -> dict:
-    # ── 사전계산 테이블 우선 조회 (hit 시 실시간 쿼리 생략) ──────────
+    # ── 사전계산 테이블 우선 조회 (팀리더는 실시간 쿼리 강제 — 캐시 테이블이 개인 범위로 잘못 캐싱될 수 있음) ──────────
     picked = _pick_brand(brand_name, emp_code)
-    if picked:
+    if picked and not _is_team_leader(emp_code):
         try:
             from portal_refresh import read_brand_report_from_table
             cached = read_brand_report_from_table(
