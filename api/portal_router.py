@@ -337,11 +337,9 @@ def _in_months(months: list[str]) -> str:
 
 
 def _latest_ym(emp_code: str = _DEFAULT_EMP_CODE) -> str:
-    # 팀리더는 캐시 미사용
-    if not _is_team_leader(emp_code):
-        cached = _cache_get(f"latest:{emp_code}")
-        if cached:
-            return str(cached)
+    cached = _cache_get(f"latest:{emp_code}")
+    if cached:
+        return str(cached)
     import main
     rows = _q(f"""
         SELECT MAX(`년월`) AS ym
@@ -350,9 +348,7 @@ def _latest_ym(emp_code: str = _DEFAULT_EMP_CODE) -> str:
           AND `매출액` IS NOT NULL
     """)
     ym = str((rows[0] or {}).get("ym") or "") if rows else ""
-    if ym and not _is_team_leader(emp_code):
-        _cache_set(f"latest:{emp_code}", ym)
-    return ym
+    return _cache_set(f"latest:{emp_code}", ym)
 
 
 def _latest_bill_date(emp_code: str = _DEFAULT_EMP_CODE, ym: str = "") -> str:
@@ -421,10 +417,8 @@ def _brand_cm_map(emp_code: str, profit_ym: str) -> dict[str, float]:
 
 
 def _brand_rows(emp_code: str = _DEFAULT_EMP_CODE) -> list[dict]:
-    # 팀리더는 캐시 미사용 (지점 전체 데이터 조회 보장)
-    if not _is_team_leader(emp_code):
-        cached = _cache_get(f"brands:{emp_code}")
-        if cached:  # 빈 리스트는 캐시 무효 처리
+    cached = _cache_get(f"brands:{emp_code}")
+    if cached:  # 빈 리스트는 캐시 무효 처리
             return cached
     import main
     latest = _latest_ym(emp_code)
@@ -521,18 +515,16 @@ def _brand_rows(emp_code: str = _DEFAULT_EMP_CODE) -> list[dict]:
             "generic_ratio": 0.0, "cm_rate": None,
         })
     # 팀리더는 캐시 저장 안함, 일반도 빈 결과는 저장 안함
-    if out and not _is_team_leader(emp_code):
+    if out:
         _cache_set(f"brands:{emp_code}", out)
     return out
 
 
 
 def portal_dashboard(emp_code: str = _DEFAULT_EMP_CODE) -> dict:
-    # 팀리더는 캐시 스킵 (주소 LIKE 수정 전 데이터가 잙0로 캐싱될 수 있음)
-    if not _is_team_leader(emp_code):
-        cached = _cache_get(f"dashboard:{emp_code}")
-        if cached is not None:
-            return cached
+    cached = _cache_get(f"dashboard:{emp_code}")
+    if cached is not None:
+        return cached
     import main
     is_leader = _is_team_leader(emp_code)
     team_name = _leader_team(emp_code)
@@ -660,8 +652,6 @@ def portal_dashboard(emp_code: str = _DEFAULT_EMP_CODE) -> dict:
         "is_leader": is_leader,
         "team_name": team_name,
     }
-    if _is_team_leader(emp_code):
-        return data  # 팀리더 캐시 저장 안함
     return _cache_set(f"dashboard:{emp_code}", data)
 
 
@@ -781,7 +771,7 @@ def brand_report(
 ) -> dict:
     # ── 사전계산 테이블 우선 조회 (팀리더는 실시간 쿼리 강제 — 캐시 테이블이 개인 범위로 잘못 캐싱될 수 있음) ──────────
     picked = _pick_brand(brand_name, emp_code)
-    if picked and not _is_team_leader(emp_code):
+    if picked:
         try:
             from portal_refresh import read_brand_report_from_table
             cached = read_brand_report_from_table(
@@ -1198,17 +1188,16 @@ async def dashboard_data_api(request: Request):
     user = _require_user(request)
     emp_code = user["emp_code"]
 
-    # ── 1순위: 사전 계산 요약 테이블 (팀리더 스킵 – T_DASH가 구실적으로 기코될 수 있음) ──
-    if not _is_team_leader(emp_code):
-        try:
-            import portal_refresh
-            precomputed = portal_refresh.read_dashboard_from_table(emp_code)
-            if precomputed:
-                return JSONResponse(content=precomputed)
-        except Exception as _e:
-            pass  # 테이블 미존재 등 → fallback
+    # ── 1순위: 사전 계산 테이블 (T_DASH) — 팀리더 포함 모두 활용 ────────────
+    try:
+        import portal_refresh
+        precomputed = portal_refresh.read_dashboard_from_table(emp_code)
+        if precomputed:
+            return JSONResponse(content=precomputed)
+    except Exception as _e:
+        pass  # 테이블 미존재 / 행 없음 → fallback
 
-    # ── 2순위: 실시간 쿼리 (fallback / 팀리더) ────────────────────────
+    # ── 2순위: 실시간 쿼리 (T_DASH refresh 전 or 업데이트 전) ────────────
     data = portal_dashboard(emp_code)
     return JSONResponse(content=data)
 

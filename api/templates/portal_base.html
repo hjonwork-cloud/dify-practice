@@ -9,21 +9,11 @@
   <link href="/static/admin.css?v={{ asset_v }}" rel="stylesheet">
   <style>
   /* ── 사이드바 접기/펼치기 ── */
-  .portal-sidebar { transition: width .22s cubic-bezier(.4,0,.2,1); overflow: hidden; position: relative; }
-  .portal-main    { transition: margin-left .22s, width .22s; }
-  /* 토글 버튼: sidebar 내부 우상단 절대 위치 */
-  .sb-toggle {
-    position: absolute; top: 18px; right: 14px;
-    width: 30px; height: 30px; border-radius: 50%;
-    background: rgba(255,255,255,.14); border: none; color: #fff;
-    cursor: pointer; font-size: 15px; display: flex; align-items: center; justify-content: center;
-    transition: background .15s, right .22s, left .22s; z-index: 5; flex-shrink: 0;
-  }
-  .sb-toggle:hover { background: rgba(255,255,255,.28); }
-  /* 브랜드 행: 토글 공간(44px) 제외 */
-  .sb-top { padding-bottom: 20px; border-bottom: 1px solid rgba(255,255,255,.12); margin-bottom: 4px;
-            padding-right: 44px; /* 토글 버튼 공간 */ }
-  .sb-brand { display: flex; gap: 10px; align-items: center; text-decoration: none; color: #fff; min-width: 0; overflow: hidden; }
+  .portal-sidebar { transition: width .22s cubic-bezier(.4,0,.2,1); overflow: hidden; }
+  .portal-main    { transition: margin-left .22s cubic-bezier(.4,0,.2,1), width .22s cubic-bezier(.4,0,.2,1); }
+  .sb-top { display: flex; align-items: center; gap: 10px;
+            padding-bottom: 20px; border-bottom: 1px solid rgba(255,255,255,.12); margin-bottom: 4px; }
+  .sb-brand { display: flex; gap: 10px; align-items: center; text-decoration: none; color: #fff; min-width: 0; overflow: hidden; flex: 1; }
   .sb-brand img { width: 108px; filter: brightness(0) invert(1); flex-shrink: 0; transition: width .2s; }
   .sb-brand-text { border-left: 1px solid rgba(255,255,255,.25); padding-left: 10px;
                    transition: opacity .18s, max-width .22s; opacity: 1; max-width: 180px;
@@ -49,27 +39,28 @@
   .nav-sub a.active, .nav-sub a:hover { background: rgba(255,255,255,.14); color: #fff!important; }
   .nav-arrow { margin-left: auto; font-size: 11px; transition: transform .2s; }
   .nav-parent.open .nav-arrow { transform: rotate(180deg); }
-  /* 사이드바 너비 전환 */
-  .portal-main { transition: margin-left .22s cubic-bezier(.4,0,.2,1), width .22s cubic-bezier(.4,0,.2,1); }
+  /* topbar 토글 버튼 */
+  .sb-topbar-toggle { width: 36px; height: 36px; border-radius: 50%; background: rgba(7,11,16,.07); border: 1px solid var(--portal-line,#e4e9ef);
+    color: #374151; cursor: pointer; font-size: 16px; display: flex; align-items: center; justify-content: center;
+    transition: background .15s; flex-shrink: 0; }
+  .sb-topbar-toggle:hover { background: rgba(7,11,16,.13); }
   /* collapsed 상태 */
-  body.sidebar-collapsed .portal-sidebar  { width: 52px!important; padding-left: 0!important; padding-right: 0!important; padding-top: 0!important; }
+  body.sidebar-collapsed .portal-sidebar  { width: 52px!important; }
   body.sidebar-collapsed .portal-main     { margin-left: 52px!important; width: calc(100% - 52px)!important; }
   body.sidebar-collapsed .sb-top          { display: none; }
-  body.sidebar-collapsed .sb-toggle       { right: auto; left: 50%; transform: translateX(-50%); top: 12px; }
   body.sidebar-collapsed .nav-label       { opacity: 0; max-width: 0; overflow: hidden; }
   body.sidebar-collapsed .nav-sub         { max-height: 0!important; }
   body.sidebar-collapsed .nav-arrow       { display: none; }
-  body.sidebar-collapsed .portal-nav      { padding-top: 58px; }
   body.sidebar-collapsed .portal-nav a,
   body.sidebar-collapsed .nav-parent      { justify-content: center; padding: 10px 0; }
+  body.sidebar-collapsed .portal-nav      { padding-top: 14px; }
   body.sidebar-collapsed .portal-user-card { justify-content: center; padding: 10px 4px; min-width: 0; }
   body.sidebar-collapsed .portal-user-card>div { display: none; }
   body.sidebar-collapsed .portal-avatar  { width: 36px; height: 36px; flex-shrink: 0; }
   @media(max-width:760px){
-    body.sidebar-collapsed .portal-sidebar { width: 280px!important; padding: 28px 18px!important; }
+    body.sidebar-collapsed .portal-sidebar { width: 280px!important; }
     body.sidebar-collapsed .portal-main    { margin-left: 0!important; width: 100%!important; }
-    body.sidebar-collapsed .sb-top         { display: block; }
-    body.sidebar-collapsed .sb-toggle      { transform: none; left: auto; right: 14px; top: 18px; }
+    body.sidebar-collapsed .sb-top         { display: flex; }
     body.sidebar-collapsed .portal-nav     { padding-top: 0; }
   }
   </style>
@@ -77,8 +68,6 @@
 <body class="portal-body">
 <div class="portal-shell">
   <aside class="portal-sidebar">
-    <!-- 토글 버튼: 항상 우상단 절대위치 고정 -->
-    <button class="sb-toggle" id="sbToggleBtn" onclick="sbToggle()" title="메뉴 접기/펼치기">☰</button>
     <div class="sb-top">
       <a class="sb-brand" href="/portal" aria-label="홈">
         <img src="/static/dongwon-homefood-logo.png" alt="동원홈푸드">
@@ -120,7 +109,7 @@
   </aside>
   <main class="portal-main">
     <header class="portal-topbar">
-      <button class="menu-toggle" onclick="document.body.classList.toggle('menu-open')">☰</button>
+      <button class="sb-topbar-toggle" id="sbToggleBtn" onclick="sbToggle()" title="메뉴 접기/펼치기">☰</button>
       <div><b>Sales Action Platform</b><small>범용/전용 구성비 기반 제안 솔루션</small></div>
       <form action="/portal/logout" method="post"><button class="portal-logout" type="submit">로그아웃</button></form>
     </header>
