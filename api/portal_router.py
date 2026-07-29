@@ -1260,6 +1260,175 @@ async def admin_refresh_dashboard(request: Request):
         )
 
 
+@router.get("/admin/diag-brand")
+async def admin_diag_brand(request: Request, name: str = "", emp: str = ""):
+    """[진단] 특정 브랜드가 사전계산 테이블에 실제로 존재하는지 확인.
+
+    사용:
+      /portal/admin/diag-brand?name=크레이지빙수＆오늘도김볶만 본사
+      /portal/admin/diag-brand?name=크레이지빙수&emp=20230720
+
+    확인 항목:
+      1) T_BRAND_SUMMARY 에 exact 매칭되는가 → 매칭되면 fallback 원인은 다른 것
+      2) 전각 ＆(U+FF06) vs 반각 &(U+0026) 정규화 후 매칭되는가
+      3) 유사 브랜드명이 존재하는가 (LIKE 검색)
+      4) 다른 테이블(T_BRAND_MONTHLY, T_BRAND_CUST, T_BRANDS)에도 존재하는가
+      5) 입력 문자열과 저장된 문자열의 유니코드 코드포인트(HEX) 비교
+    """
+    user = _require_user(request)
+    if not user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
+
+    if not name:
+        return JSONResponse(
+            {"error": "name 파라미터 필요. 예: /portal/admin/diag-brand?name=브랜드명"},
+            status_code=400,
+        )
+
+    import main
+    from portal_refresh import T_BRAND_SUMMARY, T_BRAND_MONTHLY, T_BRAND_CUST, T_BRANDS
+
+    def _hex(s: str) -> str:
+        return " ".join(f"U+{ord(c):04X}" for c in (s or ""))
+
+    def _norm(s: str) -> str:
+        # 전각 ＆(U+FF06) → 반각 &, ZWJ 제거, 공백 정리
+        return (s or "").replace('＆', '&').replace('\u200d', '').strip()
+
+    def _sample(rows: list, limit: int = 3) -> list:
+        out = []
+        for r in (rows or [])[:limit]:
+            bn = str(r.get('brand_name') or '')
+            out.append({
+                "brand_code":       str(r.get('brand_code') or ''),
+                "brand_name":       bn,
+                "brand_name_hex":   _hex(bn),
+                "exact_eq_input":   bn == name,
+                "norm_eq_input":    _norm(bn) == _norm(name),
+            })
+        return out
+
+    def _count_safe(sql: str) -> int:
+        try:
+            r = main._safe_query(sql, raw=True) or []
+            return int((r[0] or {}).get('n', 0)) if r else 0
+        except Exception:
+            return -1
+
+    input_norm = _norm(name)
+
+    # 1) 전체 행수 (테이블 존재 확인)
+    total_n = _count_safe(f"SELECT COUNT(*) AS n FROM {T_BRAND_SUMMARY}")
+
+    # 2) 정확 매칭
+    try:
+        exact = main._safe_query(
+            f"SELECT * FROM {T_BRAND_SUMMARY} WHERE brand_name = {_sql(name)}",
+            raw=True,
+        ) or []
+    except Exception as e:
+        exact = []
+        exact_err = str(e)
+    else:
+        exact_err = None
+
+    # 3) 정규화(전각→반각) 매칭
+    try:
+        normalized = main._safe_query(
+            f"SELECT * FROM {T_BRAND_SUMMARY} "
+            f"WHERE REPLACE(brand_name, '＆', '&') = {_sql(input_norm)}",
+            raw=True,
+        ) or []
+    except Exception as e:
+        normalized = []
+        norm_err = str(e)
+    else:
+        norm_err = None
+
+    # 4) LIKE 유사 검색 (앞 3~5글자)
+    like_key = input_norm[:4] if len(input_norm) >= 4 else input_norm
+    try:
+        like_rows = main._safe_query(
+            f"SELECT brand_code, brand_name FROM {T_BRAND_SUMMARY} "
+            f"WHERE brand_name LIKE {_sql('%' + like_key + '%')} LIMIT 20",
+            raw=True,
+        ) or []
+    except Exception as e:
+        like_rows = []
+        like_err = str(e)
+    else:
+        like_err = None
+
+    # 5) 다른 테이블에도 존재하는지
+    monthly_n = _count_safe(
+        f"SELECT COUNT(*) AS n FROM {T_BRAND_MONTHLY} WHERE brand_name = {_sql(name)}")
+    cust_n = _count_safe(
+        f"SELECT COUNT(*) AS n FROM {T_BRAND_CUST} WHERE brand_name = {_sql(name)}")
+    brands_n_exact = _count_safe(
+        f"SELECT COUNT(*) AS n FROM {T_BRANDS} WHERE brand_name = {_sql(name)}")
+    brands_n_emp = -1
+    if emp:
+        brands_n_emp = _count_safe(
+            f"SELECT COUNT(*) AS n FROM {T_BRANDS} "
+            f"WHERE brand_name = {_sql(name)} AND emp_code = {_sql(emp)}")
+
+    # 6) 진단 결론
+    if exact_err:
+        diagnosis = f"❌ T_BRAND_SUMMARY 쿼리 자체가 예외 발생: {exact_err} → fallback 확정 원인"
+    elif exact:
+        diagnosis = ("✅ T_BRAND_SUMMARY 에 exact 매칭 존재. "
+                     "그럼에도 fallback 이 걸린다면 원인은 (a) T_BRAND_CUST cust_rows empty (지금 코드는 fallback 안 시킴) "
+                     "(b) 병렬 쿼리 중 예외 발생 → read_brand_report_from_table 이 None 반환.")
+    elif normalized:
+        diagnosis = ("⚠️ 정규화(전각＆→반각&) 후 매칭됨. "
+                     "저장된 brand_name 이 입력과 문자 다름. refresh 스크립트에서 정규화하거나 "
+                     "조회 시 REPLACE 적용 필요.")
+    elif like_rows:
+        diagnosis = (f"⚠️ 유사 브랜드 {len(like_rows)}건 발견. 저장된 실제 brand_name 을 확인해 "
+                     "정확한 문자열로 조회하도록 매칭 로직 수정 필요.")
+    elif total_n == 0:
+        diagnosis = "❌ T_BRAND_SUMMARY 가 비어있음. refresh 실행 필요."
+    elif total_n < 0:
+        diagnosis = "❌ T_BRAND_SUMMARY 테이블 조회 실패. 테이블 미존재 또는 권한 문제."
+    else:
+        diagnosis = (f"❌ T_BRAND_SUMMARY({total_n}행) 에 이 브랜드가 아예 없음. "
+                     "refresh 스크립트의 GROUP BY 조건에서 누락됨 (예: ZC본부명 필터/집계 기준).")
+
+    return JSONResponse({
+        "input": {
+            "raw":                        name,
+            "hex":                        _hex(name),
+            "length":                     len(name),
+            "normalized":                 input_norm,
+            "normalized_hex":             _hex(input_norm),
+            "contains_fullwidth_amp":     '＆' in name,
+            "contains_halfwidth_amp":     '&' in name,
+            "contains_zwj":               '\u200d' in name,
+            "contains_trailing_space":    name != name.strip(),
+        },
+        "T_BRAND_SUMMARY": {
+            "total_rows_in_table":        total_n,
+            "exact_match_count":          len(exact),
+            "exact_samples":              _sample(exact),
+            "exact_query_error":          exact_err,
+            "normalized_match_count":     len(normalized),
+            "normalized_samples":         _sample(normalized),
+            "normalized_query_error":     norm_err,
+            "like_search_key":            like_key,
+            "like_match_count":           len(like_rows),
+            "like_samples":               _sample(like_rows, limit=20),
+            "like_query_error":           like_err,
+        },
+        "other_tables_exact_match_count": {
+            "T_BRAND_MONTHLY":            monthly_n,
+            "T_BRAND_CUST":               cust_n,
+            "T_BRANDS_all_emp":           brands_n_exact,
+            "T_BRANDS_this_emp":          brands_n_emp,
+        },
+        "diagnosis": diagnosis,
+    })
+
+
 @router.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request, error: str = "", fresh: str = ""):
     if fresh:
