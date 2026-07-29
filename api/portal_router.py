@@ -1214,9 +1214,16 @@ async def admin_refresh_dashboard(request: Request):
     import asyncio
     import portal_refresh
 
-    loop = asyncio.get_event_loop()
-    result = await loop.run_in_executor(None, lambda: portal_refresh.run_refresh(force=True))
-    return JSONResponse(content=result)
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, lambda: portal_refresh.run_refresh(force=True))
+        return JSONResponse(content=result)
+    except Exception as e:
+        import traceback
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "reason": str(e), "trace": traceback.format_exc()[-800:]}
+        )
 
 
 @router.get("/login", response_class=HTMLResponse)
@@ -1527,3 +1534,23 @@ def _warmup_cache():
 
 
 threading.Thread(target=_warmup_cache, daemon=True, name="portal-warmup").start()
+
+
+def _auto_refresh_scheduler():
+    """6시간마다 사전계산 테이블 자동 재생성. 서버 시작 시 자동 실행."""
+    import logging
+    _log = logging.getLogger("portal_refresh_scheduler")
+    # 첫 실행: 서버 기동 2분 후 (warmup 완료 대기)
+    time.sleep(120)
+    while True:
+        try:
+            _log.info("[scheduler] 사전계산 테이블 자동 refresh 시작")
+            import portal_refresh
+            result = portal_refresh.run_refresh(force=True)
+            _log.info(f"[scheduler] refresh 완료: {result.get('status')} / {result.get('emp_count')}명 / {result.get('elapsed_sec')}s")
+        except Exception as e:
+            _log.warning(f"[scheduler] refresh 실패 (6시간 후 재시도): {e}")
+        time.sleep(6 * 3600)  # 6시간 대기
+
+
+threading.Thread(target=_auto_refresh_scheduler, daemon=True, name="portal-refresh-scheduler").start()

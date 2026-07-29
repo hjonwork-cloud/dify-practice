@@ -138,7 +138,7 @@ def run_refresh(force: bool = False) -> dict:
     leader_base AS (
         SELECT lm.emp_code, lm.team_name,
                m.`ZC본부` AS zc_code, m.`거래처` AS cust_code, m.`매출액` AS sales_raw
-        FROM {T_MAIN} m JOIN leader_map lm ON m.`지점명` = lm.team_name
+        FROM {T_MAIN} m JOIN leader_map lm ON m.`지점명` LIKE CONCAT('%', lm.team_name, '%')
         WHERE m.`년월` = '{latest_ym}' AND m.`사업부명` = '외식식재사업부'
     ),
     leader_agg AS (
