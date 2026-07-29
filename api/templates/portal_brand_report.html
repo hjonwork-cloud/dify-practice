@@ -267,13 +267,8 @@
     });
   }
 
-  // 초기 로딩
-  if (selectedBrand) {
-    loadBrandData(selectedBrand, currentThreshold);
-  } else {
-    document.getElementById('brandSkeleton').setAttribute('hidden', '');
-    showError('담당 브랜드 데이터를 찾을 수 없습니다.');
-  }
+  // 초기 로딩 - brand 없으면 서버가 기본 브랜드 자동 선택
+  loadBrandData(selectedBrand, currentThreshold);
 })();
 </script>
 {% endblock %}
