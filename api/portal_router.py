@@ -528,9 +528,11 @@ def _brand_rows(emp_code: str = _DEFAULT_EMP_CODE) -> list[dict]:
 
 
 def portal_dashboard(emp_code: str = _DEFAULT_EMP_CODE) -> dict:
-    cached = _cache_get(f"dashboard:{emp_code}")
-    if cached is not None:
-        return cached
+    # 팀리더는 캐시 스킵 (주소 LIKE 수정 전 데이터가 잙0로 캐싱될 수 있음)
+    if not _is_team_leader(emp_code):
+        cached = _cache_get(f"dashboard:{emp_code}")
+        if cached is not None:
+            return cached
     import main
     is_leader = _is_team_leader(emp_code)
     team_name = _leader_team(emp_code)
@@ -658,6 +660,8 @@ def portal_dashboard(emp_code: str = _DEFAULT_EMP_CODE) -> dict:
         "is_leader": is_leader,
         "team_name": team_name,
     }
+    if _is_team_leader(emp_code):
+        return data  # 팀리더 캐시 저장 안함
     return _cache_set(f"dashboard:{emp_code}", data)
 
 
