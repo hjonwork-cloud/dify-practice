@@ -1194,16 +1194,17 @@ async def dashboard_data_api(request: Request):
     user = _require_user(request)
     emp_code = user["emp_code"]
 
-    # ── 1순위: 사전 계산 요약 테이블 ──────────────────────────────────
-    try:
-        import portal_refresh
-        precomputed = portal_refresh.read_dashboard_from_table(emp_code)
-        if precomputed:
-            return JSONResponse(content=precomputed)
-    except Exception as _e:
-        pass  # 테이블 미존재 등 → fallback
+    # ── 1순위: 사전 계산 요약 테이블 (팀리더 스킵 – T_DASH가 구실적으로 기코될 수 있음) ──
+    if not _is_team_leader(emp_code):
+        try:
+            import portal_refresh
+            precomputed = portal_refresh.read_dashboard_from_table(emp_code)
+            if precomputed:
+                return JSONResponse(content=precomputed)
+        except Exception as _e:
+            pass  # 테이블 미존재 등 → fallback
 
-    # ── 2순위: 실시간 쿼리 (초기 구동 or refresh 전) ───────────────────
+    # ── 2순위: 실시간 쿼리 (fallback / 팀리더) ────────────────────────
     data = portal_dashboard(emp_code)
     return JSONResponse(content=data)
 
