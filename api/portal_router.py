@@ -1320,9 +1320,14 @@ async def brand_report_page(
 ):
     """DB 쿼리 없이 스켈레톤 HTML 즉시 반환. 브랜드 목록+데이터는 /brand-report-data AJAX로 로딩."""
     _require_user(request)
-    return _render(request, "portal_brand_report.html",
+    response = _render(request, "portal_brand_report.html",
                    selected_brand=brand,
                    threshold=threshold or "", sent=sent)
+    # 브라우저 캐시 방지 (배포 후 즉시 반영)
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
 
 @router.get("/brand-report-data")
