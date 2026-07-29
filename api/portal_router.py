@@ -1345,8 +1345,19 @@ async def brand_report_data_api(
         logger.info(f"[brand-data] {emp_code} _pick_brand={t2-t1:.2f}s picked={picked.get('brand_name') if picked else None}")
 
         if not picked:
-            logger.warning(f"[brand-data] {emp_code} no brand found")
-            return JSONResponse(content={"error": "담당 브랜드를 찾을 수 없습니다. refresh가 필요할 수 있습니다."}, status_code=404)
+            # T_BRANDS 없음 → live query fallback으로 브랜드 목록 시도
+            logger.warning(f"[brand-data] {emp_code} no brand in T_BRANDS, trying live fallback")
+            try:
+                data = brand_report(brand or None, emp_code=emp_code,
+                                    threshold_pct=threshold,
+                                    customer_page=customer_page, target_page=target_page)
+                t_fb = time.time()
+                data["_timing"] = {"pick_s": round(t2-t1,2), "query_s": round(t_fb-t2,2),
+                                   "total_s": round(t_fb-t0,2), "source": "live_no_cache"}
+                return JSONResponse(content=_json_safe(data))
+            except Exception as _fe:
+                logger.error(f"[brand-data] {emp_code} live fallback failed: {_fe}")
+                return JSONResponse(content={"error": f"브랜드 데이터 없음 (refresh 필요). {_fe}"}, status_code=404)
 
         # ── 2단계: 사전계산 테이블 조회 ──────────────────────────────
         t3 = time.time()
