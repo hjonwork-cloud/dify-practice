@@ -115,11 +115,10 @@
 
   function loadBrandData(brand, threshold) {
     showSkeleton();
-    var url = '/portal/brand-report-data';
-    var params = [];
-    if (brand) params.push('brand=' + encodeURIComponent(brand));
-    if (threshold !== null && threshold !== undefined) params.push('threshold=' + threshold);
-    if (params.length) url += '?' + params.join('&');
+    var params = new URLSearchParams();
+    if (brand) params.set('brand', brand);
+    if (threshold !== null) { if (threshold !== undefined) params.set('threshold', threshold); }
+    var url = '/portal/brand-report-data?' + params.toString();
     fetch(url, {credentials: 'same-origin'})
       .then(function(r){ return r.json(); })
       .then(function(data){
