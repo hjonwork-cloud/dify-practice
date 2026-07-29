@@ -84,6 +84,7 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+{% autoescape false %}
 <script>
 (function(){
   var selectedBrand = {{ selected_brand | tojson if selected_brand else '""' }};
@@ -117,7 +118,7 @@
     showSkeleton();
     var params = new URLSearchParams();
     if (brand) params.set('brand', brand);
-    if (threshold !== null) { if (threshold !== undefined) params.set('threshold', threshold); }
+    if (threshold !== null && threshold !== undefined) params.set('threshold', threshold);
     var url = '/portal/brand-report-data?' + params.toString();
     fetch(url, {credentials: 'same-origin'})
       .then(function(r){ return r.json(); })
@@ -269,4 +270,5 @@
   }
 })();
 </script>
+{% endautoescape %}
 {% endblock %}
