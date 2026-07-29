@@ -419,7 +419,39 @@ def _brand_cm_map(emp_code: str, profit_ym: str) -> dict[str, float]:
 def _brand_rows(emp_code: str = _DEFAULT_EMP_CODE) -> list[dict]:
     cached = _cache_get(f"brands:{emp_code}")
     if cached:  # 빈 리스트는 캐시 무효 처리
-            return cached
+        return cached
+    # ── 1순위: T_BRANDS 사전계산 테이블 ──────────────────────────────
+    try:
+        import portal_refresh
+        rows_pre = portal_refresh.main._safe_query(
+            f"SELECT * FROM {portal_refresh.T_BRANDS} WHERE emp_code = '{emp_code}' ORDER BY sales_m DESC LIMIT 200",
+            raw=True,
+        ) or []
+        if rows_pre:
+            out_pre = []
+            for b in rows_pre:
+                code = str(b.get("brand_code") or "")
+                sales = float(b.get("sales_m") or 0) * 10000  # sales_m → raw
+                out_pre.append({
+                    "brand_code":        code,
+                    "brand_name":        str(b.get("brand_name") or ""),
+                    "customer_count":    int(b.get("customer_count") or 0),
+                    "sales":             sales,
+                    "sales_m":           int(b.get("sales_m") or 0),
+                    "my_customer_count": int(b.get("my_customer_count") or 0),
+                    "my_sales":          float(b.get("my_sales_m") or 0) * 10000,
+                    "my_sales_m":        int(b.get("my_sales_m") or 0),
+                    "generic_ratio":     float(b.get("generic_ratio") or 0),
+                    "cm_rate":           (round(float(b["cm_rate"]), 1) if b.get("cm_rate") is not None else None),
+                    "dedicated_sales":   0,
+                    "generic_sales":     0,
+                    "classified_sales":  0,
+                })
+            _cache_set(f"brands:{emp_code}", out_pre)
+            return out_pre
+    except Exception:
+        pass  # fallback to live query
+    # ── 2순위: T_MAIN 실시간 쿼리 ────────────────────────────────────
     import main
     latest = _latest_ym(emp_code)
     if not latest:
