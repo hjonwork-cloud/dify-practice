@@ -83,12 +83,18 @@
   </div>
 </div>
 
+<!-- JS 초기값: data 속성으로 전달 (autoescape 영향 없음) -->
+<div id="brandInitData"
+     data-brand="{{ selected_brand }}"
+     data-threshold="{{ threshold }}"
+     hidden></div>
+
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
-{% autoescape false %}
 <script>
 (function(){
-  var selectedBrand = {{ selected_brand | tojson if selected_brand else '""' }};
-  var currentThreshold = {{ threshold | tojson if threshold else 'null' }};
+  var _init = document.getElementById('brandInitData').dataset;
+  var selectedBrand = _init.brand || '';
+  var currentThreshold = _init.threshold ? parseFloat(_init.threshold) : null;
   var chartInstance = null;
   var brandsLoaded = false;
 
@@ -270,5 +276,4 @@
   }
 })();
 </script>
-{% endautoescape %}
 {% endblock %}
