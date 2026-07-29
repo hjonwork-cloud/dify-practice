@@ -335,9 +335,11 @@ def _in_months(months: list[str]) -> str:
 
 
 def _latest_ym(emp_code: str = _DEFAULT_EMP_CODE) -> str:
-    cached = _cache_get(f"latest:{emp_code}")
-    if cached:
-        return str(cached)
+    # 팀리더는 캐시 미사용
+    if not _is_team_leader(emp_code):
+        cached = _cache_get(f"latest:{emp_code}")
+        if cached:
+            return str(cached)
     import main
     rows = _q(f"""
         SELECT MAX(`년월`) AS ym
@@ -346,7 +348,9 @@ def _latest_ym(emp_code: str = _DEFAULT_EMP_CODE) -> str:
           AND `매출액` IS NOT NULL
     """)
     ym = str((rows[0] or {}).get("ym") or "") if rows else ""
-    return _cache_set(f"latest:{emp_code}", ym)
+    if ym and not _is_team_leader(emp_code):
+        _cache_set(f"latest:{emp_code}", ym)
+    return ym
 
 
 def _latest_bill_date(emp_code: str = _DEFAULT_EMP_CODE, ym: str = "") -> str:
@@ -415,9 +419,11 @@ def _brand_cm_map(emp_code: str, profit_ym: str) -> dict[str, float]:
 
 
 def _brand_rows(emp_code: str = _DEFAULT_EMP_CODE) -> list[dict]:
-    cached = _cache_get(f"brands:{emp_code}")
-    if cached is not None:
-        return cached
+    # 팀리더는 캐시 미사용 (지점 전체 데이터 조회 보장)
+    if not _is_team_leader(emp_code):
+        cached = _cache_get(f"brands:{emp_code}")
+        if cached:  # 빈 리스트는 캐시 무효 처리
+            return cached
     import main
     latest = _latest_ym(emp_code)
     if not latest:
@@ -512,7 +518,10 @@ def _brand_rows(emp_code: str = _DEFAULT_EMP_CODE) -> list[dict]:
             "dedicated_sales": 0, "generic_sales": 0, "classified_sales": 0,
             "generic_ratio": 0.0, "cm_rate": None,
         })
-    return _cache_set(f"brands:{emp_code}", out)
+    # 팀리더는 캐시 저장 안함, 일반도 빈 결과는 저장 안함
+    if out and not _is_team_leader(emp_code):
+        _cache_set(f"brands:{emp_code}", out)
+    return out
 
 
 

@@ -31,12 +31,16 @@
   .nav-label { transition:opacity .18s,max-width .22s; opacity:1; max-width:200px; overflow:hidden; white-space:nowrap; }
   .nav-parent { padding:14px 15px; border-radius:14px; color:#fff!important; cursor:pointer; font-weight:750; user-select:none; }
   .nav-parent:hover,.nav-parent.active { background:linear-gradient(135deg,#fff,var(--portal-coral-soft,#e8fdf5)); color:#071015!important; }
+  .nav-parent:hover .nav-icon, .nav-parent:hover .nav-label, .nav-parent:hover .nav-arrow,
+  .nav-parent.active .nav-icon, .nav-parent.active .nav-label, .nav-parent.active .nav-arrow { color:#071015!important; }
   .portal-nav>a { color:#fff!important; }
   .portal-nav>a.active,.portal-nav>a:hover { color:#071015!important; }
+  .nav-icon, .nav-label, .nav-arrow { color:inherit!important; }
   .nav-sub { display:grid; gap:2px; margin:2px 0 4px 28px;
              overflow:hidden; transition:max-height .22s cubic-bezier(.4,0,.2,1); max-height:200px; }
   .nav-sub.closed { max-height:0; }
   .nav-sub a { padding:9px 12px; border-radius:10px; color:rgba(255,255,255,.82)!important; font-size:.85rem; font-weight:600; }
+  .nav-sub a span { color:inherit!important; }
   .nav-sub a.active,.nav-sub a:hover { background:rgba(255,255,255,.14); color:#fff!important; }
   .nav-arrow { margin-left:auto; font-size:11px; transition:transform .2s; }
   .nav-parent.open .nav-arrow { transform:rotate(180deg); }

@@ -106,12 +106,16 @@
   var mn  = ratios[0], mx = ratios[n-1];
   var targetCount = customers.filter(function(c){ return c.is_target; }).length;
 
-  // X축 범위: brandAvg 중앙 배치
-  var spread = Math.max(brandAvg * 0.9, 25);
-  var xMin = Math.max(0,   Math.floor(brandAvg - spread));
-  var xMax = Math.min(100, Math.ceil(brandAvg + spread));
-  xMin = Math.min(xMin, Math.max(0, mn - 3));
-  xMax = Math.max(xMax, Math.min(100, mx + 3));
+  // X축 범위: brandAvg 완전 대칭 중앙 배치
+  // 데이터 양쪽 끝에서 brandAvg까지 거리 중 큰 값 + 여백
+  var leftDist  = Math.max(brandAvg - mn, 5);
+  var rightDist = Math.max(mx - brandAvg, 5);
+  var halfRange = Math.max(leftDist, rightDist) + 8;  // 대칭 반경
+  var xMin = Math.max(0,   Math.round(brandAvg - halfRange));
+  var xMax = Math.min(100, Math.round(brandAvg + halfRange));
+  // 한쪽이 경계에 닿으면 반대쪽도 조정
+  if (xMin === 0)   xMax = Math.min(100, brandAvg + brandAvg + 8);
+  if (xMax === 100) xMin = Math.max(0,   brandAvg - (100 - brandAvg) - 8);
 
   // 통계 배지
   var statsEl = document.getElementById('scatterStats');
