@@ -19,16 +19,16 @@
 .brand-error-box{padding:2rem;text-align:center;color:#dc2626;}
 </style>
 
-<!-- 헤딩: 브랜드 셀렉터는 즉시 렌더 (T_BRANDS 사전계산) -->
+<!-- 헤딩: 브랜드 셀렉터는 AJAX 응답 후 JS가 채움 -->
 <div class="portal-heading">
   <div>
     <p class="eyebrow">GENERIC PRODUCT PROPOSAL</p>
-    <h1 id="headingBrandName">{% if selected_brand %}{{ selected_brand }}{% else %}범용상품 제안 솔루션{% endif %}</h1>
+    <h1 id="headingBrandName">범용상품 제안 솔루션</h1>
     <p id="headingSubtitle" style="color:#6b7280;">데이터 불러오는 중&hellip;</p>
   </div>
   <div style="display:flex;align-items:center;gap:.75rem;flex-shrink:0;">
     <select id="brandSelect" style="padding:.4rem .75rem;border:1px solid #d1d5db;border-radius:.4rem;font-size:.9rem;cursor:pointer;">
-      {% for b in brands %}<option value="{{ b.brand_name }}"{% if b.brand_name == selected_brand %} selected{% endif %}>{{ b.brand_name }}</option>{% endfor %}
+      <option value="">로딩 중…</option>
     </select>
     <a id="actionLink" href="#" class="btn portal-primary" style="white-space:nowrap;font-size:.85rem;padding:.45rem 1rem;opacity:.4;pointer-events:none;">&#9889; 액션 실행</a>
   </div>
@@ -86,9 +86,10 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
 <script>
 (function(){
-  var selectedBrand = {{ selected_brand | tojson }};
+  var selectedBrand = {{ selected_brand | tojson if selected_brand else '""' }};
   var currentThreshold = {{ threshold | tojson if threshold else 'null' }};
   var chartInstance = null;
+  var brandsLoaded = false;
 
   var sel = document.getElementById('brandSelect');
   if (sel) {
@@ -99,10 +100,26 @@
     });
   }
 
+  function populateSelect(brands, currentName) {
+    if (!sel || brandsLoaded || !brands || !brands.length) return;
+    brandsLoaded = true;
+    sel.innerHTML = '';
+    brands.forEach(function(b) {
+      var opt = document.createElement('option');
+      opt.value = b.brand_name;
+      opt.textContent = b.brand_name;
+      if (b.brand_name === currentName) opt.selected = true;
+      sel.appendChild(opt);
+    });
+  }
+
   function loadBrandData(brand, threshold) {
     showSkeleton();
-    var url = '/portal/brand-report-data?brand=' + encodeURIComponent(brand);
-    if (threshold !== null && threshold !== undefined) url += '&threshold=' + threshold;
+    var url = '/portal/brand-report-data';
+    var params = [];
+    if (brand) params.push('brand=' + encodeURIComponent(brand));
+    if (threshold !== null && threshold !== undefined) params.push('threshold=' + threshold);
+    if (params.length) url += '?' + params.join('&');
     fetch(url, {credentials: 'same-origin'})
       .then(function(r){ return r.json(); })
       .then(function(data){
@@ -130,6 +147,10 @@
   function renderContent(data) {
     var brand = data.brand || {};
     var bname = brand.brand_name || selectedBrand;
+    selectedBrand = bname;
+
+    // 브랜드 셀렉터 채우기 (최초 1회)
+    populateSelect(data.brands || [], bname);
 
     document.getElementById('headingBrandName').textContent = bname;
     document.getElementById('headingSubtitle').textContent =
@@ -147,12 +168,6 @@
     document.getElementById('mAvgLabel').textContent = (data.prev_ym||'') + ' 전용상품 제외';
     document.getElementById('mThreshold').textContent = (data.threshold||0) + '%';
     document.getElementById('mTargetCount').textContent = data.target_count||0;
-
-    if (sel) {
-      for (var i = 0; i < sel.options.length; i++) {
-        if (sel.options[i].value === bname) { sel.selectedIndex = i; break; }
-      }
-    }
 
     document.getElementById('brandSkeleton').setAttribute('hidden', '');
     document.getElementById('brandContent').removeAttribute('hidden');

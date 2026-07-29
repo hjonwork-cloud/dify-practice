@@ -1318,21 +1318,10 @@ async def brand_report_page(
     threshold: float | None = None,
     sent: str = "",
 ):
-    """스켈레톤 HTML 즉시 반환. 실제 데이터는 /brand-report-data AJAX로 로딩."""
-    user = _require_user(request)
-    # 브랜드 목록만 T_BRANDS에서 빠르게 조회 (< 1초)
-    brands = _brand_rows(user["emp_code"])
-    # 기본 선택 브랜드 결정
-    selected = brand
-    if not selected and brands:
-        for b in brands:
-            if "생활맥주" in str(b.get("brand_name") or ""):
-                selected = str(b["brand_name"])
-                break
-        if not selected:
-            selected = str(brands[0]["brand_name"]) if brands else ""
+    """DB 쿼리 없이 스켈레톤 HTML 즉시 반환. 브랜드 목록+데이터는 /brand-report-data AJAX로 로딩."""
+    _require_user(request)
     return _render(request, "portal_brand_report.html",
-                   brands=brands, selected_brand=selected,
+                   selected_brand=brand,
                    threshold=threshold or "", sent=sent)
 
 
