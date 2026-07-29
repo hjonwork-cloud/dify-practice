@@ -22,6 +22,8 @@ from pydantic import BaseModel
 import access_control
 import portal_db
 
+import logging
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/portal", tags=["sales-portal"])
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
 _STATIC_DIR = Path(__file__).parent / "static"
@@ -816,7 +818,7 @@ def brand_report(
             if cached is not None:
                 return cached
         except Exception as _pre_err:
-            logger.warning(f"[brand_report] precomputed fallback ({emp_code}, {brand_name}): {_pre_err}")
+            logger.warning(f"[brand_report] precomputed fallback ({emp_code}): {_pre_err}")
     # ── fallback: 실시간 쿼리 ─────────────────────────────────────────
     if not picked:
         return {
@@ -1351,7 +1353,7 @@ async def brand_report_data_api(
             threshold_pct=threshold,
             customer_page=customer_page, target_page=target_page,
         )
-        return JSONResponse(content=data)
+        return JSONResponse(content=_json_safe(data))
     except Exception as _e:
         logger.error(f"[brand-report-data] {emp_code} error: {_e}", exc_info=True)
         return JSONResponse(content={"error": str(_e)}, status_code=500)
