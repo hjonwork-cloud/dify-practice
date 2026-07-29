@@ -815,8 +815,8 @@ def brand_report(
             )
             if cached is not None:
                 return cached
-        except Exception:
-            pass  # fallback to live queries
+        except Exception as _pre_err:
+            logger.warning(f"[brand_report] precomputed fallback ({emp_code}, {brand_name}): {_pre_err}")
     # ── fallback: 실시간 쿼리 ─────────────────────────────────────────
     if not picked:
         return {
@@ -1314,13 +1314,47 @@ async def brand_report_page(
     request: Request,
     brand: str = "",
     threshold: float | None = None,
-    customer_page: int = 1,
-    target_page: int = 1,
     sent: str = "",
 ):
+    """스켈레톤 HTML 즉시 반환. 실제 데이터는 /brand-report-data AJAX로 로딩."""
     user = _require_user(request)
-    report = brand_report(brand or None, emp_code=user["emp_code"], threshold_pct=threshold, customer_page=customer_page, target_page=target_page)
-    return _render(request, "portal_brand_report.html", report=report, sent=sent)
+    # 브랜드 목록만 T_BRANDS에서 빠르게 조회 (< 1초)
+    brands = _brand_rows(user["emp_code"])
+    # 기본 선택 브랜드 결정
+    selected = brand
+    if not selected and brands:
+        for b in brands:
+            if "생활맥주" in str(b.get("brand_name") or ""):
+                selected = str(b["brand_name"])
+                break
+        if not selected:
+            selected = str(brands[0]["brand_name"]) if brands else ""
+    return _render(request, "portal_brand_report.html",
+                   brands=brands, selected_brand=selected,
+                   threshold=threshold or "", sent=sent)
+
+
+@router.get("/brand-report-data")
+async def brand_report_data_api(
+    request: Request,
+    brand: str = "",
+    threshold: float | None = None,
+    customer_page: int = 1,
+    target_page: int = 1,
+):
+    """brand-report 데이터 JSON 반환 (AJAX 전용)."""
+    user = _require_user(request)
+    emp_code = user["emp_code"]
+    try:
+        data = brand_report(
+            brand or None, emp_code=emp_code,
+            threshold_pct=threshold,
+            customer_page=customer_page, target_page=target_page,
+        )
+        return JSONResponse(content=data)
+    except Exception as _e:
+        logger.error(f"[brand-report-data] {emp_code} error: {_e}", exc_info=True)
+        return JSONResponse(content={"error": str(_e)}, status_code=500)
 
 
 @router.get("/admin", response_class=HTMLResponse)
