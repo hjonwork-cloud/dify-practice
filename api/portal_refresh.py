@@ -355,12 +355,15 @@ def run_refresh(force: bool = False) -> dict:
         logger.warning(f"[refresh] {T_BRAND_MONTHLY} 생성 실패 (무시): {e}")
 
     # ── Step 4: 브랜드 요약 통계 (T_BRAND_SUMMARY) ─────────────────────────
+    # 당월+전월 두 달치를 `ym` 컬럼으로 함께 저장 → 프론트 토글 즉시 응답 가능
+    prev_ym = _shift_ym(latest_ym, -1)
+    _target_yms_in = f"('{latest_ym}','{prev_ym}')"
     brand_summary_sql = f"""
     CREATE OR REPLACE TABLE {T_BRAND_SUMMARY} AS
     SELECT
+        `년월` AS ym,
         `ZC본부` AS brand_code,
         `ZC본부명` AS brand_name,
-        '{prev_ym}' AS prev_ym,
         COUNT(DISTINCT `거래처`) AS customer_count,
         ROUND(SUM(`매출액`)/10000) AS brand_total_sales_m,
         CASE WHEN SUM(CASE WHEN `자재그룹명` IS NOT NULL THEN `매출액` ELSE 0 END) = 0 THEN 0.0
@@ -376,17 +379,18 @@ def run_refresh(force: bool = False) -> dict:
         END AS generic_gp_rate,
         CURRENT_TIMESTAMP() AS updated_at
     FROM {main.T_MAIN}
-    WHERE `년월` = '{prev_ym}' AND `사업부명` = '외식식재사업부'
+    WHERE `년월` IN {_target_yms_in} AND `사업부명` = '외식식재사업부'
       AND `ZC본부` IS NOT NULL AND {_zc8}
-    GROUP BY `ZC본부`, `ZC본부명`
+    GROUP BY `년월`, `ZC본부`, `ZC본부명`
     """
     try:
         main._safe_query(brand_summary_sql, raw=True)
-        logger.info(f"[refresh] {T_BRAND_SUMMARY} 생성 완료")
+        logger.info(f"[refresh] {T_BRAND_SUMMARY} 생성 완료 (yms={latest_ym},{prev_ym})")
     except Exception as e:
         logger.warning(f"[refresh] {T_BRAND_SUMMARY} 생성 실패 (무시): {e}")
 
     # ── Step 5: 가맹점별 범용비중 (T_BRAND_CUST) ───────────────────────────
+    # 당월+전월 두 달치 저장 (ym 컬럼)
     _generic_ratio_expr = """
         CASE WHEN SUM(CASE WHEN `자재그룹명` IS NOT NULL THEN `매출액` ELSE 0 END) = 0 THEN 0.0
              ELSE ROUND(
@@ -399,49 +403,52 @@ def run_refresh(force: bool = False) -> dict:
         SUM(CASE WHEN `자재그룹명` IS NOT NULL AND COALESCE(`자재그룹명`,'') <> 'FC전용상품' THEN `매출액` ELSE 0 END) AS generic_sales,
         {_generic_ratio_expr} AS generic_ratio,
         MAX(`플랜트`) AS plant_code"""
-    _where_brand = f"""
-        WHERE `년월` = '{prev_ym}' AND `사업부명` = '외식식재사업부'
+    _where_brand_2m = f"""
+        WHERE `년월` IN {_target_yms_in} AND `사업부명` = '외식식재사업부'
           AND `ZC본부` IS NOT NULL AND {_zc8}"""
 
     brand_cust_sql = f"""
     CREATE OR REPLACE TABLE {T_BRAND_CUST} AS
     WITH
     emp_data AS (
-        SELECT `영업사원` AS emp_code, `ZC본부` AS brand_code, `ZC본부명` AS brand_name,
+        SELECT `영업사원` AS emp_code, `년월` AS ym,
+               `ZC본부` AS brand_code, `ZC본부명` AS brand_name,
                `거래처` AS customer_code, MAX(`거래처명`) AS customer_name,
                {_sales_exprs}
         FROM {main.T_MAIN}
-        {_where_brand}
-        GROUP BY `영업사원`, `ZC본부`, `ZC본부명`, `거래처`
+        {_where_brand_2m}
+        GROUP BY `영업사원`, `년월`, `ZC본부`, `ZC본부명`, `거래처`
         HAVING SUM(`매출액`) > 0
     ),
     leader_data AS (
-        SELECT {_leader_case} AS emp_code, `ZC본부` AS brand_code, `ZC본부명` AS brand_name,
+        SELECT {_leader_case} AS emp_code, `년월` AS ym,
+               `ZC본부` AS brand_code, `ZC본부명` AS brand_name,
                `거래처` AS customer_code, MAX(`거래처명`) AS customer_name,
                {_sales_exprs}
         FROM {main.T_MAIN}
-        {_where_brand} AND {_leaders_where}
-        GROUP BY `지점명`, `ZC본부`, `ZC본부명`, `거래처`
+        {_where_brand_2m} AND {_leaders_where}
+        GROUP BY `지점명`, `년월`, `ZC본부`, `ZC본부명`, `거래처`
         HAVING SUM(`매출액`) > 0
     ),
     admin_data AS (
-        SELECT '{_admin_code}' AS emp_code, `ZC본부` AS brand_code, `ZC본부명` AS brand_name,
+        SELECT '{_admin_code}' AS emp_code, `년월` AS ym,
+               `ZC본부` AS brand_code, `ZC본부명` AS brand_name,
                `거래처` AS customer_code, MAX(`거래처명`) AS customer_name,
                {_sales_exprs}
         FROM {main.T_MAIN}
-        {_where_brand}
-        GROUP BY `ZC본부`, `ZC본부명`, `거래처`
+        {_where_brand_2m}
+        GROUP BY `년월`, `ZC본부`, `ZC본부명`, `거래처`
         HAVING SUM(`매출액`) > 0
     )
-    SELECT *, '{prev_ym}' AS prev_ym, CURRENT_TIMESTAMP() AS updated_at FROM emp_data
+    SELECT *, CURRENT_TIMESTAMP() AS updated_at FROM emp_data
     UNION ALL
-    SELECT *, '{prev_ym}' AS prev_ym, CURRENT_TIMESTAMP() AS updated_at FROM leader_data WHERE emp_code IS NOT NULL
+    SELECT *, CURRENT_TIMESTAMP() AS updated_at FROM leader_data WHERE emp_code IS NOT NULL
     UNION ALL
-    SELECT *, '{prev_ym}' AS prev_ym, CURRENT_TIMESTAMP() AS updated_at FROM admin_data
+    SELECT *, CURRENT_TIMESTAMP() AS updated_at FROM admin_data
     """
     try:
         main._safe_query(brand_cust_sql, raw=True)
-        logger.info(f"[refresh] {T_BRAND_CUST} 생성 완료")
+        logger.info(f"[refresh] {T_BRAND_CUST} 생성 완료 (yms={latest_ym},{prev_ym})")
     except Exception as e:
         logger.warning(f"[refresh] {T_BRAND_CUST} 생성 실패 (무시): {e}")
 
@@ -522,38 +529,32 @@ def read_brand_report_from_table(
     threshold_pct: float | None = None,
     customer_page: int = 1,
     target_page: int = 1,
+    ym_mode: str = "prev",  # "prev"=전월 / "current"=당월
 ) -> dict | None:
     """
     사전 계산 테이블에서 brand_report() 결과를 조회.
     T_BRAND_SUMMARY + T_BRAND_CUST + T_BRAND_MONTHLY + T_BRANDS 병렬 조회.
+    T_BRAND_SUMMARY / T_BRAND_CUST 는 당월+전월 두 달치를 담고 있어 ym_mode 로 즉시 전환.
     데이터 없으면 None 반환 → brand_report() fallback 실시간 처리.
     """
     import main
     from concurrent.futures import ThreadPoolExecutor
     try:
-        # ── 4개 테이블 병렬 조회 ────────────────────────────────────
+        # ── Phase 1: summary (두 달치) + monthly + brands 병렬 조회 ──
         def _q_summary():
+            # 당월/전월 두 행 모두 조회 (ym DESC → [0]=latest, [1]=prev)
             return main._safe_query(
-                f"SELECT * FROM {T_BRAND_SUMMARY} WHERE brand_name = '{brand_name}' LIMIT 1",
+                f"SELECT * FROM {T_BRAND_SUMMARY}"
+                f" WHERE brand_name = '{brand_name}'"
+                f" ORDER BY ym DESC LIMIT 2",
                 raw=True,
             ) or []
 
         def _q_monthly():
-            # MAX(ym) 없이 최근 6개월치를 한 번에 조회 → Python에서 슬라이싱
             return main._safe_query(
                 f"SELECT ym, sales_m FROM {T_BRAND_MONTHLY}"
                 f" WHERE brand_name = '{brand_name}'"
                 f" ORDER BY ym DESC LIMIT 6",
-                raw=True,
-            ) or []
-
-        def _q_cust():
-            return main._safe_query(
-                f"SELECT customer_code, customer_name, plant_code,"
-                f"       sales, dedicated_sales, generic_sales, generic_ratio"
-                f" FROM {T_BRAND_CUST}"
-                f" WHERE emp_code = '{emp_code}' AND brand_name = '{brand_name}'"
-                f" ORDER BY sales DESC",
                 raw=True,
             ) or []
 
@@ -563,33 +564,55 @@ def read_brand_report_from_table(
                 raw=True,
             ) or []
 
-        with ThreadPoolExecutor(max_workers=4) as ex:
+        with ThreadPoolExecutor(max_workers=3) as ex:
             f_summary = ex.submit(_q_summary)
             f_monthly = ex.submit(_q_monthly)
-            f_cust    = ex.submit(_q_cust)
             f_brands  = ex.submit(_q_brands)
             summary_rows = f_summary.result()
             monthly_all  = f_monthly.result()
-            cust_rows    = f_cust.result()
             brands_raw   = f_brands.result()
 
         # ── 결과 검증 ──────────────────────────────────────────────
         if not summary_rows:
+            logger.warning(f"[brand_report_table] summary empty: brand={brand_name} → None")
             return None
-        s = summary_rows[0]
-        prev_ym = str(s.get("prev_ym") or "")
-        brand_avg = float(s.get("brand_avg") or 0)
-        generic_gp_rate = float(s.get("generic_gp_rate") or 0)
+
+        # ── ym 결정: summary 두 행에서 latest/prev 추출 ─────────────
+        summary_by_ym = {str(r.get("ym") or ""): r for r in summary_rows}
+        yms_desc = sorted(summary_by_ym.keys(), reverse=True)
+        latest_ym = yms_desc[0] if yms_desc else ""
+        prev_ym   = yms_desc[1] if len(yms_desc) > 1 else _shift_ym(latest_ym, -1)
+
+        mode = (ym_mode or "prev").lower()
+        if mode == "current":
+            selected_ym = latest_ym
+        else:
+            mode = "prev"
+            selected_ym = prev_ym or latest_ym  # prev 없으면 latest 로 폴백
+
+        s = summary_by_ym.get(selected_ym) or summary_rows[0]
+        brand_avg           = float(s.get("brand_avg") or 0)
+        generic_gp_rate     = float(s.get("generic_gp_rate") or 0)
         brand_total_sales_m = int(s.get("brand_total_sales_m") or 0)
-        brand_code = str(s.get("brand_code") or "")
+        brand_code          = str(s.get("brand_code") or "")
+
+        # ── Phase 2: cust (선택된 ym 만) 별도 조회 ─────────────────
+        cust_rows = main._safe_query(
+            f"SELECT customer_code, customer_name, plant_code,"
+            f"       sales, dedicated_sales, generic_sales, generic_ratio"
+            f" FROM {T_BRAND_CUST}"
+            f" WHERE emp_code = '{emp_code}'"
+            f"   AND brand_name = '{brand_name}'"
+            f"   AND ym = '{selected_ym}'"
+            f" ORDER BY sales DESC",
+            raw=True,
+        ) or []
 
         if not cust_rows:
-            logger.warning(f"[brand_report_table] cust_rows empty: emp={emp_code} brand={brand_name} → returning empty customer list (no fallback)")
-            # 고객 데이터 없어도 요약+월별은 반환 (fallback live query 방지)
+            logger.warning(f"[brand_report_table] cust_rows empty: emp={emp_code} brand={brand_name} ym={selected_ym} → returning empty customer list (no fallback)")
 
         # ── 월별 매출 가공 (DESC로 받아서 최신 3개월 추출) ───────────
         monthly_all_sorted = sorted(monthly_all, key=lambda r: str(r.get("ym") or ""), reverse=True)
-        latest_ym = str(monthly_all_sorted[0].get("ym") or "") if monthly_all_sorted else ""
         months_3 = [latest_ym, _shift_ym(latest_ym, -1), _shift_ym(latest_ym, -2)]
         months_3 = [m for m in months_3 if m]
         months_3_set = set(months_3)
@@ -598,8 +621,9 @@ def read_brand_report_from_table(
              for r in monthly_all if str(r.get("ym") or "") in months_3_set],
             key=lambda r: r["ym"],
         )
-        current_month_sales_m = next(
-            (int(r.get("sales_m") or 0) for r in monthly_sales if str(r.get("ym")) == latest_ym), 0
+        # selected_ym 의 월 매출 (카드 표시용)
+        selected_month_sales_m = next(
+            (int(r.get("sales_m") or 0) for r in monthly_sales if str(r.get("ym")) == selected_ym), 0
         )
 
         # ── threshold 계산 ─────────────────────────────────────────
@@ -673,10 +697,12 @@ def read_brand_report_from_table(
             "brands": brands_list,
             "latest_ym": latest_ym,
             "prev_ym": prev_ym,
+            "selected_ym": selected_ym,
+            "ym_mode": mode,
             "period_months": months_3,
             "monthly_sales": monthly_sales,
             "brand_avg": brand_avg,
-            "brand_total_sales_m": current_month_sales_m or brand_total_sales_m,
+            "brand_total_sales_m": selected_month_sales_m or brand_total_sales_m,
             "customers": customers,
             "customer_page": customer_page_items,
             "customer_pagination": customer_pagination,

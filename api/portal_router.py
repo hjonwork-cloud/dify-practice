@@ -802,6 +802,7 @@ def brand_report(
     threshold_pct: float | None = None,
     customer_page: int = 1,
     target_page: int = 1,
+    ym_mode: str = "prev",  # "prev"=전월 / "current"=당월
 ) -> dict:
     # ── 사전계산 테이블 우선 조회 (팀리더는 실시간 쿼리 강제 — 캐시 테이블이 개인 범위로 잘못 캐싱될 수 있음) ──────────
     picked = _pick_brand(brand_name, emp_code)
@@ -814,6 +815,7 @@ def brand_report(
                 threshold_pct=threshold_pct,
                 customer_page=customer_page,
                 target_page=target_page,
+                ym_mode=ym_mode,
             )
             if cached is not None:
                 return cached
@@ -844,6 +846,9 @@ def brand_report(
     latest = _latest_ym(emp_code)
     months = _period_months(latest, 3)
     prev_ym = _month_shift(latest, -1) if latest else ""
+    # ym_mode 에 따라 라이브 쿼리도 대상 월 스위칭
+    _ym_mode = (ym_mode or "prev").lower()
+    selected_ym = latest if _ym_mode == "current" else (prev_ym or latest)
     bname = str(picked.get("brand_name") or "")
     monthly_rows = _q(f"""
         SELECT `년월` AS ym,
@@ -855,7 +860,7 @@ def brand_report(
         ORDER BY `년월`
     """) if months else []
     monthly_sales = [{**r, "sales_m": _money_m(r.get("sales"))} for r in monthly_rows]
-    current_month_sales_m = next((int(r.get("sales_m") or 0) for r in monthly_sales if str(r.get("ym")) == latest), 0)
+    current_month_sales_m = next((int(r.get("sales_m") or 0) for r in monthly_sales if str(r.get("ym")) == selected_ym), 0)
     avg_rows = _q(f"""
            SELECT CASE WHEN SUM(CASE WHEN `자재그룹명` IS NOT NULL THEN `매출액` ELSE 0 END) = 0 THEN 0
                     ELSE SUM(CASE WHEN `자재그룹명` IS NOT NULL AND COALESCE(`자재그룹명`, '') <> 'FC전용상품' THEN `매출액` ELSE 0 END)
@@ -864,7 +869,7 @@ def brand_report(
                COUNT(DISTINCT `ZC본부`) AS customer_count
         FROM {main.T_MAIN}
         WHERE `ZC본부명` = {_sql(bname)}
-                    AND `년월` = {_sql(prev_ym)}
+                    AND `년월` = {_sql(selected_ym)}
     """)
     avg = _pct((avg_rows[0] or {}).get("brand_avg")) if avg_rows else 0
     brand_total_sales_m = _money_m((avg_rows[0] or {}).get("sales")) if avg_rows else 0
@@ -875,7 +880,7 @@ def brand_report(
                     ELSE (SUM(`매출액`) - SUM(COALESCE(`매출원가`, 0))) / SUM(`매출액`) END AS generic_gp_rate
         FROM {main.T_MAIN}
         WHERE `ZC본부명` = {_sql(bname)}
-          AND `년월` = {_sql(prev_ym)}
+          AND `년월` = {_sql(selected_ym)}
           AND `자재그룹명` IS NOT NULL
           AND COALESCE(`자재그룹명`, '') <> 'FC전용상품'
     """)
@@ -894,7 +899,7 @@ def brand_report(
         FROM {main.T_MAIN}
         WHERE {scope}
           AND `ZC본부명` = {_sql(bname)}
-          AND `년월` = {_sql(prev_ym)}
+          AND `년월` = {_sql(selected_ym)}
         GROUP BY `거래처`, `거래처명`
         HAVING SUM(`매출액`) > 0
         ORDER BY sales DESC
@@ -937,6 +942,8 @@ def brand_report(
         "brands": _brand_rows(emp_code),
         "latest_ym": latest,
         "prev_ym": prev_ym,
+        "selected_ym": selected_ym,
+        "ym_mode": _ym_mode,
         "period_months": months,
         "monthly_sales": monthly_sales,
         "brand_avg": avg,
@@ -1506,17 +1513,21 @@ async def brand_report_data_api(
     threshold: float | None = None,
     customer_page: int = 1,
     target_page: int = 1,
+    ym: str = "prev",  # "prev"=전월 / "current"=당월
 ):
     """brand-report 데이터 JSON 반환 (AJAX 전용)."""
     user = _require_user(request)
     emp_code = user["emp_code"]
+    ym_mode = (ym or "prev").lower()
+    if ym_mode not in ("prev", "current"):
+        ym_mode = "prev"
     t0 = time.time()
     try:
         # ── 1단계: _pick_brand (브랜드 목록 조회) ───────────────────
         t1 = time.time()
         picked = _pick_brand(brand or None, emp_code)
         t2 = time.time()
-        logger.info(f"[brand-data] {emp_code} _pick_brand={t2-t1:.2f}s picked={picked.get('brand_name') if picked else None}")
+        logger.info(f"[brand-data] {emp_code} _pick_brand={t2-t1:.2f}s picked={picked.get('brand_name') if picked else None} ym_mode={ym_mode}")
 
         if not picked:
             # T_BRANDS 없음 → live query fallback으로 브랜드 목록 시도
@@ -1524,7 +1535,8 @@ async def brand_report_data_api(
             try:
                 data = brand_report(brand or None, emp_code=emp_code,
                                     threshold_pct=threshold,
-                                    customer_page=customer_page, target_page=target_page)
+                                    customer_page=customer_page, target_page=target_page,
+                                    ym_mode=ym_mode)
                 t_fb = time.time()
                 data["_timing"] = {"pick_s": round(t2-t1,2), "query_s": round(t_fb-t2,2),
                                    "total_s": round(t_fb-t0,2), "source": "live_no_cache"}
@@ -1541,6 +1553,7 @@ async def brand_report_data_api(
             str(picked.get("brand_name") or ""),
             threshold_pct=threshold,
             customer_page=customer_page, target_page=target_page,
+            ym_mode=ym_mode,
         )
         t4 = time.time()
         logger.info(f"[brand-data] {emp_code} precomputed={t4-t3:.2f}s hit={'YES' if cached else 'NO(fallback)'}")
@@ -1550,11 +1563,12 @@ async def brand_report_data_api(
             return JSONResponse(content=_json_safe(cached))
 
         # ── 3단계: fallback 실시간 쿼리 ──────────────────────────────
-        logger.warning(f"[brand-data] {emp_code} fallback to live query brand={picked.get('brand_name')}")
+        logger.warning(f"[brand-data] {emp_code} fallback to live query brand={picked.get('brand_name')} ym_mode={ym_mode}")
         data = brand_report(
             str(picked.get("brand_name") or ""), emp_code=emp_code,
             threshold_pct=threshold,
             customer_page=customer_page, target_page=target_page,
+            ym_mode=ym_mode,
         )
         t5 = time.time()
         logger.info(f"[brand-data] {emp_code} fallback_live={t5-t4:.2f}s total={t5-t0:.2f}s")

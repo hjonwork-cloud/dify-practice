@@ -17,6 +17,11 @@
 #brandSkeleton[hidden]{display:none!important;}
 #brandError[hidden]{display:none!important;}
 .brand-error-box{padding:2rem;text-align:center;color:#dc2626;}
+.ym-toggle{display:inline-flex;border:1px solid #d1d5db;border-radius:.4rem;overflow:hidden;background:#fff;}
+.ym-toggle button{border:0;background:transparent;padding:.4rem .85rem;font-size:.85rem;cursor:pointer;color:#374151;border-right:1px solid #e5e7eb;}
+.ym-toggle button:last-child{border-right:0;}
+.ym-toggle button.active{background:#111827;color:#fff;font-weight:600;}
+.ym-toggle button:disabled{opacity:.5;cursor:not-allowed;}
 </style>
 
 <!-- 헤딩: 브랜드 셀렉터는 AJAX 응답 후 JS가 채움 -->
@@ -26,7 +31,11 @@
     <h1 id="headingBrandName">범용상품 제안 솔루션</h1>
     <p id="headingSubtitle" style="color:#6b7280;">데이터 불러오는 중&hellip;</p>
   </div>
-  <div style="display:flex;align-items:center;gap:.75rem;flex-shrink:0;">
+  <div style="display:flex;align-items:center;gap:.75rem;flex-shrink:0;flex-wrap:wrap;">
+    <div class="ym-toggle" role="group" aria-label="기준월 선택">
+      <button type="button" id="ymBtnPrev" class="active" data-ym="prev">전월</button>
+      <button type="button" id="ymBtnCurrent" data-ym="current">당월</button>
+    </div>
     <select id="brandSelect" style="padding:.4rem .75rem;border:1px solid #d1d5db;border-radius:.4rem;font-size:.9rem;cursor:pointer;">
       <option value="">로딩 중…</option>
     </select>
@@ -95,6 +104,7 @@
   var _init = document.getElementById('brandInitData').dataset;
   var selectedBrand = _init.brand || '';
   var currentThreshold = _init.threshold ? parseFloat(_init.threshold) : null;
+  var ymMode = 'prev';  // 'prev' | 'current' — 기본: 전월
   var chartInstance = null;
   var brandsLoaded = false;
 
@@ -106,6 +116,22 @@
       loadBrandData(selectedBrand, null);
     });
   }
+
+  // 당월/전월 토글
+  var ymBtnPrev = document.getElementById('ymBtnPrev');
+  var ymBtnCurrent = document.getElementById('ymBtnCurrent');
+  function setYmMode(mode) {
+    if (mode !== 'prev' && mode !== 'current') return;
+    if (mode === ymMode) return;
+    ymMode = mode;
+    ymBtnPrev.classList.toggle('active', mode === 'prev');
+    ymBtnCurrent.classList.toggle('active', mode === 'current');
+    // threshold 도 새 월의 brand_avg 기준으로 재계산되어야 하므로 null 로 초기화
+    currentThreshold = null;
+    loadBrandData(selectedBrand, null);
+  }
+  if (ymBtnPrev)    ymBtnPrev.addEventListener('click',    function(){ setYmMode('prev'); });
+  if (ymBtnCurrent) ymBtnCurrent.addEventListener('click', function(){ setYmMode('current'); });
 
   function populateSelect(brands, currentName) {
     if (!sel || brandsLoaded || !brands || !brands.length) return;
@@ -125,6 +151,7 @@
     var params = new URLSearchParams();
     if (brand) params.set('brand', brand);
     if (threshold !== null && threshold !== undefined) params.set('threshold', threshold);
+    params.set('ym', ymMode);
     var url = '/portal/brand-report-data?' + params.toString();
     fetch(url, {credentials: 'same-origin'})
       .then(function(r){ return r.json(); })
@@ -163,9 +190,18 @@
     // 브랜드 셀렉터 채우기 (최초 1회)
     populateSelect(data.brands || [], bname);
 
+    // 서버가 결정한 실제 ym_mode 로 토글 UI 동기화 (혹시 서버에서 스위칭된 경우 대비)
+    if (data.ym_mode && data.ym_mode !== ymMode) {
+      ymMode = data.ym_mode;
+      if (ymBtnPrev)    ymBtnPrev.classList.toggle('active',    ymMode === 'prev');
+      if (ymBtnCurrent) ymBtnCurrent.classList.toggle('active', ymMode === 'current');
+    }
+    var selectedYm = data.selected_ym || (ymMode === 'current' ? data.latest_ym : data.prev_ym) || '';
+    var ymLabelKr = (ymMode === 'current' ? '당월' : '전월');
+
     document.getElementById('headingBrandName').textContent = bname;
     document.getElementById('headingSubtitle').textContent =
-      '범용상품 제안 솔루션. 가맹점별 상품 구성비는 전월(' + (data.prev_ym||'') + ') 기준입니다.';
+      '범용상품 제안 솔루션. 가맹점별 상품 구성비는 ' + ymLabelKr + '(' + selectedYm + ') 기준입니다.';
     document.getElementById('headingSubtitle').style.color = '';
 
     var actionLink = document.getElementById('actionLink');
@@ -174,9 +210,9 @@
     actionLink.style.pointerEvents = '';
 
     document.getElementById('mSales').textContent = fmt(data.brand_total_sales_m) + '백만';
-    document.getElementById('mSalesLabel').textContent = (data.latest_ym||'') + ' 전체 가맹점';
+    document.getElementById('mSalesLabel').textContent = selectedYm + ' 전체 가맹점';
     document.getElementById('mAvg').textContent = (data.brand_avg||0) + '%';
-    document.getElementById('mAvgLabel').textContent = (data.prev_ym||'') + ' 전용상품 제외';
+    document.getElementById('mAvgLabel').textContent = selectedYm + ' 전용상품 제외';
     document.getElementById('mThreshold').textContent = (data.threshold||0) + '%';
     document.getElementById('mTargetCount').textContent = data.target_count||0;
 
