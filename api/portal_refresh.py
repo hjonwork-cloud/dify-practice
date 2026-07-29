@@ -112,6 +112,10 @@ def run_refresh(force: bool = False) -> dict:
         FROM {T_MAIN}
         WHERE `년월` = '{latest_ym}' AND `사업부명` = '외식식재사업부'
     ),
+    leader_map(emp_code, team_name) AS (
+        VALUES ('20115003','외식1팀'),('20065782','외식3팀'),
+               ('20145012','외식2팀'),('20135653','영남지점')
+    ),
     emp_agg AS (
         SELECT emp_code, MAX(team_name) AS team_name,
                ROUND(SUM(sales_raw)/10000) AS sales_m,
@@ -119,7 +123,9 @@ def run_refresh(force: bool = False) -> dict:
                COUNT(DISTINCT CASE WHEN {_zc8a} THEN cust_code END) AS franchise_count,
                COUNT(DISTINCT CASE WHEN NOT ({_zc8a}) THEN cust_code END) AS general_count,
                COUNT(DISTINCT cust_code) AS customer_count
-        FROM base GROUP BY emp_code
+        FROM base
+        WHERE emp_code NOT IN (SELECT emp_code FROM leader_map)
+        GROUP BY emp_code
     ),
     bill AS (
         SELECT `영업사원` AS emp_code, MAX(`대금청구일`) AS latest_bill_date
@@ -130,10 +136,6 @@ def run_refresh(force: bool = False) -> dict:
     ar_emp AS (
         SELECT `영업사원` AS emp_code, ROUND(SUM(`현재잔액`)/1000000) AS ar_balance_m
         FROM {T_AR} WHERE `년월` = '{latest_ym}' GROUP BY `영업사원`
-    ),
-    leader_map(emp_code, team_name) AS (
-        VALUES ('20115003','외식1팀'),('20065782','외식3팀'),
-               ('20145012','외식2팀'),('20135653','영남지점')
     ),
     leader_base AS (
         SELECT lm.emp_code, lm.team_name,
