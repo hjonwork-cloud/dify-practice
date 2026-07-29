@@ -1,4 +1,4 @@
-"""
+﻿"""
 대시보드 요약 테이블 사전 계산 모듈.
 - run_refresh(): Azure 서버에서 main._safe_query 사용
 - read_dashboard_from_table(): 요약 테이블 단순 SELECT
@@ -56,12 +56,14 @@ def run_refresh(force: bool = False) -> dict:
 
     _zc8  = "LEFT(TRIM(LEADING '0' FROM TRIM(CAST(`ZC본부` AS STRING))), 1) = '8'"
     _zc8a = "LEFT(TRIM(LEADING '0' FROM TRIM(CAST(zc_code AS STRING))), 1) = '8'"
-    _leaders_in  = "'외식1팀','외식3팀','외식2팀','영남지점'"
-    _leader_case = """CASE `지점명`
-               WHEN '외식1팀'  THEN '20115003'
-               WHEN '외식3팀'  THEN '20065782'
-               WHEN '외식2팀'  THEN '20145012'
-               WHEN '영남지점' THEN '20135653'
+    # LIKE 조건: (FC)영남지점 등 prefix 변형 포함
+    _leaders_where = "(`지점명` LIKE '%외식1팀%' OR `지점명` LIKE '%외식3팀%' OR `지점명` LIKE '%외식2팀%' OR `지점명` LIKE '%영남지점%')"
+    _leaders_in    = "'외식1팀','외식3팀','외식2팀','영남지점'"   # 사전계산 CASE fallback 용
+    _leader_case   = """CASE
+               WHEN `지점명` LIKE '%외식1팀%'  THEN '20115003'
+               WHEN `지점명` LIKE '%외식3팀%'  THEN '20065782'
+               WHEN `지점명` LIKE '%외식2팀%'  THEN '20145012'
+               WHEN `지점명` LIKE '%영남지점%' THEN '20135653'
            END"""
 
     cm_cte = f"""
@@ -87,7 +89,7 @@ def run_refresh(force: bool = False) -> dict:
         SELECT DISTINCT {_leader_case} AS emp_code,
                TRIM(LEADING '0' FROM CAST(`거래처` AS STRING)) AS cust_t
         FROM {T_MAIN}
-        WHERE `년월` = '{latest_ym}' AND `지점명` IN ({_leaders_in})
+        WHERE `년월` = '{latest_ym}' AND {_leaders_where}
     ),
     cm_leader AS (
         SELECT lc.emp_code,
@@ -185,7 +187,7 @@ def run_refresh(force: bool = False) -> dict:
             UNION ALL
             SELECT DISTINCT {_leader_case} AS emp_code, `ZC본부` AS brand_code,
                    TRIM(LEADING '0' FROM CAST(`거래처` AS STRING)) AS cust_t
-            FROM {T_MAIN} WHERE `년월` = '{latest_ym}' AND `지점명` IN ({_leaders_in})
+            FROM {T_MAIN} WHERE `년월` = '{latest_ym}' AND {_leaders_where}
         ) ec
         JOIN (SELECT TRIM(LEADING '0' FROM CAST(`고객` AS STRING)) AS cust_t,
                      `공헌이익`, `FI매출액`
@@ -224,7 +226,7 @@ def run_refresh(force: bool = False) -> dict:
                ROUND(SUM(`매출액`)/10000) AS my_sales_m
         FROM {T_MAIN}
         WHERE `년월` = '{latest_ym}' AND `사업부명` = '외식식재사업부'
-          AND `ZC본부` IS NOT NULL AND {_zc8} AND `지점명` IN ({_leaders_in})
+          AND `ZC본부` IS NOT NULL AND {_zc8} AND {_leaders_where}
         GROUP BY `지점명`, `ZC본부`, `ZC본부명`
     ),
     my_b AS (
@@ -251,7 +253,7 @@ def run_refresh(force: bool = False) -> dict:
                END AS generic_ratio
         FROM {T_MAIN}
         WHERE `년월` = '{latest_ym}' AND `사업부명` = '외식식재사업부'
-          AND `ZC본부` IS NOT NULL AND {_zc8} AND `지점명` IN ({_leaders_in})
+          AND `ZC본부` IS NOT NULL AND {_zc8} AND {_leaders_where}
         GROUP BY `지점명`, `ZC본부`
     ),
     gr AS (SELECT * FROM gr_emp UNION ALL SELECT * FROM gr_leader WHERE emp_code IS NOT NULL)
@@ -278,7 +280,7 @@ def run_refresh(force: bool = False) -> dict:
                COUNT(DISTINCT `거래체`) AS my_customer_count
         FROM {T_MAIN}
         WHERE `년월` = '{latest_ym}' AND `사업부명` = '외식식재사업부'
-          AND (`ZC본부` IS NULL OR NOT ({_zc8})) AND `지점명` IN ({_leaders_in})
+          AND (`ZC본부` IS NULL OR NOT ({_zc8})) AND {_leaders_where}
         GROUP BY `지점명`
     )
     , gen_b AS (
@@ -416,7 +418,7 @@ def run_refresh(force: bool = False) -> dict:
                `거래처` AS customer_code, MAX(`거래처명`) AS customer_name,
                {_sales_exprs}
         FROM {main.T_MAIN}
-        {_where_brand} AND `지점명` IN ({_leaders_in})
+        {_where_brand} AND {_leaders_where}
         GROUP BY `지점명`, `ZC본부`, `ZC본부명`, `거래처`
         HAVING SUM(`매출액`) > 0
     ),

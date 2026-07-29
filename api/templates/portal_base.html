@@ -53,18 +53,19 @@
   .portal-nav a,.portal-nav span{display:flex;align-items:center;gap:10px;}
   .nav-icon{flex-shrink:0;font-size:16px;}
   /* collapsed 상태 */
-  body.sidebar-collapsed .portal-sidebar  { width:58px!important; }
+  body.sidebar-collapsed .portal-sidebar  { width:58px!important; padding-left:7px!important; padding-right:7px!important; }
   body.sidebar-collapsed .portal-main     { margin-left:58px!important; width:calc(100% - 58px)!important; }
   body.sidebar-collapsed .sb-brand-text   { opacity:0; max-width:0; padding:0; border:none; }
-  body.sidebar-collapsed .sb-brand img    { width:26px; }
-  body.sidebar-collapsed .nav-label        { opacity:0; max-width:0; }
+  body.sidebar-collapsed .sb-brand img    { width:28px; }
+  body.sidebar-collapsed .sb-brand        { flex:0 0 auto; }
+  body.sidebar-collapsed .nav-label        { opacity:0; max-width:0; overflow:hidden; }
   body.sidebar-collapsed .nav-sub          { max-height:0!important; }
   body.sidebar-collapsed .nav-arrow        { display:none; }
   body.sidebar-collapsed .portal-nav a,
-  body.sidebar-collapsed .nav-parent       { justify-content:center; padding:13px 8px; }
-  body.sidebar-collapsed .portal-user-card>div { opacity:0; max-width:0; overflow:hidden; transition:opacity .18s,max-width .22s; }
-  body.sidebar-collapsed .portal-user-card { justify-content:center; }
-  body.sidebar-collapsed .portal-avatar { flex-shrink:0; }
+  body.sidebar-collapsed .nav-parent       { justify-content:center; padding:10px 0; }
+  body.sidebar-collapsed .portal-user-card { justify-content:center; padding:10px 4px; min-width:0; }
+  body.sidebar-collapsed .portal-user-card>div { display:none; }
+  body.sidebar-collapsed .portal-avatar   { width:36px; height:36px; flex-shrink:0; }
   @media(max-width:760px){
     body.sidebar-collapsed .portal-sidebar { width:280px!important; }
     body.sidebar-collapsed .portal-main    { margin-left:0!important; width:100%!important; }

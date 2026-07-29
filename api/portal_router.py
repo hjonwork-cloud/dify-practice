@@ -54,7 +54,9 @@ def _scope_cond(emp_code: str) -> str:
     if access_control.is_admin_emp(emp_code):
         return f"`사업부명` = {_sql(access_control.AUTH_DEPT)}"
     if emp_code in _TEAM_LEADERS:
-        return f"`지점명` = {_sql(_TEAM_LEADERS[emp_code])}"
+        team = _TEAM_LEADERS[emp_code]
+        # LIKE 매칭으로 '(FC)영남지점' 등 prefix 변형도 포함
+        return f"`지점명` LIKE {_sql('%' + team + '%')}"
     return f"`영업사원` = {_sql(emp_code)}"
 
 _cache: dict[str, tuple[float, object]] = {}
