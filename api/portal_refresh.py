@@ -473,7 +473,7 @@ def read_dashboard_from_table(emp_code: str) -> dict | None:
     import main
     try:
         rows = main._safe_query(
-            f"SELECT * FROM {T_DASH} WHERE emp_code = '{emp_code}' LIMIT 1", raw=True)
+            f"SELECT * FROM {T_DASH} WHERE emp_code = '{emp_code}' ORDER BY sales_m DESC LIMIT 1", raw=True)
         if not rows:
             return None
         row = rows[0]
