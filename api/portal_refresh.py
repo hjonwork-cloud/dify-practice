@@ -584,7 +584,8 @@ def read_brand_report_from_table(
         brand_code = str(s.get("brand_code") or "")
 
         if not cust_rows:
-            return None  # 해당 emp_code + brand_name 데이터 없음 → fallback
+            logger.warning(f"[brand_report_table] cust_rows empty: emp={emp_code} brand={brand_name} → returning empty customer list (no fallback)")
+            # 고객 데이터 없어도 요약+월별은 반환 (fallback live query 방지)
 
         # ── 월별 매출 가공 (DESC로 받아서 최신 3개월 추출) ───────────
         monthly_all_sorted = sorted(monthly_all, key=lambda r: str(r.get("ym") or ""), reverse=True)

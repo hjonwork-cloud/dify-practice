@@ -1336,15 +1336,47 @@ async def brand_report_data_api(
     """brand-report 데이터 JSON 반환 (AJAX 전용)."""
     user = _require_user(request)
     emp_code = user["emp_code"]
+    t0 = time.time()
     try:
-        data = brand_report(
-            brand or None, emp_code=emp_code,
+        # ── 1단계: _pick_brand (브랜드 목록 조회) ───────────────────
+        t1 = time.time()
+        picked = _pick_brand(brand or None, emp_code)
+        t2 = time.time()
+        logger.info(f"[brand-data] {emp_code} _pick_brand={t2-t1:.2f}s picked={picked.get('brand_name') if picked else None}")
+
+        if not picked:
+            logger.warning(f"[brand-data] {emp_code} no brand found")
+            return JSONResponse(content={"error": "담당 브랜드를 찾을 수 없습니다. refresh가 필요할 수 있습니다."}, status_code=404)
+
+        # ── 2단계: 사전계산 테이블 조회 ──────────────────────────────
+        t3 = time.time()
+        from portal_refresh import read_brand_report_from_table
+        cached = read_brand_report_from_table(
+            emp_code,
+            str(picked.get("brand_name") or ""),
             threshold_pct=threshold,
             customer_page=customer_page, target_page=target_page,
         )
+        t4 = time.time()
+        logger.info(f"[brand-data] {emp_code} precomputed={t4-t3:.2f}s hit={'YES' if cached else 'NO(fallback)'}")
+
+        if cached is not None:
+            cached["_timing"] = {"pick_s": round(t2-t1,2), "query_s": round(t4-t3,2), "total_s": round(t4-t0,2)}
+            return JSONResponse(content=_json_safe(cached))
+
+        # ── 3단계: fallback 실시간 쿼리 ──────────────────────────────
+        logger.warning(f"[brand-data] {emp_code} fallback to live query brand={picked.get('brand_name')}")
+        data = brand_report(
+            str(picked.get("brand_name") or ""), emp_code=emp_code,
+            threshold_pct=threshold,
+            customer_page=customer_page, target_page=target_page,
+        )
+        t5 = time.time()
+        logger.info(f"[brand-data] {emp_code} fallback_live={t5-t4:.2f}s total={t5-t0:.2f}s")
+        data["_timing"] = {"pick_s": round(t2-t1,2), "query_s": round(t5-t3,2), "total_s": round(t5-t0,2), "source": "fallback"}
         return JSONResponse(content=_json_safe(data))
     except Exception as _e:
-        logger.error(f"[brand-report-data] {emp_code} error: {_e}", exc_info=True)
+        logger.error(f"[brand-report-data] {emp_code} error={_e} elapsed={time.time()-t0:.2f}s", exc_info=True)
         return JSONResponse(content={"error": str(_e)}, status_code=500)
 
 

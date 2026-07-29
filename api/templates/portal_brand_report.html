@@ -123,7 +123,12 @@
     fetch(url, {credentials: 'same-origin'})
       .then(function(r){ return r.json(); })
       .then(function(data){
-        if (data.error) { showError(data.error); return; }
+        if (data.error) {
+          var msg = data.error;
+          if (data._timing) msg += ' [pick:'+data._timing.pick_s+'s query:'+data._timing.query_s+'s]';
+          showError(msg); return;
+        }
+        if (data._timing) console.log('[brand-data timing]', data._timing);
         renderContent(data);
       })
       .catch(function(e){ showError(e.toString()); });
