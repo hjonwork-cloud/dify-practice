@@ -729,9 +729,20 @@ def _pick_brand(brand_name: str | None, emp_code: str = _DEFAULT_EMP_CODE) -> di
         for b in brands:
             if b.get("brand_name") == brand_name or b.get("brand_code") == brand_name:
                 return b
+    # 기본 pick: 가상 브랜드(일반외식) 는 사전계산 테이블에 없어서 30초 fallback 유발 →
+    #           실제 ZC본부 브랜드 중 첫 번째를 선택
+    def _is_virtual(b: dict) -> bool:
+        return str(b.get("brand_code") or "") in ("", "일반외식")
+
     for b in brands:
+        if _is_virtual(b):
+            continue
         if "생활맥주" in str(b.get("brand_name") or ""):
             return b
+    for b in brands:
+        if not _is_virtual(b):
+            return b
+    # 진짜 브랜드가 없으면 (관리자/전체 아닌 경우) 마지막 fallback 으로 첫 항목
     return brands[0]
 
 
