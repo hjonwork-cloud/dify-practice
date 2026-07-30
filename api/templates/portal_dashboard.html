@@ -112,13 +112,13 @@
       +'<div><b>'+b.brand_name+'</b>'
       +'<small>브랜드 전체 '+fmt(b.customer_count)+'개 거래처 · 내 담당 '
       +fmt(b.my_customer_count)+'개 / '+fmt(b.my_sales_m)+'백만 · 범용상품 '+b.generic_ratio+'%'+cm+'</small></div>'
-      +'<strong>'+fmt(b.sales_m)+'백만</strong></a>';
+      +'<strong>'+fmt(b.my_sales_m)+'백만</strong></a>';
   }
 
   function sortedBrands(){
     var arr = _allBrands.slice();
-    if(_curSort==='sales_desc') arr.sort(function(a,b){return (b.sales_m||0)-(a.sales_m||0);});
-    else if(_curSort==='sales_asc') arr.sort(function(a,b){return (a.sales_m||0)-(b.sales_m||0);});
+    if(_curSort==='sales_desc') arr.sort(function(a,b){return (b.my_sales_m||0)-(a.my_sales_m||0);});
+    else if(_curSort==='sales_asc') arr.sort(function(a,b){return (a.my_sales_m||0)-(b.my_sales_m||0);});
     else arr.sort(function(a,b){return (a.brand_name||'').localeCompare(b.brand_name||'','ko');});
     return arr;
   }
