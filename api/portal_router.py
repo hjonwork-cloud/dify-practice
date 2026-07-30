@@ -1824,6 +1824,7 @@ class _DmSendPayload(BaseModel):
     action_type: str = "dm_only"      # "dm_only" | "price_and_dm"
     dm_message: str = ""
     price_items: list[dict] = []      # [{plant,kunnr,matnr,price,date_from,date_to}]
+    sap_result: dict = {}             # 브라우저에서 SAP Bridge 직접 호출 후 결과 전달
 
 
 @router.post("/dm-send-with-price")
@@ -1834,19 +1835,9 @@ async def dm_send_with_price(request: Request, body: _DmSendPayload):
     emp_name = user.get("emp_name") or ""
     team = user.get("team") or ""
 
-    sap_result: dict = {}
-    saved_count = 0
-
-    # ── SAP 판가 등록 ─────────────────────────────────
-    if body.action_type == "price_and_dm" and body.price_items:
-        sap_result = _call_sap_upload(body.price_items)
-        if not sap_result.get("success"):
-            return JSONResponse({
-                "success": False,
-                "error": f"SAP 판가 등록 실패: {sap_result.get('error') or sap_result.get('status_msg') or '알 수 없는 오류'}",
-                "sap_result": sap_result,
-            }, status_code=400)
-        saved_count = int(sap_result.get("saved_count") or 0)
+    # SAP 호출은 브라우저가 직접 수행 (localhost:7788), 서버는 결과만 수신·저장
+    sap_result: dict = body.sap_result or {}
+    saved_count = int(sap_result.get("saved_count") or (len(body.price_items) if body.price_items else 0))
 
     # ── DM 로그 저장 ──────────────────────────────────
     from portal_db import record_dm_log_v2

@@ -439,6 +439,10 @@
   };
 
   // ─── 판가 설정 + DM 발송 ──────────────────────────
+  // SAP Bridge Agent 는 사용자 PC 에서 실행되므로 브라우저가 직접 localhost:7788 호출 →
+  // 성공 시 서버에는 DM 로그(결과 포함)만 전송하여 Azure 서버가 SAP에 직접 접속하지 않도록 함.
+  const SAP_AGENT = 'http://localhost:7788';
+
   window.sendPriceDm = async function(uid, custCode, custName, brandCode, brandName, plantCode, btn) {
     const message  = document.getElementById(`priceDmText_${uid}`)?.value || '';
     const dateFrom = document.getElementById(`dateFrom_${uid}`)?.value?.replace(/-/g,'') || '';
@@ -448,7 +452,6 @@
     // 판가 입력 행 수집
     const priceItems = [];
     document.querySelectorAll(`[id^="price_${uid}_"]`).forEach(el => {
-      const i   = el.id.replace(`price_${uid}_`, '');
       const val = parseFloat(el.value || '');
       const matnr = el.dataset.matnr || '';
       if (!isNaN(val) && val > 0 && matnr) {
@@ -463,7 +466,33 @@
       return;
     }
 
-    btn.disabled = true; btn.textContent = '처리 중...';
+    btn.disabled = true; btn.textContent = 'SAP 등록 중...';
+    resultEl.style.display = 'none';
+
+    let sapResult = { success: false, saved_count: 0, error: '' };
+
+    // ── Step 1: 브라우저 → 사용자 PC SAP Bridge (localhost:7788) ──
+    try {
+      const sapRes = await Promise.race([
+        fetch(`${SAP_AGENT}/sap/upload-price`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ items: priceItems, mode: 'N' }),
+        }),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('SAP Bridge 응답 없음 (타임아웃 30s). 에이전트가 실행 중인지 확인하세요.')), 30000)),
+      ]);
+      sapResult = await sapRes.json();
+      if (!sapResult.success) throw new Error(sapResult.error || sapResult.status_msg || 'SAP 등록 실패');
+    } catch (e) {
+      resultEl.textContent = '❌ SAP 판가 등록 실패: ' + e.message;
+      resultEl.className = 'send-result err';
+      resultEl.style.display = '';
+      btn.disabled = false; btn.textContent = '💰 판가 적용 + DM 발송';
+      return;
+    }
+
+    // ── Step 2: SAP 성공 → 서버에 DM 로그 기록 ──
+    btn.textContent = 'DM 발송 중...';
     try {
       const res = await fetch('/portal/dm-send-with-price', {
         method: 'POST',
@@ -473,18 +502,19 @@
           brand_code: brandCode, brand_name: brandName,
           action_type: 'price_and_dm', dm_message: message,
           price_items: priceItems,
+          sap_result: sapResult,   // 브라우저에서 얻은 SAP 결과를 서버로 전달
         }),
       });
       const data = await res.json();
       if (data.success) {
-        resultEl.textContent = `✅ 판가 ${data.sap_saved_count || 0}건 적용 + DM 발송 완료`;
+        resultEl.textContent = `✅ 판가 ${sapResult.saved_count || priceItems.length}건 적용 + DM 발송 완료`;
         resultEl.className = 'send-result ok';
       } else {
         resultEl.textContent = '❌ ' + (data.error || '처리 실패');
         resultEl.className = 'send-result err';
       }
     } catch (e) {
-      resultEl.textContent = '❌ 네트워크 오류';
+      resultEl.textContent = '⚠️ 판가 적용 완료, DM 로그 저장 실패: ' + e.message;
       resultEl.className = 'send-result err';
     }
     resultEl.style.display = '';
