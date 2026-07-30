@@ -642,6 +642,12 @@ class SapBridgeHandler(BaseHTTPRequestHandler):
         if path == "/":
             self._json_response({"agent": "SAP Bridge Agent", "version": "1.0", "port": PORT})
 
+        elif path == "/ping":
+            # 인증서 신뢰 확인용 실제 엔드포인트 (브라우저에서 직접 열어보기 가능)
+            # 브라우저에서 열면 JSON 응답 볼 수 있으면 인증서 정상
+            self._json_response({"ok": True, "agent": "SAP Bridge Agent", "port": PORT,
+                                  "hint": "이 페이지가 보이면 인증서 신뢰 OK. 포털에서 판가 등록 버튼을 사용하세요."})
+
         elif path == "/sap/status":
             self._json_response(_dispatch_sap("status", {}))
 
@@ -724,6 +730,7 @@ def run_server():
 
     # 자체 서명 인증서 준비
     cert_file, key_file = _ensure_cert()
+    first_run = not os.path.exists(cert_file + ".trusted")
     _trust_cert_windows(cert_file)  # 최초 실행 시 Windows 신뢰 저장소 자동 등록
 
     server = ThreadingHTTPServer(("127.0.0.1", PORT), SapBridgeHandler)
@@ -738,6 +745,17 @@ def run_server():
     print(f"[SAP Bridge Agent] STOP: Ctrl+C")
     print()
     print("  >> 준비 완료. 포털에서 판가 적용 DM 발송 버튼을 클릭하세요.")
+
+    # 첫 실행 시: 3초 후 브라우저 열어 인증서 신뢰 유도
+    if first_run:
+        def _open_browser():
+            import time as _t
+            _t.sleep(3)
+            import webbrowser
+            print("[SAP Bridge] 브라우저에서 인증서를 신뢰해 주세요: https://localhost:7788/ping")
+            webbrowser.open(f"https://localhost:{PORT}/ping")
+        threading.Thread(target=_open_browser, daemon=True, name="cert-browser").start()
+
     try:
         server.serve_forever()
     except KeyboardInterrupt:

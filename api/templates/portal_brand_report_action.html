@@ -527,6 +527,24 @@
   // ─── 공통 유틸 ────────────────────────────────────
   const SAP_AGENT = 'https://localhost:7788';
 
+  // SAP 오류 시 진단 안내 메시지 (Failed to fetch 포함)
+  function _sapErrMsg(msg) {
+    const isFetch = msg.includes('fetch') || msg.includes('Failed');
+    if (isFetch) {
+      return `❌ SAP Bridge 연결 실패<br>
+        <small style="line-height:1.8;">
+          ① <b>에이전트 실행 여부 확인:</b>
+          <a href="https://localhost:7788/ping" target="_blank" style="color:#1d4ed8;">
+            https://localhost:7788/ping
+          </a> 열어보기<br>
+          &nbsp;&nbsp;→ JSON 응답 보이면 정상 / 인증서 경고 뜨면 [고급 &gt; 계속 진행] 클릭 후 재시도<br>
+          ② 에이전트 미실행 시: <b>SAPBridgeAgent.exe</b> 실행 후 재시도<br>
+          ③ 첫 설치 후 브라우저를 완전히 <b>재시작</b>(모든 창 닫고 다시 열기) 후 재시도
+        </small>`;
+    }
+    return `❌ SAP 판가 등록 실패: ${msg}`;
+  }
+
   function _collectPriceItems(uid, plantCode, custCode) {
     const dateFrom = document.getElementById(`dateFrom_${uid}`)?.value?.replace(/-/g,'') || '';
     const dateTo   = document.getElementById(`dateTo_${uid}`)?.value?.replace(/-/g,'') || '';
@@ -581,7 +599,7 @@
       resultEl.className = 'send-result ok';
       _reloadHistory(uid, custCode, brandCode);
     } catch (e) {
-      resultEl.textContent = '❌ SAP 판가 등록 실패: ' + e.message;
+      resultEl.innerHTML = _sapErrMsg(e.message);
       resultEl.className = 'send-result err';
     }
     resultEl.style.display = '';
@@ -625,7 +643,7 @@
       sapResult = await _callSap(priceItems);
       if (!sapResult.success) throw new Error(sapResult.error || sapResult.status_msg || 'SAP 등록 실패');
     } catch (e) {
-      resultEl.textContent = '❌ SAP 판가 등록 실패: ' + e.message;
+      resultEl.innerHTML = _sapErrMsg(e.message);
       resultEl.className = 'send-result err'; resultEl.style.display = '';
       btn.disabled = false; btn.textContent = '💰 판가 등록 + DM 발송'; return;
     }
