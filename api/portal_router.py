@@ -893,12 +893,25 @@ def brand_report(
     _ym_mode = (ym_mode or "prev").lower()
     selected_ym = latest if _ym_mode == "current" else (prev_ym or latest)
     bname = str(picked.get("brand_name") or "")
+    bcode = str(picked.get("brand_code") or "")
+    # ── 가상 브랜드 '일반외식업장' 대응 ────────────────────────────────
+    # T_MAIN 의 ZC본부명 에는 '🧑‍🍳일반외식업장' 값이 존재하지 않음 (가상 브랜드).
+    # 따라서 실 브랜드는 `ZC본부명 = <bname>` 로, 일반외식은 ZC본부 8*이 아닌 조건으로 필터해야 함.
+    _is_generic = (bcode == "일반외식")
+    _brand_where = (
+        "(`ZC본부` IS NULL OR LEFT(TRIM(LEADING '0' FROM TRIM(CAST(`ZC본부` AS STRING))), 1) <> '8')"
+        if _is_generic
+        else f"`ZC본부명` = {_sql(bname)}"
+    )
+    # 일반외식업장은 외식식재사업부 로 스코프 한정 필요 (다른 사업부 매출 유입 방지)
+    _div_where = " AND `사업부명` = '외식식재사업부'" if _is_generic else ""
+
     monthly_rows = _q(f"""
         SELECT `년월` AS ym,
                SUM(`매출액`) AS sales
         FROM {main.T_MAIN}
-        WHERE `ZC본부명` = {_sql(bname)}
-          AND `년월` IN ({_in_months(months)})
+        WHERE {_brand_where}
+          AND `년월` IN ({_in_months(months)}){_div_where}
         GROUP BY `년월`
         ORDER BY `년월`
     """) if months else []
@@ -911,8 +924,8 @@ def brand_report(
                SUM(`매출액`) AS sales,
                COUNT(DISTINCT `ZC본부`) AS customer_count
         FROM {main.T_MAIN}
-        WHERE `ZC본부명` = {_sql(bname)}
-                    AND `년월` = {_sql(selected_ym)}
+        WHERE {_brand_where}
+                    AND `년월` = {_sql(selected_ym)}{_div_where}
     """)
     avg = _pct((avg_rows[0] or {}).get("brand_avg")) if avg_rows else 0
     brand_total_sales_m = _money_m((avg_rows[0] or {}).get("sales")) if avg_rows else 0
@@ -922,10 +935,10 @@ def brand_report(
         SELECT CASE WHEN SUM(`매출액`) = 0 THEN 0
                     ELSE (SUM(`매출액`) - SUM(COALESCE(`매출원가`, 0))) / SUM(`매출액`) END AS generic_gp_rate
         FROM {main.T_MAIN}
-        WHERE `ZC본부명` = {_sql(bname)}
+        WHERE {_brand_where}
           AND `년월` = {_sql(selected_ym)}
           AND `자재그룹명` IS NOT NULL
-          AND COALESCE(`자재그룹명`, '') <> 'FC전용상품'
+          AND COALESCE(`자재그룹명`, '') <> 'FC전용상품'{_div_where}
     """)
     generic_gp_rate = _pct((gp_rows[0] or {}).get("generic_gp_rate")) if gp_rows else 0
     # 거래처(고객코드) 기준 집계: 개별 가맹점 단위로 집계
@@ -941,8 +954,8 @@ def brand_report(
                          / SUM(CASE WHEN `자재그룹명` IS NOT NULL THEN `매출액` ELSE 0 END) END AS generic_ratio
         FROM {main.T_MAIN}
         WHERE {scope}
-          AND `ZC본부명` = {_sql(bname)}
-          AND `년월` = {_sql(selected_ym)}
+          AND {_brand_where}
+          AND `년월` = {_sql(selected_ym)}{_div_where}
         GROUP BY `거래처`, `거래처명`
         HAVING SUM(`매출액`) > 0
         ORDER BY sales DESC
