@@ -418,6 +418,54 @@ def _brand_cm_map(emp_code: str, profit_ym: str) -> dict[str, float]:
     return _cache_set(f"brand_cm:{emp_code}:{profit_ym}", result)
 
 
+def _convert_brand_row(b: dict) -> dict:
+    """T_BRANDS 원시 row → `_brand_rows` / warmup 공통 변환."""
+    code = str(b.get("brand_code") or "")
+    sales = float(b.get("sales_m") or 0) * 10000  # sales_m → raw
+    return {
+        "brand_code":        code,
+        "brand_name":        str(b.get("brand_name") or ""),
+        "customer_count":    int(b.get("customer_count") or 0),
+        "sales":             sales,
+        "sales_m":           int(b.get("sales_m") or 0),
+        "my_customer_count": int(b.get("my_customer_count") or 0),
+        "my_sales":          float(b.get("my_sales_m") or 0) * 10000,
+        "my_sales_m":        int(b.get("my_sales_m") or 0),
+        "generic_ratio":     float(b.get("generic_ratio") or 0),
+        "cm_rate":           (round(float(b["cm_rate"]), 1) if b.get("cm_rate") is not None else None),
+        "dedicated_sales":   0,
+        "generic_sales":     0,
+        "classified_sales":  0,
+    }
+
+
+def _bulk_warm_brand_rows() -> int:
+    """T_BRANDS 를 **한 번의 SELECT** 로 전체 읽어서 사용자별 캐시에 채워 넣는다.
+
+    이 함수를 부팅 warmup 과 주기적 refresh 에서 호출한다.
+    한 번 실행하면 모든 영업사원의 다음 첫 클릭이 즉시(캐시 히트) 반환된다.
+
+    Returns:
+        캐시에 채운 사용자 수.
+    """
+    import portal_refresh
+    rows = portal_refresh.main._safe_query(
+        f"SELECT * FROM {portal_refresh.T_BRANDS} ORDER BY emp_code, sales_m DESC",
+        raw=True,
+    ) or []
+    # emp_code 별 그룹핑
+    by_emp: dict[str, list[dict]] = {}
+    for r in rows:
+        emp = str(r.get("emp_code") or "").strip()
+        if not emp:
+            continue
+        by_emp.setdefault(emp, []).append(_convert_brand_row(r))
+    # 캐시 채우기 (LIMIT 200 유지)
+    for emp, out in by_emp.items():
+        _cache_set(f"brands:{emp}", out[:200])
+    return len(by_emp)
+
+
 def _brand_rows(emp_code: str = _DEFAULT_EMP_CODE) -> list[dict]:
     cached = _cache_get(f"brands:{emp_code}")
     if cached:  # 빈 리스트는 캐시 무효 처리
@@ -430,25 +478,7 @@ def _brand_rows(emp_code: str = _DEFAULT_EMP_CODE) -> list[dict]:
             raw=True,
         ) or []
         if rows_pre:
-            out_pre = []
-            for b in rows_pre:
-                code = str(b.get("brand_code") or "")
-                sales = float(b.get("sales_m") or 0) * 10000  # sales_m → raw
-                out_pre.append({
-                    "brand_code":        code,
-                    "brand_name":        str(b.get("brand_name") or ""),
-                    "customer_count":    int(b.get("customer_count") or 0),
-                    "sales":             sales,
-                    "sales_m":           int(b.get("sales_m") or 0),
-                    "my_customer_count": int(b.get("my_customer_count") or 0),
-                    "my_sales":          float(b.get("my_sales_m") or 0) * 10000,
-                    "my_sales_m":        int(b.get("my_sales_m") or 0),
-                    "generic_ratio":     float(b.get("generic_ratio") or 0),
-                    "cm_rate":           (round(float(b["cm_rate"]), 1) if b.get("cm_rate") is not None else None),
-                    "dedicated_sales":   0,
-                    "generic_sales":     0,
-                    "classified_sales":  0,
-                })
+            out_pre = [_convert_brand_row(b) for b in rows_pre]
             _cache_set(f"brands:{emp_code}", out_pre)
             return out_pre
     except Exception:
@@ -1917,6 +1947,16 @@ def _warmup_cache():
     except Exception as e:
         _log.warning(f"[warmup] 브랜드 리포트 워밍업 실패: {e}")
 
+    # ── (1.5) 결정타: T_BRANDS 를 한 번에 읽어 전 사용자 캐시 populate ──
+    #   이렇게 하면 부팅 후 처음 로그인하는 어떤 사용자든 분포분석 첫 클릭이
+    #   메모리 캐시 히트 → pick_s ≈ 0.00s 로 즉시 응답.
+    try:
+        _t_bulk = time.time()
+        _n = _bulk_warm_brand_rows()
+        _log.info(f"[warmup] T_BRANDS bulk cache 채움: {_n}명 in {time.time()-_t_bulk:.2f}s")
+    except Exception as e:
+        _log.warning(f"[warmup] T_BRANDS bulk cache 실패: {e}")
+
     # ── (2) 화이트리스트: 로그인 속도 개선 ────────────────────────
     try:
         _log.info("[warmup] 영업사원 화이트리스트 캐시 워밍업 시작")
@@ -1950,6 +1990,9 @@ def _databricks_keepalive():
     import logging
     _log = logging.getLogger("portal_keepalive")
     interval_sec = int(os.getenv("DBX_KEEPALIVE_SEC", "300"))  # 기본 5분
+    # T_BRANDS bulk cache 재갱신 주기 (기본 30분) — 6h TTL 만료 전에 계속 채워둠
+    bulk_refresh_sec = int(os.getenv("BULK_WARM_SEC", "1800"))
+    _last_bulk = time.time()  # warmup 에서 이미 채웠으므로 지금 시각으로 시작
     # 첫 사이클: 부팅 warmup(30초) 완료 후 약 60초 시점에 실행 → 이후 interval_sec 간격
     time.sleep(60)
     while True:
@@ -1961,6 +2004,15 @@ def _databricks_keepalive():
             _main._safe_query(f"SELECT 1 AS x FROM {_pr.T_DASH} LIMIT 1", raw=True)
             _elapsed = round(time.time() - _t0, 2)
             _log.info(f"[keepalive] ok ({_elapsed}s)")
+            # bulk_refresh_sec 간격으로 T_BRANDS 캐시 재populate
+            if time.time() - _last_bulk >= bulk_refresh_sec:
+                try:
+                    _t_b = time.time()
+                    _n = _bulk_warm_brand_rows()
+                    _log.info(f"[keepalive] T_BRANDS bulk cache 재갱신: {_n}명 in {time.time()-_t_b:.2f}s")
+                    _last_bulk = time.time()
+                except Exception as _be:
+                    _log.warning(f"[keepalive] bulk cache 재갱신 실패: {_be}")
         except Exception as e:
             _log.warning(f"[keepalive] 실패 (다음 주기 재시도): {e}")
         time.sleep(interval_sec)
@@ -1978,6 +2030,14 @@ def _auto_refresh_scheduler():
             import portal_refresh
             result = portal_refresh.run_refresh(force=True)
             _log.info(f"[scheduler] refresh 완료: {result.get('status')} / {result.get('emp_count')}명 / {result.get('elapsed_sec')}s")
+            # refresh 성공 시 T_BRANDS bulk cache 도 즉시 재갱신 (stale data 방지)
+            if result.get("status") in ("ok", "success"):
+                try:
+                    _t_b = time.time()
+                    _n = _bulk_warm_brand_rows()
+                    _log.info(f"[scheduler] T_BRANDS bulk cache 재갱신: {_n}명 in {time.time()-_t_b:.2f}s")
+                except Exception as _be:
+                    _log.warning(f"[scheduler] bulk cache 재갱신 실패: {_be}")
         except Exception as e:
             _log.warning(f"[scheduler] refresh 실패 (6시간 후 재시도): {e}")
         time.sleep(6 * 3600)  # 6시간 대기
