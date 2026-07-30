@@ -50,9 +50,33 @@
 .action-send-btn:disabled{background:#9ca3af;cursor:not-allowed;}
 .action-send-btn.price-send{background:#0369a1;}
 .action-send-btn.price-send:hover{background:#0284c7;}
+.action-send-btn.price-only{background:#7c3aed;}
+.action-send-btn.price-only:hover{background:#6d28d9;}
+.action-send-btn.dm-only-btn{background:#0891b2;}
+.action-send-btn.dm-only-btn:hover{background:#0e7490;}
+.price-btn-row{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin-top:.5rem;}
 .send-result{font-size:.82rem;margin-top:.4rem;padding:.35rem .6rem;border-radius:.35rem;}
 .send-result.ok{background:#dcfce7;color:#166534;}
 .send-result.err{background:#fee2e2;color:#991b1b;}
+/* ── 이력 섹션 ── */
+.hist-details{margin-top:.75rem;border:1px solid #e5e7eb;border-radius:.45rem;overflow:hidden;}
+.hist-details summary{padding:.45rem .75rem;font-size:.8rem;font-weight:600;cursor:pointer;background:#f9fafb;list-style:none;display:flex;align-items:center;gap:.5rem;}
+.hist-details summary::-webkit-details-marker{display:none;}
+.hist-details summary:hover{background:#f3f4f6;}
+.hist-body{padding:.5rem .75rem;}
+.hist-table{width:100%;border-collapse:collapse;font-size:.75rem;}
+.hist-table th{background:#e5e7eb;padding:.25rem .4rem;text-align:center;white-space:nowrap;}
+.hist-table td{padding:.25rem .4rem;border-bottom:1px solid #f9fafb;vertical-align:middle;}
+.hist-badge{display:inline-block;padding:.1rem .4rem;border-radius:.25rem;font-size:.7rem;font-weight:600;}
+.hist-badge.price{background:#ede9fe;color:#6d28d9;}
+.hist-badge.dm{background:#cffafe;color:#0e7490;}
+.hist-badge.both{background:#dcfce7;color:#166534;}
+/* ── 테이블 컨트롤 ── */
+.tbl-ctrl-row{display:flex;gap:.5rem;margin:.3rem 0 .5rem;flex-wrap:wrap;}
+.tbl-ctrl-btn{font-size:.75rem;padding:.25rem .6rem;border:1px dashed #9ca3af;border-radius:.3rem;background:#fff;cursor:pointer;color:#374151;}
+.tbl-ctrl-btn:hover{background:#f3f4f6;}
+.price-table input[type=text]{width:80px;border:1px solid #d1d5db;border-radius:.3rem;padding:.2rem .3rem;font-size:.78rem;}
+.del-row-btn{background:none;border:none;color:#ef4444;cursor:pointer;font-size:.95rem;padding:0 .25rem;line-height:1;}
 </style>
 
 {% if not report.brand %}
@@ -310,16 +334,21 @@
     tbl.className = 'price-table';
     tbl.innerHTML = `<thead><tr>
       <th>상품코드</th><th>상품명</th><th>현재GP%</th>
-      <th>현재단가(₩)</th><th>원가(₩)</th><th>설정판가(₩)</th><th>목표GP%</th>
+      <th>현재단가(₩)</th><th>원가(₩)</th><th>설정판가(₩)</th><th>목표GP%</th><th></th>
     </tr></thead>`;
     const tbody = document.createElement('tbody');
 
-    products.forEach((p, i) => {
+    // 상품 목록 저장 (uid별 전체 보관, 5개씩 표시)
+    _allProducts[uid] = products;
+    _shownCount[uid]  = 0;
+
+    function buildProductRow(p, i) {
       const pid       = `${uid}_${i}`;
       const gp        = parseFloat(p.gp_pct    || 0).toFixed(1);
       const unitPrice = parseInt(p.unit_price  || 0, 10);
       const unitCost  = parseInt(p.unit_cost   || 0, 10);
       const tr = document.createElement('tr');
+      tr.dataset.rowIdx = i;
       tr.innerHTML = `
         <td style="font-size:.72rem;color:#6b7280;">${p.product_code || ''}</td>
         <td style="text-align:left;font-size:.78rem;">${p.product_name || p.product_code || ''}</td>
@@ -331,28 +360,96 @@
              oninput="recalcFromPrice('${pid}')" data-matnr="${p.product_code||''}"></td>
         <td><input type="number" id="gptarget_${pid}" placeholder="GP%" min="0" max="99.9" step="0.1"
              oninput="recalcFromGp('${pid}')" class="derived"></td>
+        <td></td>
       `;
-      tbody.appendChild(tr);
-      // 단가/원가 모두 있으면 즉시 GP% 계산
       if (unitCost > 0 && unitPrice > 0) {
         setTimeout(() => window.recalcFromPrice(pid), 0);
       }
-    });
+      return tr;
+    }
+
+    // 처음 5개 렌더링
+    function appendMoreRows(count) {
+      const start = _shownCount[uid];
+      const end   = Math.min(start + count, _allProducts[uid].length);
+      for (let i = start; i < end; i++) {
+        tbody.appendChild(buildProductRow(_allProducts[uid][i], i));
+      }
+      _shownCount[uid] = end;
+      // 더 보기 버튼 표시/숨김
+      const moreBtn = document.getElementById(`moreBtn_${uid}`);
+      if (moreBtn) {
+        const remain = _allProducts[uid].length - _shownCount[uid];
+        if (remain > 0) {
+          moreBtn.textContent = `+ 추천품목 ${Math.min(5, remain)}개 더 보기 (남은 ${remain}개)`;
+          moreBtn.style.display = '';
+        } else {
+          moreBtn.style.display = 'none';
+        }
+      }
+    }
+    appendMoreRows(5);
+
     tbl.appendChild(tbody);
     pricePanel.appendChild(tbl);
 
-    // DM 메시지 미리보기 (판가 설정 모드)
-    pricePanel.innerHTML += `
-      <div class="action-section-title">DM 메시지</div>
-      <textarea class="dm-preview-area" id="priceDmText_${uid}" rows="5">${dmMsg}</textarea>
-      <div style="margin-top:.5rem;display:flex;gap:.5rem;align-items:center;">
-        <button class="action-send-btn price-send"
-            onclick="sendPriceDm('${uid}','${custCode}','${custName.replace(/'/g,"\\'")}','${brandCode}','${brandName.replace(/'/g,"\\'")}','${plantCode}',this)">
-          💰 판가 적용 + DM 발송
-        </button>
-        <span id="priceResult_${uid}" class="send-result" style="display:none;"></span>
-      </div>
+    // 테이블 컨트롤 버튼 행
+    const ctrlRow = document.createElement('div');
+    ctrlRow.className = 'tbl-ctrl-row';
+    ctrlRow.innerHTML = `
+      <button id="moreBtn_${uid}" class="tbl-ctrl-btn" type="button"
+          onclick="window._appendMoreRows_${uid}(5)">+ 추천품목 더 보기</button>
+      <button class="tbl-ctrl-btn" type="button"
+          onclick="window.addManualRow('${uid}')">＋ 직접 입력 행 추가</button>
     `;
+    pricePanel.appendChild(ctrlRow);
+    // appendMoreRows 를 전역 접근용으로 노출
+    window[`_appendMoreRows_${uid}`] = appendMoreRows;
+    // 초기 버튼 상태
+    const remain0 = products.length - _shownCount[uid];
+    const moreBtn0 = ctrlRow.querySelector(`#moreBtn_${uid}`);
+    if (remain0 <= 0 && moreBtn0) moreBtn0.style.display = 'none';
+    else if (moreBtn0) moreBtn0.textContent = `+ 추천품목 ${Math.min(5,remain0)}개 더 보기 (남은 ${remain0}개)`;
+
+    // DM 메시지 + 버튼 3개
+    const actionFooter = document.createElement('div');
+    actionFooter.innerHTML = `
+      <div class="action-section-title" style="margin-top:.6rem;">DM 메시지</div>
+      <textarea class="dm-preview-area" id="priceDmText_${uid}" rows="4">${dmMsg}</textarea>
+      <div class="price-btn-row">
+        <button class="action-send-btn price-only" type="button"
+            onclick="window.sendPriceOnly('${uid}','${custCode}','${custName.replace(/'/g,"\\'")}','${brandCode}','${brandName.replace(/'/g,"\\'")}','${plantCode}',this)">
+          📋 판가만 SAP 등록
+        </button>
+        <button class="action-send-btn dm-only-btn" type="button"
+            onclick="window.sendDmFromPricePanel('${uid}','${custCode}','${custName.replace(/'/g,"\\'")}','${brandCode}','${brandName.replace(/'/g,"\\'")}',this)">
+          💬 DM만 발송
+        </button>
+        <button class="action-send-btn price-send" type="button"
+            onclick="window.sendPriceDm('${uid}','${custCode}','${custName.replace(/'/g,"\\'")}','${brandCode}','${brandName.replace(/'/g,"\\'")}','${plantCode}',this)">
+          💰 판가 등록 + DM 발송
+        </button>
+      </div>
+      <div id="priceResult_${uid}" class="send-result" style="display:none;"></div>
+    `;
+    pricePanel.appendChild(actionFooter);
+
+    // 판가/DM 이력 섹션
+    const histSection = document.createElement('details');
+    histSection.className = 'hist-details';
+    histSection.id = `histDetails_${uid}`;
+    histSection.innerHTML = `
+      <summary>📋 판가·DM 발송 이력 <span id="histCount_${uid}" style="color:#9ca3af;font-weight:400;"></span></summary>
+      <div class="hist-body" id="histBody_${uid}"><div style="color:#9ca3af;font-size:.82rem;">클릭하면 이력을 불러옵니다.</div></div>
+    `;
+    histSection.addEventListener('toggle', () => {
+      if (histSection.open && !histSection.dataset.loaded) {
+        histSection.dataset.loaded = '1';
+        window.loadDmHistory('${uid}', '${custCode}', brandCode);
+      }
+    });
+    pricePanel.appendChild(histSection);
+
     body.appendChild(pricePanel);
 
     // 라디오 토글
@@ -364,6 +461,11 @@
       });
     });
   }
+
+  // uid별 전체 상품 목록 / 표시 카운트 / 수기 행 인덱스 (모듈 스코프)
+  const _allProducts = {};
+  const _shownCount  = {};
+  const _manualIdx   = {};
 
   // ─── 상호계산 (판가 ↔ GP%, 원가 기준) ──────────────
   window.recalcFromPrice = function(pid) {
@@ -438,88 +540,204 @@
     btn.disabled = false; btn.textContent = '💬 DM 발송';
   };
 
-  // ─── 판가 설정 + DM 발송 ──────────────────────────
-  // SAP Bridge Agent 는 사용자 PC 에서 실행되므로 브라우저가 직접 localhost:7788 호출 →
-  // 성공 시 서버에는 DM 로그(결과 포함)만 전송하여 Azure 서버가 SAP에 직접 접속하지 않도록 함.
+  // ─── 공통 유틸 ────────────────────────────────────
   const SAP_AGENT = 'https://localhost:7788';
 
-  window.sendPriceDm = async function(uid, custCode, custName, brandCode, brandName, plantCode, btn) {
-    const message  = document.getElementById(`priceDmText_${uid}`)?.value || '';
+  function _collectPriceItems(uid, plantCode, custCode) {
     const dateFrom = document.getElementById(`dateFrom_${uid}`)?.value?.replace(/-/g,'') || '';
     const dateTo   = document.getElementById(`dateTo_${uid}`)?.value?.replace(/-/g,'') || '';
-    const resultEl = document.getElementById(`priceResult_${uid}`);
-
-    // 판가 입력 행 수집
-    const priceItems = [];
+    const items = [];
     document.querySelectorAll(`[id^="price_${uid}_"]`).forEach(el => {
-      const val = parseFloat(el.value || '');
-      const matnr = el.dataset.matnr || '';
+      const val   = parseFloat(el.value || '');
+      const matnr = el.dataset.matnr || el.closest('tr')?.querySelector('input[data-matnr]')?.dataset.matnr || '';
       if (!isNaN(val) && val > 0 && matnr) {
-        priceItems.push({ plant: plantCode, kunnr: custCode, matnr, price: val, date_from: dateFrom, date_to: dateTo });
+        items.push({ plant: plantCode, kunnr: custCode, matnr, price: val, date_from: dateFrom, date_to: dateTo });
       }
     });
+    return items;
+  }
 
-    if (priceItems.length === 0) {
+  async function _callSap(priceItems) {
+    const sapRes = await Promise.race([
+      fetch(`${SAP_AGENT}/sap/upload-price`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: priceItems, mode: 'N' }),
+      }),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('SAP Bridge 응답 없음 (30s). 에이전트 실행 여부 확인하세요.')), 30000)),
+    ]);
+    return sapRes.json();
+  }
+
+  async function _logToServer(payload) {
+    const res = await fetch('/portal/dm-send-with-price', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return res.json();
+  }
+
+  // ─── 판가만 SAP 등록 ───────────────────────────────
+  window.sendPriceOnly = async function(uid, custCode, custName, brandCode, brandName, plantCode, btn) {
+    const resultEl = document.getElementById(`priceResult_${uid}`);
+    const priceItems = _collectPriceItems(uid, plantCode, custCode);
+    if (!priceItems.length) {
       resultEl.textContent = '❌ 설정판가를 1건 이상 입력하세요.';
-      resultEl.className = 'send-result err';
-      resultEl.style.display = '';
-      return;
+      resultEl.className = 'send-result err'; resultEl.style.display = ''; return;
     }
-
-    btn.disabled = true; btn.textContent = 'SAP 등록 중...';
-    resultEl.style.display = 'none';
-
-    let sapResult = { success: false, saved_count: 0, error: '' };
-
-    // ── Step 1: 브라우저 → 사용자 PC SAP Bridge (localhost:7788) ──
+    btn.disabled = true; btn.textContent = 'SAP 등록 중...'; resultEl.style.display = 'none';
     try {
-      const sapRes = await Promise.race([
-        fetch(`${SAP_AGENT}/sap/upload-price`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ items: priceItems, mode: 'N' }),
-        }),
-        new Promise((_, rej) => setTimeout(() => rej(new Error('SAP Bridge 응답 없음 (타임아웃 30s). 에이전트가 실행 중인지 확인하세요.')), 30000)),
-      ]);
-      sapResult = await sapRes.json();
+      const sapResult = await _callSap(priceItems);
       if (!sapResult.success) throw new Error(sapResult.error || sapResult.status_msg || 'SAP 등록 실패');
+      await _logToServer({ customer_code: custCode, customer_name: custName,
+        brand_code: brandCode, brand_name: brandName, action_type: 'price_only',
+        dm_message: '', price_items: priceItems, sap_result: sapResult });
+      resultEl.textContent = `✅ 판가 ${sapResult.saved_count || priceItems.length}건 SAP 등록 완료`;
+      resultEl.className = 'send-result ok';
+      _reloadHistory(uid, custCode, brandCode);
     } catch (e) {
       resultEl.textContent = '❌ SAP 판가 등록 실패: ' + e.message;
       resultEl.className = 'send-result err';
-      resultEl.style.display = '';
-      btn.disabled = false; btn.textContent = '💰 판가 적용 + DM 발송';
-      return;
     }
+    resultEl.style.display = '';
+    btn.disabled = false; btn.textContent = '📋 판가만 SAP 등록';
+  };
 
-    // ── Step 2: SAP 성공 → 서버에 DM 로그 기록 ──
-    btn.textContent = 'DM 발송 중...';
+  // ─── DM만 발송 (판가 패널에서) ──────────────────────
+  window.sendDmFromPricePanel = async function(uid, custCode, custName, brandCode, brandName, btn) {
+    const message  = document.getElementById(`priceDmText_${uid}`)?.value || '';
+    const resultEl = document.getElementById(`priceResult_${uid}`);
+    btn.disabled = true; btn.textContent = '발송 중...'; resultEl.style.display = 'none';
     try {
-      const res = await fetch('/portal/dm-send-with-price', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          customer_code: custCode, customer_name: custName,
-          brand_code: brandCode, brand_name: brandName,
-          action_type: 'price_and_dm', dm_message: message,
-          price_items: priceItems,
-          sap_result: sapResult,   // 브라우저에서 얻은 SAP 결과를 서버로 전달
-        }),
-      });
-      const data = await res.json();
+      const data = await _logToServer({ customer_code: custCode, customer_name: custName,
+        brand_code: brandCode, brand_name: brandName, action_type: 'dm_only',
+        dm_message: message, price_items: [], sap_result: {} });
       if (data.success) {
-        resultEl.textContent = `✅ 판가 ${sapResult.saved_count || priceItems.length}건 적용 + DM 발송 완료`;
-        resultEl.className = 'send-result ok';
+        resultEl.textContent = '✅ DM 발송 완료'; resultEl.className = 'send-result ok';
+        _reloadHistory(uid, custCode, brandCode);
       } else {
-        resultEl.textContent = '❌ ' + (data.error || '처리 실패');
-        resultEl.className = 'send-result err';
+        resultEl.textContent = '❌ ' + (data.error || '발송 실패'); resultEl.className = 'send-result err';
       }
     } catch (e) {
-      resultEl.textContent = '⚠️ 판가 적용 완료, DM 로그 저장 실패: ' + e.message;
+      resultEl.textContent = '❌ 네트워크 오류'; resultEl.className = 'send-result err';
+    }
+    resultEl.style.display = '';
+    btn.disabled = false; btn.textContent = '💬 DM만 발송';
+  };
+
+  // ─── 판가 등록 + DM 발송 ──────────────────────────
+  window.sendPriceDm = async function(uid, custCode, custName, brandCode, brandName, plantCode, btn) {
+    const message  = document.getElementById(`priceDmText_${uid}`)?.value || '';
+    const resultEl = document.getElementById(`priceResult_${uid}`);
+    const priceItems = _collectPriceItems(uid, plantCode, custCode);
+    if (!priceItems.length) {
+      resultEl.textContent = '❌ 설정판가를 1건 이상 입력하세요.';
+      resultEl.className = 'send-result err'; resultEl.style.display = ''; return;
+    }
+    btn.disabled = true; btn.textContent = 'SAP 등록 중...'; resultEl.style.display = 'none';
+    let sapResult;
+    try {
+      sapResult = await _callSap(priceItems);
+      if (!sapResult.success) throw new Error(sapResult.error || sapResult.status_msg || 'SAP 등록 실패');
+    } catch (e) {
+      resultEl.textContent = '❌ SAP 판가 등록 실패: ' + e.message;
+      resultEl.className = 'send-result err'; resultEl.style.display = '';
+      btn.disabled = false; btn.textContent = '💰 판가 등록 + DM 발송'; return;
+    }
+    btn.textContent = 'DM 발송 중...';
+    try {
+      const data = await _logToServer({ customer_code: custCode, customer_name: custName,
+        brand_code: brandCode, brand_name: brandName, action_type: 'price_and_dm',
+        dm_message: message, price_items: priceItems, sap_result: sapResult });
+      if (data.success) {
+        resultEl.textContent = `✅ 판가 ${sapResult.saved_count || priceItems.length}건 등록 + DM 발송 완료`;
+        resultEl.className = 'send-result ok';
+        _reloadHistory(uid, custCode, brandCode);
+      } else {
+        resultEl.textContent = '❌ ' + (data.error || '처리 실패'); resultEl.className = 'send-result err';
+      }
+    } catch (e) {
+      resultEl.textContent = '⚠️ 판가 등록 완료, DM 로그 저장 실패: ' + e.message;
       resultEl.className = 'send-result err';
     }
     resultEl.style.display = '';
-    btn.disabled = false; btn.textContent = '💰 판가 적용 + DM 발송';
+    btn.disabled = false; btn.textContent = '💰 판가 등록 + DM 발송';
   };
+
+  // ─── 수기 행 추가 ─────────────────────────────────
+  window.addManualRow = function(uid) {
+    if (!_manualIdx[uid]) _manualIdx[uid] = 9000;
+    const idx = _manualIdx[uid]++;
+    const pid = `${uid}_m${idx}`;
+    const tbody = document.querySelector(`#pricePanel_${uid} .price-table tbody`);
+    if (!tbody) return;
+    const tr = document.createElement('tr');
+    tr.dataset.manual = '1';
+    tr.innerHTML = `
+      <td><input type="text" id="matnr_${pid}" placeholder="상품코드" style="width:72px;"
+           oninput="this.closest('tr').querySelector('[data-matnr]').dataset.matnr=this.value"></td>
+      <td style="text-align:left;"><input type="text" placeholder="상품명" style="width:90px;border:1px solid #d1d5db;border-radius:.3rem;padding:.2rem .3rem;font-size:.78rem;"></td>
+      <td>-</td><td>-</td>
+      <td><input type="number" id="cost_${pid}" placeholder="원가" min="0" step="1" style="width:72px;border:1px solid #d1d5db;border-radius:.3rem;padding:.2rem .3rem;font-size:.78rem;"
+           oninput="recalcFromCost('${pid}')"></td>
+      <td><input type="number" id="price_${pid}" placeholder="판가" min="0" step="1"
+           oninput="recalcFromPrice('${pid}')" data-matnr=""></td>
+      <td><input type="number" id="gptarget_${pid}" placeholder="GP%" min="0" max="99.9" step="0.1"
+           oninput="recalcFromGp('${pid}')" class="derived"></td>
+      <td><button class="del-row-btn" type="button" onclick="this.closest('tr').remove()" title="행 삭제">×</button></td>
+    `;
+    tbody.appendChild(tr);
+    tr.querySelector(`#matnr_${pid}`)?.focus();
+  };
+
+  // ─── 이력 로드 ────────────────────────────────────
+  function _renderHistory(uid, rows) {
+    const body = document.getElementById(`histBody_${uid}`);
+    const countEl = document.getElementById(`histCount_${uid}`);
+    if (!body) return;
+    if (countEl) countEl.textContent = rows.length ? `(${rows.length}건)` : '';
+    if (!rows.length) {
+      body.innerHTML = '<div style="color:#9ca3af;font-size:.82rem;padding:.25rem 0;">이력 없음</div>';
+      return;
+    }
+    const tbl = document.createElement('table');
+    tbl.className = 'hist-table';
+    tbl.innerHTML = `<thead><tr><th>일시</th><th>구분</th><th>품목수</th><th>SAP등록</th><th>메시지</th></tr></thead>`;
+    const tb = document.createElement('tbody');
+    rows.forEach(r => {
+      const tr = document.createElement('tr');
+      const typeMap = { price_and_dm: ['both','판가+DM'], price_only: ['price','판가만'], dm_only_sent: ['dm','DM만'], dm_only: ['dm','DM만'] };
+      const [cls, label] = typeMap[r.action_type] || ['dm', r.action_type || '-'];
+      const dt = (r.created_at || '').replace('T',' ').slice(0,16);
+      const msg = (r.message || '').slice(0, 30) + ((r.message||'').length > 30 ? '…' : '');
+      tr.innerHTML = `
+        <td style="color:#6b7280;white-space:nowrap;">${dt}</td>
+        <td><span class="hist-badge ${cls}">${label}</span></td>
+        <td style="text-align:center;">${r.price_item_count || 0}</td>
+        <td style="text-align:center;">${r.sap_saved_count || 0}</td>
+        <td style="text-align:left;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${(r.message||'').replace(/"/g,'&quot;')}">${msg || '-'}</td>
+      `;
+      tb.appendChild(tr);
+    });
+    tbl.appendChild(tb);
+    body.innerHTML = '';
+    body.appendChild(tbl);
+  }
+
+  window.loadDmHistory = function(uid, custCode, brandCode) {
+    const body = document.getElementById(`histBody_${uid}`);
+    if (body) body.innerHTML = '<div style="color:#9ca3af;font-size:.82rem;">불러오는 중...</div>';
+    fetch(`/portal/dm-log-list?brand_code=${encodeURIComponent(brandCode)}&cust_code=${encodeURIComponent(custCode)}`)
+      .then(r => r.json())
+      .then(d => _renderHistory(uid, d.rows || []))
+      .catch(() => { if (body) body.innerHTML = '<div style="color:#ef4444;font-size:.82rem;">불러오기 실패</div>'; });
+  };
+
+  function _reloadHistory(uid, custCode, brandCode) {
+    const det = document.getElementById(`histDetails_${uid}`);
+    if (det && det.open) window.loadDmHistory(uid, custCode, brandCode);
+  }
 
 })();
 </script>

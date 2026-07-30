@@ -1855,11 +1855,13 @@ async def dm_send_with_price(request: Request, body: _DmSendPayload):
         price_items_json=_json.dumps(body.price_items, ensure_ascii=False),
         sap_saved_count=saved_count,
         sap_result_json=_json.dumps(sap_result, ensure_ascii=False),
-        status="price_applied_dm_sent" if body.action_type == "price_and_dm" else "dm_only_sent",
+        status=("price_applied_dm_sent" if body.action_type == "price_and_dm"
+            else "price_only" if body.action_type == "price_only"
+            else "dm_only_sent"),
     )
 
     # ── 판가설정 액션이면 실적 테이블 백그라운드 갱신 ─────────────────
-    if body.action_type == "price_and_dm":
+    if body.action_type in ("price_and_dm", "price_only"):
         def _refresh_action_results():
             try:
                 from portal_refresh import run_action_results_refresh
@@ -1874,6 +1876,30 @@ async def dm_send_with_price(request: Request, body: _DmSendPayload):
         "sap_saved_count": saved_count,
         "dm_status": "logged",
     })
+
+
+@router.get("/dm-log-list")
+async def dm_log_list(request: Request, brand_code: str = "", cust_code: str = "", limit: int = 100):
+    """판가설정/DM 발송 이력 조회 (브랜드 + 고객 필터)."""
+    import json as _json
+    _require_user(request)
+    from portal_db import list_dm_logs
+    all_rows = list_dm_logs(limit=500)
+    rows = [
+        r for r in all_rows
+        if (not brand_code or r.get("brand_code") == brand_code)
+        and (not cust_code or r.get("customer_code") == cust_code)
+    ][:limit]
+    # price_items_json → 품목명 목록 파싱
+    for r in rows:
+        try:
+            items = _json.loads(r.get("price_items_json") or "[]")
+            r["product_list"] = [str(i.get("matnr") or "") for i in items if i.get("matnr")]
+            r["price_item_count"] = len(items)
+        except Exception:
+            r["product_list"] = []
+            r["price_item_count"] = 0
+    return JSONResponse({"rows": rows})
 
 
 # ── 백그라운드 스레드 싱글턴 가드 ────────────────────────────────
