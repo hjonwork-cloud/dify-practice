@@ -441,7 +441,7 @@
   // ─── 판가 설정 + DM 발송 ──────────────────────────
   // SAP Bridge Agent 는 사용자 PC 에서 실행되므로 브라우저가 직접 localhost:7788 호출 →
   // 성공 시 서버에는 DM 로그(결과 포함)만 전송하여 Azure 서버가 SAP에 직접 접속하지 않도록 함.
-  const SAP_AGENT = 'http://localhost:7788';
+  const SAP_AGENT = 'https://localhost:7788';
 
   window.sendPriceDm = async function(uid, custCode, custName, brandCode, brandName, plantCode, btn) {
     const message  = document.getElementById(`priceDmText_${uid}`)?.value || '';
