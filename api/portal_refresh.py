@@ -262,7 +262,7 @@ def run_refresh(force: bool = False) -> dict:
     {cm_brand_cte}
     , gen_all AS (
         SELECT ROUND(SUM(`매출액`)/10000) AS sales_m,
-               COUNT(DISTINCT `거래체`) AS customer_count
+               COUNT(DISTINCT `거래처`) AS customer_count
         FROM {T_MAIN}
         WHERE `년월` = '{latest_ym}' AND `사업부명` = '외식식재사업부'
           AND (`ZC본부` IS NULL OR NOT ({_zc8}))
@@ -270,7 +270,7 @@ def run_refresh(force: bool = False) -> dict:
     , gen_emp AS (
         SELECT `영업사원` AS emp_code,
                ROUND(SUM(`매출액`)/10000) AS my_sales_m,
-               COUNT(DISTINCT `거래체`) AS my_customer_count
+               COUNT(DISTINCT `거래처`) AS my_customer_count
         FROM {T_MAIN}
         WHERE `년월` = '{latest_ym}' AND `사업부명` = '외식식재사업부'
           AND (`ZC본부` IS NULL OR NOT ({_zc8}))
@@ -279,7 +279,7 @@ def run_refresh(force: bool = False) -> dict:
     , gen_leader AS (
         SELECT {_leader_case} AS emp_code,
                ROUND(SUM(`매출액`)/10000) AS my_sales_m,
-               COUNT(DISTINCT `거래체`) AS my_customer_count
+               COUNT(DISTINCT `거래처`) AS my_customer_count
         FROM {T_MAIN}
         WHERE `년월` = '{latest_ym}' AND `사업부명` = '외식식재사업부'
           AND (`ZC본부` IS NULL OR NOT ({_zc8})) AND {_leaders_where}

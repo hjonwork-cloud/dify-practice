@@ -1829,6 +1829,59 @@ async def dm_send_with_price(request: Request, body: _DmSendPayload):
     })
 
 
+# ── 백그라운드 스레드 싱글턴 가드 ────────────────────────────────
+# 배경(2026-07-30):
+#   Azure App Service 에서 gunicorn -w 4 로 뜨면 각 워커가 이 모듈을 import 하면서
+#   warmup / keepalive / refresh 스케쥴러가 4번 중복 실행되어
+#   - Databricks 커넥션/워크로드 4배 부담
+#   - CREATE OR REPLACE TABLE 이 4개 워커에서 동시에 → Delta MetadataChangedException
+#   문제가 발생했다.
+#
+# 해결:
+#   1) gunicorn.conf.py 로 workers=1 을 기본값으로 고정 (1차 방어)
+#   2) 그럼에도 누군가 워커를 늘렸을 때를 대비, POSIX 파일락으로 프로세스간
+#      싱글턴을 보장 (2차 방어). 락을 얻지 못한 워커는 해당 스레드를 스킵.
+#   3) Windows 로컬 개발환경에는 fcntl 이 없으므로 락 없이 그대로 실행
+#      (로컬은 단일 프로세스라 문제 없음).
+_SINGLETON_FDS: dict[str, int] = {}
+
+
+def _acquire_singleton_lock(name: str) -> bool:
+    """서버 프로세스 간 배타 락. True 반환 시 이 프로세스가 리더."""
+    # Windows(개발환경) → fcntl 없음 → 항상 True (단일 프로세스라 안전)
+    try:
+        import fcntl  # type: ignore
+    except ImportError:
+        return True
+
+    lock_dir = os.getenv("DATA_DIR", "/tmp")
+    try:
+        os.makedirs(lock_dir, exist_ok=True)
+    except OSError:
+        lock_dir = "/tmp"
+    lock_path = os.path.join(lock_dir, f".portal_singleton_{name}.lock")
+    try:
+        fd = os.open(lock_path, os.O_WRONLY | os.O_CREAT, 0o644)
+    except OSError as e:
+        logger.warning(f"[singleton] {name} 락 파일 열기 실패({e}) → 허용")
+        return True
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (BlockingIOError, OSError):
+        os.close(fd)
+        logger.info(f"[singleton] {name}: 다른 워커가 보유 중 → 스킵")
+        return False
+    try:
+        os.ftruncate(fd, 0)
+        os.write(fd, f"{os.getpid()}\n".encode())
+    except OSError:
+        pass
+    # fd 를 모듈 전역에 보관해서 프로세스 종료 시까지 락 유지
+    _SINGLETON_FDS[name] = fd
+    logger.info(f"[singleton] {name}: pid={os.getpid()} 리더 획득")
+    return True
+
+
 # ── 서버 시작 시 백그라운드 캐시 워밍업 ──────────────────────────────
 def _warmup_cache():
     """서버 시작 후 30초 대기 후 주요 캐시를 미리 채운다."""
@@ -1869,9 +1922,6 @@ def _warmup_cache():
         _log.warning(f"[warmup] 브랜드 리포트 워밍업 실패: {e}")
 
 
-threading.Thread(target=_warmup_cache, daemon=True, name="portal-warmup").start()
-
-
 # ── Databricks SQL Warehouse Keepalive ──────────────────────────────
 # Warehouse idle timeout(기본 10분) 전에 가벼운 쿼리를 계속 날려서 항상 warm 유지.
 # 이걸 안 하면 첫 접속자마다 15~30초 콜드 스타트를 겪게 된다.
@@ -1895,9 +1945,6 @@ def _databricks_keepalive():
         time.sleep(interval_sec)
 
 
-threading.Thread(target=_databricks_keepalive, daemon=True, name="portal-dbx-keepalive").start()
-
-
 def _auto_refresh_scheduler():
     """6시간마다 사전계산 테이블 자동 재생성. 서버 시작 시 자동 실행."""
     import logging
@@ -1915,4 +1962,21 @@ def _auto_refresh_scheduler():
         time.sleep(6 * 3600)  # 6시간 대기
 
 
-threading.Thread(target=_auto_refresh_scheduler, daemon=True, name="portal-refresh-scheduler").start()
+# ── 백그라운드 스레드 기동 (싱글턴 락으로 보호) ────────────────
+# workers=1 이 기본이지만 만약 -w N 으로 뜨더라도 아래 락이 리더 워커 하나만
+# 아래 세 스레드를 돌리도록 보장한다. 리더가 아닌 워커는 요청 처리만 수행.
+#
+# 주의: warmup 은 **각 워커별 커넥션 풀 예열**을 위해 리더 여부와 무관하게
+# 모두 실행하는 편이 콜드스타트 완화에 유리하다. 반면 keepalive/scheduler 는
+# Databricks 자원과 Delta 커밋 충돌을 유발하므로 리더 하나만 실행한다.
+threading.Thread(target=_warmup_cache, daemon=True, name="portal-warmup").start()
+
+if _acquire_singleton_lock("keepalive"):
+    threading.Thread(target=_databricks_keepalive, daemon=True, name="portal-dbx-keepalive").start()
+else:
+    logger.info("[boot] keepalive 스레드 스킵 (다른 워커가 리더)")
+
+if _acquire_singleton_lock("refresh-scheduler"):
+    threading.Thread(target=_auto_refresh_scheduler, daemon=True, name="portal-refresh-scheduler").start()
+else:
+    logger.info("[boot] refresh-scheduler 스레드 스킵 (다른 워커가 리더)")
