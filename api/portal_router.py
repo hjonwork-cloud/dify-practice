@@ -1947,6 +1947,38 @@ def _warmup_cache():
     except Exception as e:
         _log.warning(f"[warmup] 브랜드 리포트 워밍업 실패: {e}")
 
+    # ── (1.2) 커넥션 풀 병렬 예열 ──────────────────────────────
+    #   Databricks Serverless SQL Warehouse 는 세션마다 다른 컴퓨트 인스턴스에
+    #   라우팅될 수 있다. 위 (1) 은 커넥션 1개만 warm 시키므로, 두 번째 사용자가
+    #   다른 세션을 요청하면 다시 콜드 스핀업 (15~30s) 겪는다.
+    #   → DB_POOL_SIZE 만큼 병렬로 SELECT 실행해서 풀의 모든 슬롯을 warm 유지.
+    try:
+        _log.info("[warmup] 커넥션 풀 병렬 예열 시작")
+        import portal_refresh as _pr
+        import main as _main
+        _pool_size = int(os.getenv("DB_POOL_SIZE", "5"))
+
+        def _warm_slot(_idx: int) -> float:
+            _t = time.time()
+            _main._safe_query(f"SELECT {_idx} AS x FROM {_pr.T_DASH} LIMIT 1", raw=True)
+            return time.time() - _t
+
+        _t_pool = time.time()
+        with ThreadPoolExecutor(max_workers=_pool_size) as _ex:
+            _futures = [_ex.submit(_warm_slot, i) for i in range(_pool_size)]
+            _slot_times = []
+            for _f in as_completed(_futures):
+                try:
+                    _slot_times.append(_f.result())
+                except Exception as _pe:
+                    _log.warning(f"[warmup] pool slot 예열 실패: {_pe}")
+        _log.info(
+            f"[warmup] 커넥션 풀 병렬 예열 완료 ({_pool_size} slots, "
+            f"total={time.time()-_t_pool:.2f}s, max_slot={max(_slot_times or [0]):.2f}s)"
+        )
+    except Exception as e:
+        _log.warning(f"[warmup] 커넥션 풀 예열 실패: {e}")
+
     # ── (1.5) 결정타: T_BRANDS 를 한 번에 읽어 전 사용자 캐시 populate ──
     #   이렇게 하면 부팅 후 처음 로그인하는 어떤 사용자든 분포분석 첫 클릭이
     #   메모리 캐시 히트 → pick_s ≈ 0.00s 로 즉시 응답.
