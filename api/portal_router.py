@@ -777,7 +777,7 @@ def _recommend_products(brand_name: str, customer_code: str, months: list[str], 
         GROUP BY `자재`
         HAVING SUM(`매출액`) > 0
         ORDER BY adopter_count DESC, gp_rate DESC, sales DESC
-        LIMIT 5
+        LIMIT 30
     """)
     result = []
     for r in rows:

@@ -434,22 +434,6 @@
     `;
     pricePanel.appendChild(actionFooter);
 
-    // 판가/DM 이력 섹션
-    const histSection = document.createElement('details');
-    histSection.className = 'hist-details';
-    histSection.id = `histDetails_${uid}`;
-    histSection.innerHTML = `
-      <summary>📋 판가·DM 발송 이력 <span id="histCount_${uid}" style="color:#9ca3af;font-weight:400;"></span></summary>
-      <div class="hist-body" id="histBody_${uid}"><div style="color:#9ca3af;font-size:.82rem;">클릭하면 이력을 불러옵니다.</div></div>
-    `;
-    histSection.addEventListener('toggle', () => {
-      if (histSection.open && !histSection.dataset.loaded) {
-        histSection.dataset.loaded = '1';
-        window.loadDmHistory('${uid}', '${custCode}', brandCode);
-      }
-    });
-    pricePanel.appendChild(histSection);
-
     body.appendChild(pricePanel);
 
     // 라디오 토글
@@ -735,29 +719,21 @@
   };
 
   function _reloadHistory(uid, custCode, brandCode) {
-    const det = document.getElementById(`histDetails_${uid}`);
-    if (det && det.open) window.loadDmHistory(uid, custCode, brandCode);
+    // 글로벌 이력 탭 갱신 (열려 있으면 자동 새로고침)
+    if (window._arHistLoaded && typeof window.arLoadHist === 'function') window.arLoadHist();
   }
 
 })();
 </script>
 
-<!-- ── 📊 액션 실적 섹션 ─────────────────────────────────────────── -->
-<section class="portal-panel" style="margin-top:1.25rem;" id="actionResultsSection">
-  <div class="portal-panel-head" style="padding-bottom:.5rem;">
-    <div>
-      <p class="eyebrow">ACTION RESULTS</p>
-      <h2>📊 액션 실적</h2>
-      <p style="font-size:.82rem;color:#6b7280;">판가설정 후 DM 발송 이후 해당 가맹점의 누적 매출·GP 실적입니다.</p>
-    </div>
-    <div id="actionResultsSummary" style="display:flex;gap:.75rem;flex-wrap:wrap;align-items:center;font-size:.82rem;"></div>
-  </div>
-  <div id="actionResultsBody" style="padding:0 1.25rem 1.25rem;">
-    <div style="color:#9ca3af;font-size:.85rem;">불러오는 중...</div>
-  </div>
-</section>
-
 <style>
+/* ACTION RESULTS 탭 */
+.ar-tabs{display:flex;gap:0;border-bottom:2px solid #e5e7eb;margin-bottom:.75rem;}
+.ar-tab-btn{padding:.45rem 1.1rem;font-size:.85rem;font-weight:600;border:none;background:none;cursor:pointer;color:#6b7280;border-bottom:2px solid transparent;margin-bottom:-2px;}
+.ar-tab-btn.active{color:#16a34a;border-bottom-color:#16a34a;}
+.ar-tab-btn:hover:not(.active){color:#374151;background:#f9fafb;}
+.ar-pane{display:none;}.ar-pane.active{display:block;}
+/* 공통 테이블 */
 .ar-table{width:100%;border-collapse:collapse;font-size:.78rem;}
 .ar-table th{background:#e5e7eb;padding:.3rem .5rem;text-align:center;font-weight:600;white-space:nowrap;}
 .ar-table td{padding:.3rem .5rem;border-bottom:1px solid #f3f4f6;text-align:right;vertical-align:middle;}
@@ -765,64 +741,202 @@
 .ar-badge{display:inline-block;background:#f0fdf4;color:#166534;border:1px solid #bbf7d0;border-radius:.35rem;padding:.1rem .45rem;font-size:.72rem;font-weight:700;}
 .ar-badge.blue{background:#eff6ff;color:#1e40af;border-color:#bfdbfe;}
 .ar-badge.gray{background:#f3f4f6;color:#374151;border-color:#d1d5db;}
+/* 이력 가맹점 섹션 */
+.hist-cust-section{border:1px solid #e5e7eb;border-radius:.4rem;margin-bottom:.4rem;overflow:hidden;}
+.hist-cust-header{display:flex;align-items:center;justify-content:space-between;padding:.4rem .75rem;background:#f9fafb;cursor:pointer;user-select:none;}
+.hist-cust-header:hover{background:#f3f4f6;}
+.hist-cust-body{padding:.35rem .5rem;}
+.hist-filter-row{display:flex;gap:.5rem;align-items:center;margin-bottom:.5rem;flex-wrap:wrap;}
+.hist-filter-row label{font-size:.8rem;font-weight:600;}
+.hist-filter-row select,.hist-filter-row input{font-size:.8rem;padding:.2rem .4rem;border:1px solid #d1d5db;border-radius:.3rem;}
 </style>
+
+<!-- ── 📊 액션 실적 섹션 ─────────────────────────────────────────── -->
+<section class="portal-panel" style="margin-top:1.25rem;" id="actionResultsSection">
+  <div class="portal-panel-head" style="padding-bottom:.25rem;">
+    <div><p class="eyebrow">ACTION RESULTS</p><h2>📊 액션 실적 &amp; 이력</h2></div>
+    <div id="actionResultsSummary" style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;font-size:.82rem;"></div>
+  </div>
+  <!-- 탭 버튼 -->
+  <div class="ar-tabs" style="padding:0 1.25rem;">
+    <button class="ar-tab-btn active" onclick="arSwitchTab('sales',this)">📊 매출 실적</button>
+    <button class="ar-tab-btn" onclick="arSwitchTab('hist',this)">📋 판가·DM 발송 이력</button>
+  </div>
+  <!-- 탭 1: 매출 실적 -->
+  <div class="ar-pane active" id="arPane_sales" style="padding:0 1.25rem 1.25rem;">
+    <div id="actionResultsBody"><div style="color:#9ca3af;font-size:.85rem;">불러오는 중...</div></div>
+  </div>
+  <!-- 탭 2: 발송 이력 -->
+  <div class="ar-pane" id="arPane_hist" style="padding:0 1.25rem 1.25rem;">
+    <div class="hist-filter-row">
+      <label>가맹점:</label>
+      <select id="histCustFilter" onchange="arRenderHistFiltered()" style="min-width:150px;"><option value="">전체</option></select>
+      <label>구분:</label>
+      <select id="histTypeFilter" onchange="arRenderHistFiltered()">
+        <option value="">전체</option>
+        <option value="price_and_dm">판가+DM</option>
+        <option value="price_only">판가만</option>
+        <option value="dm_only_sent">DM만</option>
+      </select>
+      <button class="tbl-ctrl-btn" onclick="arLoadHist()">🔄 새로고침</button>
+      <span id="histTotalBadge" style="font-size:.78rem;color:#6b7280;"></span>
+    </div>
+    <div id="histAllBody"><div style="color:#9ca3af;font-size:.85rem;">탭 클릭 시 로드됩니다.</div></div>
+  </div>
+</section>
 
 <script>
 (function(){
   const brandCode = {{ report.brand.brand_code | tojson }};
-  const apiUrl = `/portal/action-results?brand_code=${encodeURIComponent(brandCode)}`;
 
-  fetch(apiUrl, { headers: { Accept: 'application/json' } })
+  // ─── 탭 전환 ────────────────────────────────────────
+  window.arSwitchTab = function(tab, btn) {
+    document.querySelectorAll('.ar-tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.ar-pane').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById(`arPane_${tab}`).classList.add('active');
+    if (tab === 'hist' && !window._arHistLoaded) { arLoadHist(); window._arHistLoaded = true; }
+  };
+
+  // ─── 매출 실적 탭 ────────────────────────────────────
+  fetch(`/portal/action-results?brand_code=${encodeURIComponent(brandCode)}`, { headers: { Accept: 'application/json' } })
     .then(r => r.json())
     .then(data => {
-      const body    = document.getElementById('actionResultsBody');
+      const body = document.getElementById('actionResultsBody');
       const summary = document.getElementById('actionResultsSummary');
-      const rows    = data.rows  || [];
-      const sum     = data.summary || {};
-
-      // ── 요약 배지 ─────────────────────────────────
+      const rows = data.rows || [];
+      const sum  = data.summary || {};
       summary.innerHTML = [
-        `<span class="ar-badge gray">총 액션 <b>${sum.count || 0}</b>건</span>`,
-        `<span class="ar-badge">누적 매출 <b>${(sum.total_sales_after_m || 0).toLocaleString()}</b>백만</span>`,
-        `<span class="ar-badge">누적 GP <b>${(sum.total_gp_after_m || 0).toLocaleString()}</b>백만</span>`,
-        `<span class="ar-badge blue">범용 추가 <b>${(sum.total_generic_after_m || 0).toLocaleString()}</b>백만</span>`,
+        `<span class="ar-badge gray">총 액션 <b>${sum.count||0}</b>건</span>`,
+        `<span class="ar-badge">누적 매출 <b>${(sum.total_sales_after_m||0).toLocaleString()}</b>백만</span>`,
+        `<span class="ar-badge">누적 GP <b>${(sum.total_gp_after_m||0).toLocaleString()}</b>백만</span>`,
+        `<span class="ar-badge blue">범용 추가 <b>${(sum.total_generic_after_m||0).toLocaleString()}</b>백만</span>`,
       ].join('');
-
       if (!rows.length) {
-        body.innerHTML = '<div style="color:#9ca3af;font-size:.85rem;padding:.5rem 0;">아직 판가설정 액션 실적이 없습니다.</div>';
-        return;
+        body.innerHTML = '<div style="color:#9ca3af;font-size:.85rem;padding:.5rem 0;">아직 판가설정 액션 실적이 없습니다. (판가 등록 후 다음 달 매출 집계 시 표시)</div>'; return;
       }
-
       const tbl = document.createElement('table');
       tbl.className = 'ar-table';
       tbl.innerHTML = `<thead><tr>
-        <th>가맹점명</th><th>가맹점코드</th><th>액션월</th><th>설정품목</th>
-        <th>이후누적매출(백만)</th><th>이후누적GP(백만)</th><th>GP율(%)</th><th>범용추가매출(백만)</th>
+        <th>가맹점명</th><th>코드</th><th>액션월</th><th>설정품목</th>
+        <th>이후누적매출(백만)</th><th>이후GP(백만)</th><th>GP율</th><th>범용추가(백만)</th>
       </tr></thead>`;
       const tbody = document.createElement('tbody');
       rows.forEach(r => {
         const tr = document.createElement('tr');
-        const gpClass = r.gp_rate_after >= 20 ? 'up' : r.gp_rate_after >= 10 ? 'neutral' : 'down';
+        const gpC = r.gp_rate_after >= 20 ? 'up' : r.gp_rate_after >= 10 ? 'neutral' : 'down';
         tr.innerHTML = `
-          <td><b>${r.customer_name || ''}</b></td>
-          <td style="color:#9ca3af;">${r.customer_code || ''}</td>
-          <td>${r.action_ym || ''}</td>
-          <td style="text-align:center;">${r.action_item_count || 0}품목</td>
-          <td>${(r.sales_after_m || 0).toLocaleString()}</td>
-          <td>${(r.gp_after_m || 0).toLocaleString()}</td>
-          <td><span class="gp-chip ${gpClass}">${r.gp_rate_after || 0}%</span></td>
-          <td>${(r.generic_sales_after_m || 0).toLocaleString()}</td>
-        `;
+          <td><b>${r.customer_name||''}</b></td>
+          <td style="color:#9ca3af;font-size:.72rem;">${r.customer_code||''}</td>
+          <td>${r.action_ym||''}</td>
+          <td style="text-align:center;">${r.action_item_count||0}품목</td>
+          <td>${(r.sales_after_m||0).toLocaleString()}</td>
+          <td>${(r.gp_after_m||0).toLocaleString()}</td>
+          <td><span class="gp-chip ${gpC}">${r.gp_rate_after||0}%</span></td>
+          <td>${(r.generic_sales_after_m||0).toLocaleString()}</td>`;
         tbody.appendChild(tr);
       });
-      tbl.appendChild(tbody);
-      body.innerHTML = '';
-      body.appendChild(tbl);
+      tbl.appendChild(tbody); body.innerHTML = ''; body.appendChild(tbl);
     })
-    .catch(() => {
-      document.getElementById('actionResultsBody').innerHTML =
-        '<div style="color:#ef4444;font-size:.82rem;">실적 데이터를 불러오지 못했습니다.</div>';
+    .catch(() => { document.getElementById('actionResultsBody').innerHTML = '<div style="color:#ef4444;font-size:.82rem;">실적 데이터 로드 실패</div>'; });
+
+  // ─── 발송 이력 탭 ────────────────────────────────────
+  let _histAllRows = [];
+  window._arHistLoaded = false;
+
+  window.arLoadHist = function() {
+    const body = document.getElementById('histAllBody');
+    body.innerHTML = '<div style="color:#9ca3af;font-size:.85rem;">불러오는 중...</div>';
+    fetch(`/portal/dm-log-list?brand_code=${encodeURIComponent(brandCode)}&limit=300`)
+      .then(r => r.json())
+      .then(d => {
+        _histAllRows = d.rows || [];
+        // 가맹점 필터 옵션 구성
+        const custSet = new Map();
+        _histAllRows.forEach(r => { if (r.customer_code) custSet.set(r.customer_code, r.customer_name || r.customer_code); });
+        const sel = document.getElementById('histCustFilter');
+        const prev = sel.value;
+        sel.innerHTML = '<option value="">전체</option>';
+        [...custSet.entries()].sort((a,b)=>(a[1]||'').localeCompare(b[1]||'')).forEach(([code,name])=>{
+          sel.innerHTML += `<option value="${code}">${name} (${code})</option>`;
+        });
+        sel.value = prev;
+        arRenderHistFiltered();
+      })
+      .catch(() => { document.getElementById('histAllBody').innerHTML = '<div style="color:#ef4444;font-size:.82rem;">불러오기 실패</div>'; });
+  };
+
+  window.arRenderHistFiltered = function() {
+    const body  = document.getElementById('histAllBody');
+    const custF = document.getElementById('histCustFilter')?.value || '';
+    const typeF = document.getElementById('histTypeFilter')?.value || '';
+    const rows  = _histAllRows.filter(r =>
+      (!custF || r.customer_code === custF) &&
+      (!typeF || r.action_type === typeF || (typeF === 'dm_only_sent' && r.action_type === 'dm_only'))
+    );
+    document.getElementById('histTotalBadge').textContent = `${rows.length}건`;
+    if (!rows.length) {
+      body.innerHTML = '<div style="color:#9ca3af;font-size:.85rem;padding:.5rem 0;">해당 이력이 없습니다.</div>'; return;
+    }
+    const typeMap = { price_and_dm:['both','판가+DM'], price_only:['price','판가만'], dm_only_sent:['dm','DM만'], dm_only:['dm','DM만'] };
+    body.innerHTML = '';
+    if (custF) {
+      // 단일 가맹점: 테이블 직접 표시
+      body.appendChild(_buildHistTable(rows, typeMap, false));
+    } else {
+      // 전체: 가맹점별 섹션으로 그룹
+      const byCustomer = new Map();
+      rows.forEach(r => {
+        const key = r.customer_code || 'unknown';
+        if (!byCustomer.has(key)) byCustomer.set(key, { name: r.customer_name || key, rows: [] });
+        byCustomer.get(key).rows.push(r);
+      });
+      [...byCustomer.entries()].forEach(([code, g]) => {
+        const sec = document.createElement('div');
+        sec.className = 'hist-cust-section';
+        const hdr = document.createElement('div');
+        hdr.className = 'hist-cust-header';
+        hdr.innerHTML = `<b>${g.name}</b><small style="color:#6b7280;">${code} · ${g.rows.length}건</small>`;
+        const tb = document.createElement('div');
+        tb.className = 'hist-cust-body';
+        tb.appendChild(_buildHistTable(g.rows, typeMap, false));
+        // 기본 접힘 (첫 번째 섹션만 펼침)
+        if (byCustomer.entries().next().value[0] !== code) tb.style.display = 'none';
+        hdr.onclick = () => { tb.style.display = tb.style.display === 'none' ? '' : 'none'; };
+        sec.appendChild(hdr); sec.appendChild(tb); body.appendChild(sec);
+      });
+    }
+  };
+
+  function _buildHistTable(rows, typeMap, showCust) {
+    const tbl = document.createElement('table');
+    tbl.className = 'ar-table';
+    tbl.innerHTML = `<thead><tr>
+      ${showCust ? '<th>가맹점</th>' : ''}
+      <th>일시</th><th>구분</th><th>품목수</th><th>SAP등록</th><th style="text-align:left;">메시지</th>
+    </tr></thead>`;
+    const tb = document.createElement('tbody');
+    rows.forEach(r => {
+      const tr = document.createElement('tr');
+      const [cls, label] = typeMap[r.action_type] || ['dm', r.action_type || '-'];
+      const dt  = (r.created_at || '').replace('T',' ').slice(0, 16);
+      const msg = (r.message || '').slice(0, 40) + ((r.message||'').length > 40 ? '…' : '');
+      tr.innerHTML = `
+        ${showCust ? `<td style="font-size:.75rem;">${r.customer_name||''}<br><span style="color:#9ca3af;">${r.customer_code||''}</span></td>` : ''}
+        <td style="color:#6b7280;white-space:nowrap;font-size:.75rem;">${dt}</td>
+        <td><span class="hist-badge ${cls}">${label}</span></td>
+        <td style="text-align:center;">${r.price_item_count||0}</td>
+        <td style="text-align:center;">${r.sap_saved_count||0}</td>
+        <td style="text-align:left;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.78rem;"
+            title="${(r.message||'').replace(/"/g,'&quot;')}">${msg||'-'}</td>`;
+      tb.appendChild(tr);
     });
+    tbl.appendChild(tb); return tbl;
+  }
+
+  // 가맹점 패널에서 액션 완료 시 이력 탭 갱신
+  window._refreshGlobalHist = function() { if (window._arHistLoaded) arLoadHist(); };
+
 })();
 </script>
 {% endif %}
