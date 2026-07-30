@@ -335,7 +335,11 @@ def list_password_status(emp_codes: list[str]) -> dict[str, dict]:
     for r in rows:
         r = dict(r)
         r["is_locked"] = bool(r.get("locked_until") and r["locked_until"] > now)
-    def list_login_users() -> list[dict]:
+        result[r["emp_code"]] = r
+    return result
+
+
+def list_login_users() -> list[dict]:
     """로그인 성공 기록이 있는 고유 사용자 목록 반환."""
     init_db()
     with _connect() as conn:
