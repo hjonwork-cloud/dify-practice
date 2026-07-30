@@ -19,8 +19,8 @@
 .action-target-summary:hover{background:#f9fafb;}
 .action-target-summary b{font-size:.9rem;}
 .action-target-summary small{display:block;font-size:.75rem;color:#6b7280;}
-.action-toggle-btn{flex-shrink:0;font-size:.8rem;padding:.25rem .6rem;border:1px solid #d1d5db;border-radius:.35rem;background:#fff;cursor:pointer;white-space:nowrap;}
-.action-toggle-btn:hover{background:#f3f4f6;}
+.action-toggle-btn{border:0;border-radius:999px;background:#071015;color:#fff;font-weight:900;padding:8px 13px;cursor:pointer;white-space:nowrap;font-size:.82rem;}
+.action-toggle-btn:hover{background:var(--portal-coral,#18b9c7);}
 /* ── 확장 패널 ── */
 .action-panel{padding:.75rem;background:#f9fafb;border-top:1px solid #e5e7eb;}
 .action-radio-group{display:flex;gap:1.25rem;margin-bottom:.75rem;font-size:.88rem;}
@@ -44,16 +44,7 @@
 .gp-chip.up{background:#dcfce7;color:#166534;}
 .gp-chip.down{background:#fee2e2;color:#991b1b;}
 .gp-chip.neutral{background:#f3f4f6;color:#374151;}
-/* ── 버튼 ── */
-.action-send-btn{display:inline-flex;align-items:center;gap:.4rem;background:#16a34a;color:#fff;border:none;border-radius:.45rem;padding:.45rem 1rem;font-size:.85rem;cursor:pointer;font-weight:600;}
-.action-send-btn:hover{background:#15803d;}
-.action-send-btn:disabled{background:#9ca3af;cursor:not-allowed;}
-.action-send-btn.price-send{background:#0369a1;}
-.action-send-btn.price-send:hover{background:#0284c7;}
-.action-send-btn.price-only{background:#7c3aed;}
-.action-send-btn.price-only:hover{background:#6d28d9;}
-.action-send-btn.dm-only-btn{background:#0891b2;}
-.action-send-btn.dm-only-btn:hover{background:#0e7490;}
+/* ── 버튼 (구 정의 제거됨 → 하단 통합 CSS 사용) ── */
 .price-btn-row{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin-top:.5rem;}
 .send-result{font-size:.82rem;margin-top:.4rem;padding:.35rem .6rem;border-radius:.35rem;}
 .send-result.ok{background:#dcfce7;color:#166534;}
@@ -72,11 +63,36 @@
 .hist-badge.dm{background:#cffafe;color:#0e7490;}
 .hist-badge.both{background:#dcfce7;color:#166534;}
 /* ── 테이블 컨트롤 ── */
-.tbl-ctrl-row{display:flex;gap:.5rem;margin:.3rem 0 .5rem;flex-wrap:wrap;}
-.tbl-ctrl-btn{font-size:.75rem;padding:.25rem .6rem;border:1px dashed #9ca3af;border-radius:.3rem;background:#fff;cursor:pointer;color:#374151;}
-.tbl-ctrl-btn:hover{background:#f3f4f6;}
+.tbl-ctrl-row{display:flex;gap:.5rem;margin:.3rem 0 .5rem;flex-wrap:wrap;align-items:center;}
+.tbl-ctrl-btn{font-size:.75rem;padding:.28rem .75rem;border:1px solid var(--portal-line,#e4e9ef);border-radius:999px;background:#fff;cursor:pointer;color:#071015;font-weight:700;white-space:nowrap;}
+.tbl-ctrl-btn:hover{background:var(--portal-coral-soft,#e8fdf5);border-color:rgba(24,185,199,.45);}
+.tbl-ctrl-btn.dm-confirm{background:#071015;color:#fff;border-color:#071015;}
+.tbl-ctrl-btn.dm-confirm:hover{background:var(--portal-coral,#18b9c7);border-color:var(--portal-coral,#18b9c7);}
 .row-del-btn{background:none;border:none;color:#ef4444;font-size:1rem;cursor:pointer;padding:.1rem .3rem;line-height:1;border-radius:4px;}
 .row-del-btn:hover{background:#fee2e2;}
+/* ── 액션 버튼 개선 ── */
+.action-send-btn{display:inline-flex;align-items:center;gap:.4rem;border:none;border-radius:999px;padding:.45rem 1.1rem;font-size:.84rem;cursor:pointer;font-weight:800;white-space:nowrap;box-shadow:0 4px 12px rgba(0,0,0,.15);transition:box-shadow .15s,transform .1s;}
+.action-send-btn:hover{transform:translateY(-1px);box-shadow:0 6px 18px rgba(0,0,0,.18);}
+.action-send-btn:disabled{opacity:.5;cursor:not-allowed;transform:none;box-shadow:none;}
+.action-send-btn{background:linear-gradient(135deg,#064f88,#0871bb);color:#fff;}
+.action-send-btn.price-send{background:linear-gradient(135deg,#014669,#0369a1);}
+.action-send-btn.price-only{background:linear-gradient(135deg,#4c1d95,#7c3aed);}
+.action-send-btn.dm-only-btn{background:linear-gradient(135deg,#065666,#0891b2);}
+.action-toggle-btn{border:0;border-radius:999px;background:#071015;color:#fff;font-weight:900;padding:8px 14px;cursor:pointer;white-space:nowrap;font-size:.82rem;}
+.action-toggle-btn:hover{background:var(--portal-coral,#18b9c7);}
+/* ── SAP 모달 ── */
+.sap-modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9998;align-items:center;justify-content:center;}
+.sap-modal-bg.open{display:flex;}
+.sap-modal{background:#fff;border-radius:20px;max-width:480px;width:90%;padding:2rem;box-shadow:0 24px 70px rgba(0,0,0,.25);position:relative;}
+.sap-modal h3{margin:0 0 .5rem;font-size:1.05rem;}
+.sap-modal p{color:#6b7280;font-size:.87rem;line-height:1.6;margin:.4rem 0;}
+.sap-modal ol{padding-left:1.4rem;margin:.75rem 0;color:#374151;font-size:.87rem;line-height:1.8;}
+.sap-modal-close{position:absolute;top:.75rem;right:1rem;background:none;border:none;font-size:1.3rem;cursor:pointer;color:#9ca3af;}
+.sap-modal-close:hover{color:#374151;}
+.sap-dl-btn{display:inline-flex;align-items:center;gap:.5rem;background:linear-gradient(135deg,#064f88,#0871bb);color:#fff;border:none;border-radius:999px;padding:.6rem 1.4rem;font-size:.9rem;font-weight:800;cursor:pointer;margin-top:.75rem;box-shadow:0 4px 14px rgba(8,113,187,.3);text-decoration:none;}
+.sap-dl-btn:hover{background:linear-gradient(135deg,#053f70,#0660a0);}
+.sap-open-btn{border:1px solid var(--portal-line,#e4e9ef);border-radius:999px;background:#fff;color:#071015;font-weight:900;font-size:12px;padding:8px 12px;cursor:pointer;white-space:nowrap;}
+.sap-open-btn:hover{background:var(--portal-coral-soft,#e8fdf5);border-color:rgba(24,185,199,.45);}
 .price-table input[type=text]{width:80px;border:1px solid #d1d5db;border-radius:.3rem;padding:.2rem .3rem;font-size:.78rem;}
 .del-row-btn{background:none;border:none;color:#ef4444;cursor:pointer;font-size:.95rem;padding:0 .25rem;line-height:1;}
 </style>
@@ -150,9 +166,10 @@
     <div class="portal-panel-head">
       <div><p class="eyebrow">ACTION TARGETS</p><h2>제안 대상 · 액션 실행</h2>
       <p>범용비중 {{ report.threshold }}% 미만. {{ report.target_count }}건</p></div>
-      <div style="display:flex;gap:.4rem;">
-        <button type="button" onclick="sortTargets('sales')" style="font-size:.75rem;padding:.2rem .5rem;border:1px solid #d1d5db;border-radius:.3rem;background:#fff;cursor:pointer;">매출↓</button>
-        <button type="button" onclick="sortTargets('ratio')" style="font-size:.75rem;padding:.2rem .5rem;border:1px solid #d1d5db;border-radius:.3rem;background:#fff;cursor:pointer;">범용↓</button>
+      <div class="target-sort-actions">
+        <button type="button" class="sap-open-btn" onclick="document.getElementById('sapModal').classList.add('open')">🔧 SAP 브릿지</button>
+        <button type="button" onclick="sortTargets('sales')">매출↓</button>
+        <button type="button" onclick="sortTargets('ratio')">범용↓</button>
       </div>
     </div>
 
@@ -171,7 +188,7 @@
             <b>{{ c.customer_name }}</b>
             <small>{{ c.customer_code }} · 범용 {{ c.generic_ratio }}% · Gap {{ c.gap }}%p · 효과 {{ '{:,}'.format(c.proposal_possible_sales_m) }}백만</small>
           </div>
-          <button type="button" class="action-toggle-btn">▶ 액션</button>
+          <button type="button" class="action-toggle-btn">▶ 액션 실행</button>
         </div>
         <div class="action-panel" hidden data-target-body>
           <div class="empty" style="font-size:.82rem;">추천상품과 액션 옵션을 불러오는 중...</div>
@@ -255,7 +272,7 @@
     const btn  = row.querySelector('.action-toggle-btn');
     if (isOpen) {
       body.hidden = true; row.dataset.open = '0';
-      btn.textContent = '▶ 액션';
+      btn.textContent = '▶ 액션 실행';
       return;
     }
     body.hidden = false; row.dataset.open = '1';
@@ -400,8 +417,9 @@
       const tr = btn.closest('tr');
       if (!tr) return;
       tr.remove();
-      _rebuildDmMsg();
+      // DM 자동 반영 제거 → '품목 확정·DM 반영' 버튼 수동 클릭 방식으로 변경
     };
+    window[`_confirmDm_${uid}`] = _rebuildDmMsg;
 
     // 처음 5개 렌더링
     function appendMoreRows(count) {
@@ -436,6 +454,8 @@
           onclick="window._appendMoreRows_${uid}(5)">+ 추천품목 더 보기</button>
       <button class="tbl-ctrl-btn" type="button"
           onclick="window.addManualRow('${uid}')">＋ 직접 입력 행 추가</button>
+      <button class="tbl-ctrl-btn dm-confirm" type="button"
+          onclick="window._confirmDm_${uid}()">✅ 품목 확정 · DM 반영</button>
     `;
     pricePanel.appendChild(ctrlRow);
     // appendMoreRows 를 전역 접근용으로 노출
@@ -992,5 +1012,24 @@
 
 })();
 </script>
+<!-- SAP 브릿지 설치 가이드 모달 -->
+<div class="sap-modal-bg" id="sapModal" onclick="if(event.target===this)this.classList.remove('open')">
+  <div class="sap-modal">
+    <button class="sap-modal-close" onclick="document.getElementById('sapModal').classList.remove('open')">&times;</button>
+    <h3>🔧 SAP 브릿지 에이전트 설치 안내</h3>
+    <p>영업 PC에 설치하면 플랫폼에서 판가를 직접 SAP에 연동할 수 있습니다.</p>
+    <ol>
+      <li>아래 다운로드 버튼을 눌러 <b>ZIP 파일을 외부에 제공하지 마세요</b></li>
+      <li>ZIP 압축 해제 → <b>SAP_Bridge_Agent.exe</b> 실행</li>
+      <li>첫 실행 시 Windows 방화벽 경고 → <b>"액세스 허용"</b> 클릭</li>
+      <li>시스템 트레이에 하언 아이콘 확인 &rarr; 에이전트 실행 중</li>
+      <li>플랫폼에서 판가 등록 시목록에 보이면 성공</li>
+    </ol>
+    <p style="font-size:.8rem;color:#ef4444;font-weight:600;">&#9888; 파일은 사내 전용. 외부 유출 금지.</p>
+    <a href="/static/sap_bridge.zip" download="SAP_Bridge_배포팩키지.zip" class="sap-dl-btn">
+      📥 배포 패키지 다운로드
+    </a>
+  </div>
+</div>
 {% endif %}
 {% endblock %}

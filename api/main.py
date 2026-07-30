@@ -54,6 +54,19 @@ from portal_router import router as _portal_router
 app.include_router(_portal_router)
 import admin_db  # VOC 접수 / 공개 FAQ 자동응답
 
+# ── 포털 401 → 로그인 페이지 리다이렉트 ────────────────────────────────────
+from fastapi.responses import JSONResponse as _JSONResponse, RedirectResponse as _RedirectResponse
+from fastapi.exceptions import HTTPException as _HTTPExc
+
+@app.exception_handler(_HTTPExc)
+async def _portal_auth_redirect(request: Request, exc: _HTTPExc):
+    if exc.status_code == 401 and request.url.path.startswith("/portal/"):
+        accept = request.headers.get("accept", "")
+        if "text/html" in accept:
+            return _RedirectResponse(url="/portal/login", status_code=302)
+    headers = getattr(exc, "headers", None) or {}
+    return _JSONResponse(status_code=exc.status_code, content={"detail": exc.detail}, headers=headers)
+
 # 직접 처리 규칙과 공개 FAQ로 답하지 못한 질문의 처리 방식.
 # 기본값은 Dify 호출을 하지 않고 VOC로 접수한다. (운영 기본 = 차단)
 _DIFY_FALLBACK_ENABLED = os.getenv("ENABLE_DIFY_FALLBACK", "false").lower() == "true"
