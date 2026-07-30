@@ -413,7 +413,7 @@ def sap_upload_price(payload: dict) -> dict:
                                       encoding="ansi", newline="\n")
     lines = []
     for item in items:
-        vwerk     = str(item.get("vwerk", "")).strip()
+        vwerk     = str(item.get("vwerk") or item.get("plant", "")).strip()
         kunnr     = str(item.get("kunnr", "")).strip()
         matnr     = str(item.get("matnr", "")).strip()
         price     = str(item.get("price", "")).strip()
@@ -472,10 +472,12 @@ def sap_upload_price(payload: dict) -> dict:
         result_rows = []
         success_count = 0
         error_count = 0
+        grid_found = False
         try:
             shell = session.FindById("wnd[0]/usr/cntlCONTAINER/shellcont/shell")
             co = shell.ColumnOrder
             col_names = [co.ElementAt(i) for i in range(co.Count)]
+            grid_found = True
             for r in range(shell.RowCount):
                 row = {}
                 for nm in col_names:
@@ -487,20 +489,29 @@ def sap_upload_price(payload: dict) -> dict:
                         pass
                 result_rows.append(row)
                 icon = row.get("ICON", "")
-                if "@EB@" in icon or "@AV@" in icon:  # 초록 LED = 성공
+                msg  = row.get("MESSAGE", "") or row.get("MSGTEXT", "") or row.get("TEXT", "")
+                # 초록 LED(@EB@), 초록 체크(@08@, @AV@) = 성공 행
+                if "@EB@" in icon or "@AV@" in icon or "@08@" in icon:
                     success_count += 1
-                elif row.get("MESSAGE"):
+                elif msg and not icon:
+                    # 아이콘 없이 메시지만 있으면 오류 행으로 처리
                     error_count += 1
-        except Exception:
-            pass
+        except Exception as ge:
+            # 그리드 못 찾음 — 상태바로 판단
+            result_rows = [{"grid_parse_error": str(ge), "status": status_msg}]
 
         # ── Step 4: 판가 생성 (RUN 버튼) ──
-        # @EB@ = Upload 정상, 이 상태에서 RUN을 눌러야 실제 조건레코드 저장됨
+        # 그리드 발견 or 상태바에 명시적 오류 없으면 RUN 시도
+        run_attempted = False
         saved_count = 0
         save_error = None
-        if success_count > 0:
+        should_run = grid_found or (not status_msg or ("오류" not in status_msg and "Error" not in status_msg))
+        if should_run:
             try:
-                shell.PressToolbarButton('RUN')
+                # grid_found=False 시 shell 재탐색
+                run_shell = shell if grid_found else session.FindById("wnd[0]/usr/cntlCONTAINER/shellcont/shell")
+                run_shell.PressToolbarButton('RUN')
+                run_attempted = True
                 time.sleep(3)
                 # 팝업 처리
                 for _ in range(3):
@@ -537,7 +548,11 @@ def sap_upload_price(payload: dict) -> dict:
             except Exception as e2:
                 save_error = str(e2)
 
-        success = saved_count > 0 or (save_error is None and success_count > 0)
+        # saved_count > 0 : RUN 후 그리드에서 성공 아이콘 확인
+        # run_attempted & save_error is None : RUN 시도했고 예외 없음 (상태바로 최종 판단)
+        success = (saved_count > 0
+                   or (run_attempted and save_error is None)
+                   or (not run_attempted and save_error is None and success_count > 0))
 
         return {
             "success":       success,
@@ -546,6 +561,7 @@ def sap_upload_price(payload: dict) -> dict:
             "success_count": success_count,
             "saved_count":   saved_count,
             "error_count":   error_count,
+            "run_attempted": run_attempted,
             "status_msg":    status_msg,
             "messages":      messages,
             "rows":          result_rows,
