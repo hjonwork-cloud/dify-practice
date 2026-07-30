@@ -347,6 +347,16 @@ def run_refresh(force: bool = False) -> dict:
       AND `ZC본부` IS NOT NULL AND {_zc8}
       AND `년월` >= '{six_months_ago}'
     GROUP BY `ZC본부`, `ZC본부명`, `년월`
+    UNION ALL
+    -- 가상 브랜드: 일반외식업장
+    SELECT '일반외식' AS brand_code, '🧑‍🍳일반외식업장' AS brand_name,
+           `년월` AS ym, ROUND(SUM(`매출액`)/10000) AS sales_m,
+           CURRENT_TIMESTAMP() AS updated_at
+    FROM {main.T_MAIN}
+    WHERE `사업부명` = '외식식재사업부'
+      AND (`ZC본부` IS NULL OR NOT ({_zc8}))
+      AND `년월` >= '{six_months_ago}'
+    GROUP BY `년월`
     """
     try:
         main._safe_query(brand_monthly_sql, raw=True)
@@ -358,6 +368,7 @@ def run_refresh(force: bool = False) -> dict:
     # 당월+전월 두 달치를 `ym` 컬럼으로 함께 저장 → 프론트 토글 즉시 응답 가능
     prev_ym = _shift_ym(latest_ym, -1)
     _target_yms_in = f"('{latest_ym}','{prev_ym}')"
+    # 실브랜드 8종 + 가상 브랜드 '일반외식' (ZC본부 IS NULL OR NOT _zc8) 를 하나의 테이블에 담는다.
     brand_summary_sql = f"""
     CREATE OR REPLACE TABLE {T_BRAND_SUMMARY} AS
     SELECT
@@ -382,6 +393,30 @@ def run_refresh(force: bool = False) -> dict:
     WHERE `년월` IN {_target_yms_in} AND `사업부명` = '외식식재사업부'
       AND `ZC본부` IS NOT NULL AND {_zc8}
     GROUP BY `년월`, `ZC본부`, `ZC본부명`
+    UNION ALL
+    -- 가상 브랜드: 일반외식업장 (ZC본부 미분류 or 8대 브랜드 이외)
+    SELECT
+        `년월` AS ym,
+        '일반외식' AS brand_code,
+        '🧑‍🍳일반외식업장' AS brand_name,
+        COUNT(DISTINCT `거래처`) AS customer_count,
+        ROUND(SUM(`매출액`)/10000) AS brand_total_sales_m,
+        CASE WHEN SUM(CASE WHEN `자재그룹명` IS NOT NULL THEN `매출액` ELSE 0 END) = 0 THEN 0.0
+             ELSE ROUND(
+                 SUM(CASE WHEN `자재그룹명` IS NOT NULL AND COALESCE(`자재그룹명`,'') <> 'FC전용상품' THEN `매출액` ELSE 0 END)
+               / SUM(CASE WHEN `자재그룹명` IS NOT NULL THEN `매출액` ELSE 0 END) * 100, 1)
+        END AS brand_avg,
+        CASE WHEN SUM(CASE WHEN `자재그룹명` IS NOT NULL AND COALESCE(`자재그룹명`,'') <> 'FC전용상품' THEN `매출액` ELSE 0 END) = 0 THEN 0.0
+             ELSE ROUND((
+                 SUM(CASE WHEN `자재그룹명` IS NOT NULL AND COALESCE(`자재그룹명`,'') <> 'FC전용상품' THEN `매출액` ELSE 0 END)
+               - SUM(CASE WHEN `자재그룹명` IS NOT NULL AND COALESCE(`자재그룹명`,'') <> 'FC전용상품' THEN COALESCE(`매출원가`,0) ELSE 0 END)
+             ) / SUM(CASE WHEN `자재그룹명` IS NOT NULL AND COALESCE(`자재그룹명`,'') <> 'FC전용상품' THEN `매출액` ELSE 0 END) * 100, 1)
+        END AS generic_gp_rate,
+        CURRENT_TIMESTAMP() AS updated_at
+    FROM {main.T_MAIN}
+    WHERE `년월` IN {_target_yms_in} AND `사업부명` = '외식식재사업부'
+      AND (`ZC본부` IS NULL OR NOT ({_zc8}))
+    GROUP BY `년월`
     """
     try:
         main._safe_query(brand_summary_sql, raw=True)
@@ -406,6 +441,9 @@ def run_refresh(force: bool = False) -> dict:
     _where_brand_2m = f"""
         WHERE `년월` IN {_target_yms_in} AND `사업부명` = '외식식재사업부'
           AND `ZC본부` IS NOT NULL AND {_zc8}"""
+    _where_gen_2m = f"""
+        WHERE `년월` IN {_target_yms_in} AND `사업부명` = '외식식재사업부'
+          AND (`ZC본부` IS NULL OR NOT ({_zc8}))"""
 
     brand_cust_sql = f"""
     CREATE OR REPLACE TABLE {T_BRAND_CUST} AS
@@ -439,12 +477,49 @@ def run_refresh(force: bool = False) -> dict:
         {_where_brand_2m}
         GROUP BY `년월`, `ZC본부`, `ZC본부명`, `거래처`
         HAVING SUM(`매출액`) > 0
+    ),
+    -- 가상 브랜드: 일반외식업장 (ZC본부 미분류 or 8대 브랜드 이외)
+    gen_emp_data AS (
+        SELECT `영업사원` AS emp_code, `년월` AS ym,
+               '일반외식' AS brand_code, '🧑‍🍳일반외식업장' AS brand_name,
+               `거래처` AS customer_code, MAX(`거래처명`) AS customer_name,
+               {_sales_exprs}
+        FROM {main.T_MAIN}
+        {_where_gen_2m}
+        GROUP BY `영업사원`, `년월`, `거래처`
+        HAVING SUM(`매출액`) > 0
+    ),
+    gen_leader_data AS (
+        SELECT {_leader_case} AS emp_code, `년월` AS ym,
+               '일반외식' AS brand_code, '🧑‍🍳일반외식업장' AS brand_name,
+               `거래처` AS customer_code, MAX(`거래처명`) AS customer_name,
+               {_sales_exprs}
+        FROM {main.T_MAIN}
+        {_where_gen_2m} AND {_leaders_where}
+        GROUP BY `지점명`, `년월`, `거래처`
+        HAVING SUM(`매출액`) > 0
+    ),
+    gen_admin_data AS (
+        SELECT '{_admin_code}' AS emp_code, `년월` AS ym,
+               '일반외식' AS brand_code, '🧑‍🍳일반외식업장' AS brand_name,
+               `거래처` AS customer_code, MAX(`거래처명`) AS customer_name,
+               {_sales_exprs}
+        FROM {main.T_MAIN}
+        {_where_gen_2m}
+        GROUP BY `년월`, `거래처`
+        HAVING SUM(`매출액`) > 0
     )
     SELECT *, CURRENT_TIMESTAMP() AS updated_at FROM emp_data
     UNION ALL
     SELECT *, CURRENT_TIMESTAMP() AS updated_at FROM leader_data WHERE emp_code IS NOT NULL
     UNION ALL
     SELECT *, CURRENT_TIMESTAMP() AS updated_at FROM admin_data
+    UNION ALL
+    SELECT *, CURRENT_TIMESTAMP() AS updated_at FROM gen_emp_data
+    UNION ALL
+    SELECT *, CURRENT_TIMESTAMP() AS updated_at FROM gen_leader_data WHERE emp_code IS NOT NULL
+    UNION ALL
+    SELECT *, CURRENT_TIMESTAMP() AS updated_at FROM gen_admin_data
     """
     try:
         main._safe_query(brand_cust_sql, raw=True)
