@@ -448,9 +448,10 @@ def _bulk_warm_brand_rows() -> int:
     Returns:
         캐시에 채운 사용자 수.
     """
-    import portal_refresh
-    rows = portal_refresh.main._safe_query(
-        f"SELECT * FROM {portal_refresh.T_BRANDS} ORDER BY emp_code, sales_m DESC",
+    import main as _main  # portal_refresh.main 은 module attribute 가 아니므로 직접 import
+    import portal_refresh as _pr
+    rows = _main._safe_query(
+        f"SELECT * FROM {_pr.T_BRANDS} ORDER BY emp_code, sales_m DESC",
         raw=True,
     ) or []
     # emp_code 별 그룹핑
@@ -472,9 +473,10 @@ def _brand_rows(emp_code: str = _DEFAULT_EMP_CODE) -> list[dict]:
         return cached
     # ── 1순위: T_BRANDS 사전계산 테이블 ──────────────────────────────
     try:
-        import portal_refresh
-        rows_pre = portal_refresh.main._safe_query(
-            f"SELECT * FROM {portal_refresh.T_BRANDS} WHERE emp_code = '{emp_code}' ORDER BY sales_m DESC LIMIT 200",
+        import main as _main
+        import portal_refresh as _pr
+        rows_pre = _main._safe_query(
+            f"SELECT * FROM {_pr.T_BRANDS} WHERE emp_code = '{emp_code}' ORDER BY sales_m DESC LIMIT 200",
             raw=True,
         ) or []
         if rows_pre:
