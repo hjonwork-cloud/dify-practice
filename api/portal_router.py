@@ -1819,9 +1819,48 @@ def _warmup_cache():
         _log.info("[warmup] 사업부 기준 데이터 완료")
     except Exception as e:
         _log.warning(f"[warmup] 사업부 데이터 실패: {e}")
+    # ── 분포분석용 사전계산 테이블 워밍업 (T_BRANDS/T_BRAND_SUMMARY/T_BRAND_CUST 세션 열기) ──
+    try:
+        _log.info("[warmup] 브랜드 리포트 사전계산 테이블 워밍업 시작")
+        import portal_refresh as _pr
+        import main as _main
+        for _t in (_pr.T_BRANDS, _pr.T_BRAND_SUMMARY, _pr.T_BRAND_CUST, _pr.T_BRAND_MONTHLY, _pr.T_DASH):
+            try:
+                _main._safe_query(f"SELECT 1 FROM {_t} LIMIT 1", raw=True)
+            except Exception as _te:
+                _log.warning(f"[warmup] {_t} ping 실패: {_te}")
+        _log.info("[warmup] 브랜드 리포트 사전계산 테이블 워밍업 완료")
+    except Exception as e:
+        _log.warning(f"[warmup] 브랜드 리포트 워밍업 실패: {e}")
 
 
 threading.Thread(target=_warmup_cache, daemon=True, name="portal-warmup").start()
+
+
+# ── Databricks SQL Warehouse Keepalive ──────────────────────────────
+# Warehouse idle timeout(기본 10분) 전에 가벼운 쿼리를 계속 날려서 항상 warm 유지.
+# 이걸 안 하면 첫 접속자마다 15~30초 콜드 스타트를 겪게 된다.
+def _databricks_keepalive():
+    import logging
+    _log = logging.getLogger("portal_keepalive")
+    interval_sec = int(os.getenv("DBX_KEEPALIVE_SEC", "300"))  # 기본 5분
+    # 서버 부팅 직후엔 warmup 스레드가 이미 세션 열고 있으므로 첫 사이클은 좀 늦게
+    time.sleep(interval_sec)
+    while True:
+        try:
+            import portal_refresh as _pr
+            import main as _main
+            # 초경량 SELECT — 인덱스/파티션 필요 없고 캐시된 metadata 로 즉시 응답
+            _t0 = time.time()
+            _main._safe_query(f"SELECT 1 AS x FROM {_pr.T_DASH} LIMIT 1", raw=True)
+            _elapsed = round(time.time() - _t0, 2)
+            _log.info(f"[keepalive] ok ({_elapsed}s)")
+        except Exception as e:
+            _log.warning(f"[keepalive] 실패 (다음 주기 재시도): {e}")
+        time.sleep(interval_sec)
+
+
+threading.Thread(target=_databricks_keepalive, daemon=True, name="portal-dbx-keepalive").start()
 
 
 def _auto_refresh_scheduler():
