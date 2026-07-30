@@ -105,6 +105,39 @@ def _ensure_cert() -> tuple[str, str]:
         return _CERT_FILE, _KEY_FILE
 
 
+def _trust_cert_windows(cert_path: str) -> None:
+    """Windows CurrentUser\\Root 신뢰 저장소에 인증서 등록 (최초 1회).
+    PowerShell을 subprocess로 실행. 관리자 권한 불필요(CurrentUser)."""
+    import subprocess, os
+    flag_file = cert_path + ".trusted"
+    if os.path.exists(flag_file):
+        return  # 이미 등록됨
+
+    ps_code = f"""
+$cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2('{cert_path}')
+$store = New-Object System.Security.Cryptography.X509Certificates.X509Store(
+    [System.Security.Cryptography.X509Certificates.StoreName]::Root,
+    [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
+)
+$store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+$store.Add($cert)
+$store.Close()
+Write-Output "OK"
+"""
+    try:
+        r = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_code],
+            capture_output=True, text=True, timeout=15
+        )
+        if "OK" in r.stdout:
+            print("[SAP Bridge] 인증서 Windows 신뢰 저장소 등록 완료 (Chrome/Edge 경고 없음)")
+            # 다음 실행 때 재등록하지 않도록 flag 파일 생성
+            open(flag_file, "w").close()
+        else:
+            print(f"[SAP Bridge] 인증서 신뢰 등록 경고: {r.stderr.strip()[:200]}")
+    except Exception as e:
+        print(f"[SAP Bridge] 인증서 신뢰 등록 실패 (무시): {e}")
+
 
 # ── SAP 작업 큐 (HTTP 스레드 → SAP 전용 워커 스레드) ─────────────────
 # COM 객체는 STA 스레드에서만 접근 가능하므로, 모든 SAP 호출을
@@ -675,6 +708,7 @@ def run_server():
 
     # 자체 서명 인증서 준비
     cert_file, key_file = _ensure_cert()
+    _trust_cert_windows(cert_file)  # 최초 실행 시 Windows 신뢰 저장소 자동 등록
 
     server = ThreadingHTTPServer(("127.0.0.1", PORT), SapBridgeHandler)
 
@@ -687,8 +721,7 @@ def run_server():
     print(f"[SAP Bridge Agent] 인증서: {cert_file}")
     print(f"[SAP Bridge Agent] STOP: Ctrl+C")
     print()
-    print("  !! 처음 실행 시 브라우저에서 https://localhost:7788 을 열어 인증서를 신뢰해야 합니다.")
-    print("  !! 또는 install_sap_agent.ps1 을 관리자 권한으로 실행하면 자동 등록됩니다.")
+    print("  >> 준비 완료. 포털에서 판가 적용 DM 발송 버튼을 클릭하세요.")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
