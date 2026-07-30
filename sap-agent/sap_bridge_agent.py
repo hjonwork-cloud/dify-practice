@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 SAP 브릿지 에이전트 — localhost:7788 (HTTPS)
 사용자 PC에서 실행. 브라우저(플랫폼)의 fetch() 요청을 받아 SAP GUI를 자동 제어.
