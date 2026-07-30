@@ -1477,6 +1477,41 @@ async def login(request: Request):
     )
     # 첫 로그인 시 사이드바 펼침 강제 (JS에서 sb_fresh 감지 후 localStorage 초기화)
     response.set_cookie("sb_fresh", "1", max_age=10, samesite="lax")
+
+    # ── 백그라운드 prefetch: 사용자가 대시보드 보는 동안 분포분석용 캐시를 미리 채움 ─────
+    # 목적: 로그인 → 분포분석 클릭 시 `pick_s` 를 캐시 히트로 만들어 첫 접속 지연 제거
+    def _prefetch_user_data(_emp: str):
+        _lg = logging.getLogger("portal_prefetch")
+        try:
+            _t0 = time.time()
+            # 1) 브랜드 목록 캐시 (분포분석의 pick_s 를 즉시 응답으로 만듦)
+            brands = _brand_rows(_emp)
+            _t1 = time.time()
+            _lg.info(f"[prefetch] {_emp} brands={len(brands)} in {_t1-_t0:.2f}s")
+
+            # 2) 대표 브랜드 1개의 사전계산 데이터도 미리 채워두면 첫 클릭이 즉시 반환
+            first_brand = None
+            for _b in brands:
+                bn = str(_b.get("brand_name") or "")
+                if bn and bn != "🧑\u200d🍳일반외식업장":  # 가상 브랜드 제외
+                    first_brand = bn
+                    break
+            if first_brand:
+                try:
+                    from portal_refresh import read_brand_report_from_table
+                    read_brand_report_from_table(_emp, first_brand, ym_mode="prev")
+                    _t2 = time.time()
+                    _lg.info(f"[prefetch] {_emp} brand={first_brand} in {_t2-_t1:.2f}s")
+                except Exception as _pe:
+                    _lg.warning(f"[prefetch] {_emp} brand prefetch 실패: {_pe}")
+        except Exception as _e:
+            _lg.warning(f"[prefetch] {_emp} 실패: {_e}")
+
+    threading.Thread(
+        target=_prefetch_user_data, args=(user["emp_code"],),
+        daemon=True, name=f"prefetch-{user['emp_code']}",
+    ).start()
+
     return response
 
 
@@ -1844,8 +1879,8 @@ def _databricks_keepalive():
     import logging
     _log = logging.getLogger("portal_keepalive")
     interval_sec = int(os.getenv("DBX_KEEPALIVE_SEC", "300"))  # 기본 5분
-    # 서버 부팅 직후엔 warmup 스레드가 이미 세션 열고 있으므로 첫 사이클은 좀 늦게
-    time.sleep(interval_sec)
+    # 첫 사이클: 부팅 warmup(30초) 완료 후 약 60초 시점에 실행 → 이후 interval_sec 간격
+    time.sleep(60)
     while True:
         try:
             import portal_refresh as _pr
