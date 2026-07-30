@@ -59,7 +59,7 @@
 <!-- 실제 콘텐츠 (AJAX 로딩 후 표시) -->
 <div id="brandContent" hidden>
   <section class="portal-metric-grid compact">
-    <article><span>브랜드 전체 매출</span><strong id="mSales">-</strong><small id="mSalesLabel">-</small></article>
+    <article><span>내 담당 매출</span><strong id="mSales">-</strong><small id="mSalesLabel">-</small></article>
     <article><span>브랜드 평균 범용상품</span><strong id="mAvg">-</strong><small id="mAvgLabel">-</small></article>
     <article><span>제안 기준</span><strong id="mThreshold">-</strong><small>슬라이더 기준 미만 고객</small></article>
     <article><span>제안 대상</span><strong id="mTargetCount">-</strong><small>기준 미만 전체 가맹점</small></article>
@@ -210,7 +210,7 @@
     actionLink.style.pointerEvents = '';
 
     document.getElementById('mSales').textContent = fmt(data.brand_total_sales_m) + '백만';
-    document.getElementById('mSalesLabel').textContent = selectedYm + ' 전체 가맹점';
+    document.getElementById('mSalesLabel').textContent = selectedYm + ' 내 담당 가맹점';
     document.getElementById('mAvg').textContent = (data.brand_avg||0) + '%';
     document.getElementById('mAvgLabel').textContent = selectedYm + ' 전용상품 제외';
     document.getElementById('mThreshold').textContent = (data.threshold||0) + '%';
