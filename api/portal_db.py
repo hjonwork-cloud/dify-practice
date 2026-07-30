@@ -1,18 +1,27 @@
 """영업사원 포털 활동 로그 저장소."""
 from __future__ import annotations
 
+import hashlib
 import os
+import secrets
 import sqlite3
 from pathlib import Path
 from datetime import datetime
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    from backports.zoneinfo import ZoneInfo  # type: ignore
 
 DATA_DIR = Path(os.getenv("CHATBOT_DATA_DIR", os.getenv("DATA_DIR", r"E:\data\chatbot")))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = DATA_DIR / "portal_activity.db"
 
+_KST = ZoneInfo("Asia/Seoul")
+
 
 def _now() -> str:
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    """현재 한국 시간 (KST) 문자열 반환."""
+    return datetime.now(_KST).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _connect() -> sqlite3.Connection:
@@ -76,16 +85,29 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_action_created ON promotion_action_logs(created_at DESC);
             """
         )
-        # 기존 DB 하위호환 컬럼 마이그레이션 (없으면 추가)
+        # 하위호환 마이그레이션
         for col, typedef in [
             ("price_items_json", "TEXT"),
             ("sap_saved_count",  "INTEGER DEFAULT 0"),
             ("sap_result_json",  "TEXT"),
+            ("action_ym",        "TEXT"),
         ]:
             try:
                 conn.execute(f"ALTER TABLE dm_send_logs ADD COLUMN {col} {typedef}")
             except Exception:
-                pass  # 이미 존재하면 무시
+                pass
+        # 비밀번호 테이블 마이그레이션
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS portal_user_passwords (
+                emp_code      TEXT PRIMARY KEY,
+                password_hash TEXT NOT NULL,
+                must_change   INTEGER DEFAULT 0,
+                failed_count  INTEGER DEFAULT 0,
+                locked_until  TEXT,
+                created_at    TEXT NOT NULL,
+                updated_at    TEXT NOT NULL
+            );
+        """)
 
 
 def record_login(emp_code: str, emp_name: str = "", team: str = "", ip: str = "", user_agent: str = "", success: bool = True, reason: str = "") -> None:
@@ -163,12 +185,22 @@ def list_login_logs(limit: int = 200) -> list[dict]:
         return [dict(row) for row in rows]
 
 
-def list_dm_logs(limit: int = 200) -> list[dict]:
+def list_dm_logs(limit: int = 200, emp_code: str | None = None,
+                 brand_code: str | None = None, action_ym: str | None = None) -> list[dict]:
     init_db()
+    conds, params = [], []
+    if emp_code:
+        conds.append("emp_code = ?"); params.append(emp_code)
+    if brand_code:
+        conds.append("brand_code = ?"); params.append(brand_code)
+    if action_ym:
+        conds.append("action_ym = ?"); params.append(action_ym)
+    where = ("WHERE " + " AND ".join(conds)) if conds else ""
+    params.append(limit)
     with _connect() as conn:
         rows = conn.execute(
-            "SELECT * FROM dm_send_logs ORDER BY created_at DESC LIMIT ?",
-            (limit,),
+            f"SELECT * FROM dm_send_logs {where} ORDER BY created_at DESC LIMIT ?",
+            params,
         ).fetchall()
         return [dict(row) for row in rows]
 
@@ -183,4 +215,149 @@ def list_action_logs(limit: int = 200) -> list[dict]:
         return [dict(row) for row in rows]
 
 
+# ── 비밀번호 관리 ──────────────────────────────────────────────────────
+
+_HASH_ITER = 260_000
+
+def _hash_pw(password: str, salt: str) -> str:
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), _HASH_ITER)
+    return dk.hex()
+
+
+def set_password(emp_code: str, password: str, must_change: bool = False) -> None:
+    """비밀번호 설정 (신규/변경 공통)."""
+    init_db()
+    salt = secrets.token_hex(16)
+    pw_hash = f"pbkdf2:{salt}:{_hash_pw(password, salt)}"
+    now = _now()
+    with _connect() as conn:
+        conn.execute("""
+            INSERT INTO portal_user_passwords (emp_code, password_hash, must_change, failed_count, created_at, updated_at)
+            VALUES (?, ?, ?, 0, ?, ?)
+            ON CONFLICT(emp_code) DO UPDATE SET
+                password_hash=excluded.password_hash,
+                must_change=excluded.must_change,
+                failed_count=0,
+                locked_until=NULL,
+                updated_at=excluded.updated_at
+        """, (emp_code, pw_hash, 1 if must_change else 0, now, now))
+
+
+def check_password(emp_code: str, password: str) -> dict:
+    """비밀번호 검증. 반환: {ok, locked, must_change, reason}"""
+    init_db()
+    now = _now()
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM portal_user_passwords WHERE emp_code = ?", (emp_code,)
+        ).fetchone()
+        if not row:
+            return {"ok": False, "locked": False, "must_change": False, "reason": "no_password"}
+
+        row = dict(row)
+        # 잠금 확인
+        locked_until = row.get("locked_until")
+        if locked_until and locked_until > now:
+            return {"ok": False, "locked": True, "must_change": False,
+                    "reason": f"계정이 잠겼습니다. {locked_until[:16]} 이후 재시도 가능합니다."}
+
+        # 비밀번호 검증
+        stored = row["password_hash"]
+        try:
+            _, salt, hx = stored.split(":", 2)
+            ok = secrets.compare_digest(_hash_pw(password, salt), hx)
+        except Exception:
+            ok = False
+
+        if ok:
+            # 성공: 실패 카운트 초기화
+            conn.execute(
+                "UPDATE portal_user_passwords SET failed_count=0, locked_until=NULL WHERE emp_code=?",
+                (emp_code,)
+            )
+            return {"ok": True, "locked": False, "must_change": bool(row.get("must_change"))}
+        else:
+            # 실패: 카운트 증가, 5회 이상이면 30분 잠금
+            new_count = (row.get("failed_count") or 0) + 1
+            lock_until = None
+            if new_count >= 5:
+                from datetime import timedelta
+                lock_until = (datetime.now(_KST) + timedelta(minutes=30)).strftime("%Y-%m-%d %H:%M:%S")
+            conn.execute(
+                "UPDATE portal_user_passwords SET failed_count=?, locked_until=? WHERE emp_code=?",
+                (new_count, lock_until, emp_code)
+            )
+            remain = max(0, 5 - new_count)
+            if lock_until:
+                return {"ok": False, "locked": True, "must_change": False,
+                        "reason": f"비밀번호 5회 오류. 30분간 잠금됩니다."}
+            return {"ok": False, "locked": False, "must_change": False,
+                    "reason": f"비밀번호가 올바르지 않습니다. ({remain}회 남음)"}
+
+
+def has_password(emp_code: str) -> bool:
+    """비밀번호 설정 여부 확인."""
+    init_db()
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM portal_user_passwords WHERE emp_code = ?", (emp_code,)
+        ).fetchone()
+        return row is not None
+
+
+def reset_password(emp_code: str) -> str:
+    """관리자용 비밀번호 초기화. 임시 비밀번호(사번 뒤 4자리) 반환."""
+    temp_pw = emp_code[-4:]
+    set_password(emp_code, temp_pw, must_change=True)
+    return temp_pw
+
+
+def unlock_account(emp_code: str) -> None:
+    """계정 잠금 해제."""
+    init_db()
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE portal_user_passwords SET failed_count=0, locked_until=NULL WHERE emp_code=?",
+            (emp_code,)
+        )
+
+
+def list_password_status(emp_codes: list[str]) -> dict[str, dict]:
+    """emp_code 목록의 비밀번호 상태 반환."""
+    init_db()
+    with _connect() as conn:
+        rows = conn.execute(
+            f"SELECT * FROM portal_user_passwords WHERE emp_code IN ({','.join('?'*len(emp_codes))})",
+            emp_codes
+        ).fetchall()
+    result = {}
+    now = _now()
+    for r in rows:
+        r = dict(r)
+        r["is_locked"] = bool(r.get("locked_until") and r["locked_until"] > now)
+    def list_login_users() -> list[dict]:
+    """로그인 성공 기록이 있는 고유 사용자 목록 반환."""
+    init_db()
+    with _connect() as conn:
+        rows = conn.execute(
+            """SELECT emp_code, emp_name, team,
+               MAX(created_at) AS last_login, COUNT(*) AS login_count
+               FROM portal_login_logs WHERE success=1
+               GROUP BY emp_code ORDER BY last_login DESC"""
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def list_login_logs(limit: int = 200) -> list[dict]:
+    """최근 로그인 기록 반환."""
+    init_db()
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM portal_login_logs ORDER BY created_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+# ── 모듈 로드 시 DB 초기화 ──────────────────────────────────────────────────
 init_db()

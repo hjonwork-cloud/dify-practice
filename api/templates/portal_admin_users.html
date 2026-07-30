@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>관리자 · 사용자 관리 | 세일즈 액션 플랫폼</title>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net">
+  <link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" rel="stylesheet">
+  <link href="/static/admin.css?v={{ asset_v }}" rel="stylesheet">
+  <style>
+    body{background:#f1f5f9;font-family:'Pretendard Variable',sans-serif;padding:1.5rem;}
+    h1{font-size:1.25rem;margin:0 0 1.5rem;}
+    .section{background:#fff;border-radius:12px;padding:1.25rem;margin-bottom:1.5rem;box-shadow:0 2px 8px rgba(0,0,0,.05);}
+    .section h2{font-size:.95rem;font-weight:700;margin:0 0 1rem;color:#1e293b;}
+    table{width:100%;border-collapse:collapse;font-size:.8rem;}
+    th{background:#f8fafc;padding:.5rem .6rem;text-align:left;border-bottom:2px solid #e2e8f0;white-space:nowrap;}
+    td{padding:.45rem .6rem;border-bottom:1px solid #f1f5f9;vertical-align:middle;}
+    tr:hover td{background:#f9fafb;}
+    .badge{display:inline-block;padding:.15rem .5rem;border-radius:99px;font-size:.72rem;font-weight:600;}
+    .badge.ok{background:#dcfce7;color:#15803d;}
+    .badge.warn{background:#fef9c3;color:#a16207;}
+    .badge.danger{background:#fee2e2;color:#b91c1c;}
+    .badge.gray{background:#f3f4f6;color:#6b7280;}
+    .act-btn{padding:.3rem .65rem;font-size:.75rem;font-weight:600;border:none;border-radius:6px;cursor:pointer;margin-right:.3rem;}
+    .act-btn.reset{background:#f59e0b;color:#fff;}
+    .act-btn.unlock{background:#3b82f6;color:#fff;}
+    .act-btn:hover{opacity:.85;}
+    .toast{position:fixed;bottom:1.5rem;right:1.5rem;background:#1e293b;color:#fff;padding:.6rem 1rem;border-radius:8px;font-size:.85rem;display:none;z-index:999;}
+  </style>
+</head>
+<body>
+  <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;">
+    <a href="/portal" style="font-size:.82rem;color:#6b7280;text-decoration:none;">← 포털 홈</a>
+    <h1 style="margin:0;">관리자 · 사용자 관리</h1>
+  </div>
+
+  <div class="section">
+    <h2>사용자 목록 (로그인 성공 기록 기준)</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>사번</th><th>이름</th><th>팀</th><th>마지막 로그인</th><th>로그인 횟수</th>
+          <th>비밀번호</th><th>잠금</th><th>변경필요</th><th>관리</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for u in users %}
+        {% set ps = pw_status.get(u.emp_code, {}) %}
+        <tr>
+          <td><code>{{ u.emp_code }}</code></td>
+          <td><b>{{ u.emp_name or '-' }}</b></td>
+          <td style="color:#6b7280;">{{ u.team or '-' }}</td>
+          <td style="font-size:.75rem;white-space:nowrap;">{{ u.last_login }}</td>
+          <td style="text-align:center;">{{ u.login_count }}</td>
+          <td>
+            {% if ps %}
+              <span class="badge ok">설정됨</span>
+            {% else %}
+              <span class="badge gray">미설정</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if ps.get('is_locked') %}
+              <span class="badge danger">잠금</span>
+            {% else %}
+              <span class="badge ok">정상</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if ps.get('must_change') %}
+              <span class="badge warn">변경필요</span>
+            {% else %}
+              <span class="badge gray">-</span>
+            {% endif %}
+          </td>
+          <td>
+            <button class="act-btn reset" onclick="resetPw('{{ u.emp_code }}','{{ u.emp_name or u.emp_code }}')">초기화</button>
+            {% if ps.get('is_locked') %}
+            <button class="act-btn unlock" onclick="unlockAcc('{{ u.emp_code }}','{{ u.emp_name or u.emp_code }}')">잠금해제</button>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="section">
+    <h2>최근 로그인 기록 (최대 100건)</h2>
+    <table>
+      <thead>
+        <tr><th>시각(KST)</th><th>사번</th><th>이름</th><th>결과</th><th>사유</th><th>IP</th></tr>
+      </thead>
+      <tbody>
+        {% for l in login_logs %}
+        <tr>
+          <td style="font-size:.75rem;white-space:nowrap;">{{ l.created_at }}</td>
+          <td><code>{{ l.emp_code }}</code></td>
+          <td>{{ l.emp_name or '-' }}</td>
+          <td>
+            {% if l.success %}
+              <span class="badge ok">성공</span>
+            {% else %}
+              <span class="badge danger">실패</span>
+            {% endif %}
+          </td>
+          <td style="font-size:.75rem;color:#6b7280;">{{ l.reason or '-' }}</td>
+          <td style="font-size:.72rem;color:#9ca3af;">{{ l.ip or '-' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="toast" id="toast"></div>
+  <script>
+  function showToast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.style.display = 'block';
+    setTimeout(() => { t.style.display = 'none'; }, 3000);
+  }
+  async function resetPw(empCode, name) {
+    if (!confirm(`${name}(${empCode})의 비밀번호를 초기화하시겠습니까?\n임시 비밀번호: 사번 뒤 4자리`)) return;
+    const fd = new FormData(); fd.append('emp_code', empCode);
+    const res = await fetch('/portal/admin/reset-password', {method:'POST', body:fd});
+    const d = await res.json();
+    if (d.ok) { showToast(`✅ ${name} 임시 비밀번호: ${d.temp_pw} (로그인 시 변경 필요)`); }
+    else { showToast('❌ 오류 발생'); }
+  }
+  async function unlockAcc(empCode, name) {
+    if (!confirm(`${name}(${empCode}) 계정 잠금을 해제하시겠습니까?`)) return;
+    const fd = new FormData(); fd.append('emp_code', empCode);
+    const res = await fetch('/portal/admin/unlock-account', {method:'POST', body:fd});
+    const d = await res.json();
+    if (d.ok) { showToast(`✅ ${name} 잠금 해제 완료`); location.reload(); }
+    else { showToast('❌ 오류 발생'); }
+  }
+  </script>
+</body>
+</html>

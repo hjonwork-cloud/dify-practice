@@ -19,13 +19,14 @@
     </section>
     <section class="portal-login-card">
       <h2>플랫폼 로그인</h2>
-      <p>현재 테스트 단계에서는 사번만 입력합니다. 8월 3일 전까지는 선정된 베타테스터와 관리자만 접속할 수 있습니다.</p>
+      <p>사번과 비밀번호를 입력하세요. 최초 로그인 시 비밀번호를 설정하게 됩니다.</p>
       {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
       <form method="post" action="/portal/login" class="login-form">
         <label>사번<input name="emp_code" inputmode="numeric" autocomplete="username" placeholder="사번 입력" autofocus></label>
+        <label>비밀번호<input type="password" name="password" autocomplete="current-password" placeholder="비밀번호 입력"></label>
         <button class="btn primary full" type="submit">로그인</button>
       </form>
-      <p class="login-note">비밀번호 없는 임시 테스트 로그인입니다. 모든 로그인 시도는 관리자 활동내역에 기록됩니다.</p>
+      <p class="login-note">모든 로그인 시도는 관리자 활동내역에 기록됩니다.</p>
     </section>
   </main>
 </body>

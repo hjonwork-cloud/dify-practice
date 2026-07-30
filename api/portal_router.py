@@ -799,7 +799,10 @@ def _recommend_products(brand_name: str, customer_code: str, months: list[str], 
 
 
 def _dm_message(brand_name: str, customer: dict, brand_avg: float, products: list[dict]) -> str:
-    product_lines = "\n".join(f"• {p.get('product_name') or p.get('product_code')}" for p in products[:5]) or "• 추천 후보 상품 확인 필요"
+    product_lines = "\n".join(
+        f"• [{p.get('product_code','')}] {p.get('product_name') or p.get('product_code')}"
+        for p in products[:5]
+    ) or "• 추천 후보 상품 확인 필요"
     return (
         f"안녕하세요, {customer.get('customer_name')} 사장님.\n\n"
         f"{brand_name}을 운영해주셔서 감사드립니다. "
@@ -1507,6 +1510,7 @@ async def login_page(request: Request, error: str = "", fresh: str = ""):
 async def login(request: Request):
     form = await _read_form(request)
     emp_code = form.get("emp_code", "").strip()
+    password = form.get("password", "").strip()
     ip = request.client.host if request.client else ""
     ua = request.headers.get("user-agent", "")[:300]
     user = _portal_user(emp_code)
@@ -1521,6 +1525,29 @@ async def login(request: Request):
         if reason == "beta_not_allowed":
             return _redirect_msg("/portal/login", error=access_control.beta_denied_message("세일즈 액션 플랫폼"))
         return _redirect_msg("/portal/login", error="외식식재사업부 화이트리스트에 등록된 사번만 이용 가능합니다.")
+
+    # ── 비밀번호 미설정 계정: 비밀번호 설정 페이지로 ──────────────────────
+    if not portal_db.has_password(emp_code):
+        portal_db.record_login(emp_code, user["name"], user["team"], ip, ua, True, "no_password_redirect")
+        response = _redirect("/portal/set-password")
+        response.set_cookie(_SESSION_COOKIE, _make_session(emp_code), max_age=600,
+                            httponly=True, samesite="lax")
+        return response
+
+    # ── 비밀번호 검증 ──────────────────────────────────────────────────
+    pw_result = portal_db.check_password(emp_code, password)
+    if not pw_result["ok"]:
+        portal_db.record_login(emp_code, user["name"], user["team"], ip, ua, False, "wrong_password")
+        return _redirect_msg("/portal/login", error=pw_result["reason"])
+
+    # ── 비밀번호 변경 요구 (관리자 초기화 후 첫 로그인) ───────────────────
+    if pw_result.get("must_change"):
+        portal_db.record_login(emp_code, user["name"], user["team"], ip, ua, True, "must_change_pw")
+        response = _redirect("/portal/set-password?must_change=1")
+        response.set_cookie(_SESSION_COOKIE, _make_session(emp_code), max_age=600,
+                            httponly=True, samesite="lax")
+        return response
+
     portal_db.record_login(user["emp_code"], user["name"], user["team"], ip, ua, True, "")
     response = _redirect("/portal")
     response.set_cookie(
@@ -1576,6 +1603,68 @@ async def logout(request: Request):
     response = _redirect("/portal/login")
     response.delete_cookie(_SESSION_COOKIE)
     return response
+
+
+# ── 비밀번호 설정 (최초 로그인 / 관리자 초기화 후) ──────────────────────────
+
+@router.get("/set-password", response_class=HTMLResponse)
+async def set_password_page(request: Request, must_change: str = ""):
+    user = _require_user(request)
+    return _render(request, "portal_set_password.html", user=user, must_change=bool(must_change),
+                   error=request.query_params.get("error", ""))
+
+@router.post("/set-password", response_class=HTMLResponse)
+async def set_password_post(request: Request):
+    user = _require_user(request)
+    form = await _read_form(request)
+    pw1 = form.get("password", "").strip()
+    pw2 = form.get("password2", "").strip()
+    if len(pw1) < 6:
+        return _render(request, "portal_set_password.html", user=user, must_change=False,
+                       error="비밀번호는 6자 이상이어야 합니다.")
+    if pw1 != pw2:
+        return _render(request, "portal_set_password.html", user=user, must_change=False,
+                       error="비밀번호가 일치하지 않습니다.")
+    portal_db.set_password(user["emp_code"], pw1, must_change=False)
+    return _redirect("/portal")
+
+
+# ── 관리자 기능 ──────────────────────────────────────────────────────────────
+
+def _require_admin(request: Request) -> dict:
+    user = _require_user(request)
+    if user["emp_code"] != access_control.ADMIN_EMP_CODE:
+        raise HTTPException(status_code=403, detail="관리자 전용입니다.")
+    return user
+
+@router.get("/admin/users", response_class=HTMLResponse)
+async def admin_users_page(request: Request):
+    _require_admin(request)
+    users = portal_db.list_login_users()
+    pw_status = portal_db.list_password_status([u["emp_code"] for u in users])
+    login_logs = portal_db.list_login_logs(limit=100)
+    return _render(request, "portal_admin_users.html",
+                   users=users, pw_status=pw_status, login_logs=login_logs)
+
+@router.post("/admin/reset-password")
+async def admin_reset_password(request: Request):
+    _require_admin(request)
+    form = await _read_form(request)
+    emp_code = form.get("emp_code", "").strip()
+    if not emp_code:
+        raise HTTPException(status_code=400, detail="emp_code 필요")
+    temp_pw = portal_db.reset_password(emp_code)
+    return JSONResponse({"ok": True, "temp_pw": temp_pw, "emp_code": emp_code})
+
+@router.post("/admin/unlock-account")
+async def admin_unlock_account(request: Request):
+    _require_admin(request)
+    form = await _read_form(request)
+    emp_code = form.get("emp_code", "").strip()
+    if not emp_code:
+        raise HTTPException(status_code=400, detail="emp_code 필요")
+    portal_db.unlock_account(emp_code)
+    return JSONResponse({"ok": True, "emp_code": emp_code})
 
 
 @router.get("/brand-report", response_class=HTMLResponse)
@@ -1761,9 +1850,12 @@ async def brand_report_results_page(
         "total_generic_after_m": total_generic,
         "avg_gp_rate":           round(total_gp / total_sales * 100, 1) if total_sales else 0,
     }
+    # DM 발송 이력
+    dm_logs = portal_db.list_dm_logs(user["emp_code"], brand_code=brand_code or None, action_ym=action_ym or None)
     return _render(request, "portal_brand_report_results.html",
                    rows=rows, brands=brands, summary=summary,
-                   sel_brand_code=brand_code, sel_action_ym=action_ym)
+                   sel_brand_code=brand_code, sel_action_ym=action_ym,
+                   dm_logs=dm_logs)
 
 
 @router.get("/action-results")

@@ -184,4 +184,38 @@
   window.sortTable(5);
 })();
 </script>
+
+{% if dm_logs %}
+<!-- DM 발송 이력 -->
+<div class="portal-panel" style="padding:1.25rem;margin-top:1.5rem;">
+  <h3 style="margin:0 0 .75rem;font-size:.95rem;color:#1e293b;">💬 DM 발송 이력</h3>
+  <div class="results-table-wrap">
+    <table class="results-table">
+      <thead>
+        <tr>
+          <th>발송시각(KST)</th>
+          <th>가맹점명</th>
+          <th>가맹점코드</th>
+          <th>브랜드</th>
+          <th>액션월</th>
+          <th>DM 메시지</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for d in dm_logs %}
+        <tr>
+          <td style="font-size:.75rem;white-space:nowrap;">{{ d.created_at }}</td>
+          <td><b>{{ d.customer_name }}</b></td>
+          <td style="color:#9ca3af;font-size:.75rem;">{{ d.customer_code }}</td>
+          <td style="font-size:.78rem;">{{ d.brand_name }}</td>
+          <td>{{ d.action_ym or '-' }}</td>
+          <td style="max-width:280px;font-size:.75rem;white-space:pre-wrap;color:#374151;">{{ d.message }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
 {% endblock %}
