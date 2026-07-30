@@ -1884,22 +1884,56 @@ def _acquire_singleton_lock(name: str) -> bool:
 
 # ── 서버 시작 시 백그라운드 캐시 워밍업 ──────────────────────────────
 def _warmup_cache():
-    """서버 시작 후 30초 대기 후 주요 캐시를 미리 채운다."""
+    """서버 시작 직후 Databricks Warehouse 를 즉시 깨우고 주요 캐시를 채운다.
+
+    순서가 매우 중요:
+      (1) T_BRANDS / T_DASH ping = warehouse-wake  ← 사용자 첫 클릭 대응
+      (2) 무거운 admin/whitelist 캐시              ← 로그인/관리 페이지 대응
+    이전에는 sleep(30) + admin_overview 를 먼저 돌려 warehouse-wake 가
+    부팅 후 60초 이상 지나서야 발생 → 첫 사용자가 콜드 스타트 세금을 그대로 냈다.
+    """
     import logging
     _log = logging.getLogger("portal_warmup")
-    time.sleep(30)  # 서버 완전 기동 대기
+    # gunicorn 워커가 완전히 앱을 import 하고 라우터가 준비된 직후에 시작.
+    # 굳이 30초를 기다릴 필요가 없다. (짧게 2초만 대기해서 다른 부팅 스레드와 순서만 정렬)
+    time.sleep(2)
+
+    # ── (1) 최우선: Databricks Warehouse 예열 + 사전계산 테이블 세션 오픈 ──
+    #   이게 첫 사용자 pick_s 를 결정한다. 다른 warmup 보다 먼저 실행.
+    try:
+        _log.info("[warmup] 브랜드 리포트 사전계산 테이블 워밍업 시작 (warehouse-wake)")
+        import portal_refresh as _pr
+        import main as _main
+        # T_BRANDS 를 첫 번째로 ping — 이 쿼리 하나가 warehouse 를 깨우고
+        # 커넥션 풀 슬롯 하나를 warm 상태로 유지시킨다.
+        for _t in (_pr.T_BRANDS, _pr.T_DASH, _pr.T_BRAND_SUMMARY, _pr.T_BRAND_CUST, _pr.T_BRAND_MONTHLY):
+            try:
+                _t_ping = time.time()
+                _main._safe_query(f"SELECT 1 FROM {_t} LIMIT 1", raw=True)
+                _log.info(f"[warmup] {_t} ping ok ({time.time()-_t_ping:.2f}s)")
+            except Exception as _te:
+                _log.warning(f"[warmup] {_t} ping 실패: {_te}")
+        _log.info("[warmup] 브랜드 리포트 사전계산 테이블 워밍업 완료")
+    except Exception as e:
+        _log.warning(f"[warmup] 브랜드 리포트 워밍업 실패: {e}")
+
+    # ── (2) 화이트리스트: 로그인 속도 개선 ────────────────────────
     try:
         _log.info("[warmup] 영업사원 화이트리스트 캐시 워밍업 시작")
-        _employee_whitelist()  # 로그인 속도 개선: 미리 채워둠
+        _employee_whitelist()
         _log.info("[warmup] 영업사원 화이트리스트 캐시 완료")
     except Exception as e:
         _log.warning(f"[warmup] 화이트리스트 실패: {e}")
+
+    # ── (3) 관리자 대시보드: 관리자 접속 시 즉시 응답 ──────────────
     try:
         _log.info("[warmup] 관리자 대시보드 캐시 워밍업 시작")
         portal_admin_overview({})
         _log.info("[warmup] 관리자 대시보드 캐시 완료")
     except Exception as e:
         _log.warning(f"[warmup] 관리자 대시보드 실패: {e}")
+
+    # ── (4) 사업부 기준 데이터 ────────────────────────────────────
     try:
         _log.info("[warmup] 사업부 기준 데이터 워밍업 시작")
         _division_latest_ym()
@@ -1907,19 +1941,6 @@ def _warmup_cache():
         _log.info("[warmup] 사업부 기준 데이터 완료")
     except Exception as e:
         _log.warning(f"[warmup] 사업부 데이터 실패: {e}")
-    # ── 분포분석용 사전계산 테이블 워밍업 (T_BRANDS/T_BRAND_SUMMARY/T_BRAND_CUST 세션 열기) ──
-    try:
-        _log.info("[warmup] 브랜드 리포트 사전계산 테이블 워밍업 시작")
-        import portal_refresh as _pr
-        import main as _main
-        for _t in (_pr.T_BRANDS, _pr.T_BRAND_SUMMARY, _pr.T_BRAND_CUST, _pr.T_BRAND_MONTHLY, _pr.T_DASH):
-            try:
-                _main._safe_query(f"SELECT 1 FROM {_t} LIMIT 1", raw=True)
-            except Exception as _te:
-                _log.warning(f"[warmup] {_t} ping 실패: {_te}")
-        _log.info("[warmup] 브랜드 리포트 사전계산 테이블 워밍업 완료")
-    except Exception as e:
-        _log.warning(f"[warmup] 브랜드 리포트 워밍업 실패: {e}")
 
 
 # ── Databricks SQL Warehouse Keepalive ──────────────────────────────
