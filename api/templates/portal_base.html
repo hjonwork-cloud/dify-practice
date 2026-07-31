@@ -128,35 +128,52 @@
 <script src="/static/admin.js?v={{ asset_v }}"></script>
 <script>
 (function(){
-  var SB_KEY  = 'sb_collapsed';
-  var SUB_KEY = 'sb_brand_open';
+  var SB_KEY       = 'sb_collapsed';
+  var SUB_BRAND_KEY = 'sb_brand_open';
+  var SUB_ADMIN_KEY = 'sb_admin_open';
+
   function applyCollapsed(c) { document.body.classList.toggle('sidebar-collapsed', c); }
-  function applySubOpen(open) {
-    var sub = document.getElementById('navBrandSub');
-    var par = document.getElementById('navBrandParent');
+
+  function applySubOpen(subId, parentId, open, storageKey) {
+    var sub = document.getElementById(subId);
+    var par = document.getElementById(parentId);
     if (!sub) return;
-    if (open) { sub.classList.remove('closed'); if (par) par.classList.add('open'); }
-    else      { sub.classList.add('closed');    if (par) par.classList.remove('open'); }
+    if (open) {
+      sub.classList.remove('closed');
+      if (par) par.classList.add('open');
+    } else {
+      sub.classList.add('closed');
+      if (par) par.classList.remove('open');
+    }
+    if (storageKey) localStorage.setItem(storageKey, open ? '1' : '0');
   }
+
   // 로그인 직후(sb_fresh 쿠키) 사이드바 강제 펼침
   if (document.cookie.indexOf('sb_fresh=1') !== -1) {
     localStorage.removeItem(SB_KEY);
     document.cookie = 'sb_fresh=; max-age=0; path=/';
   }
   applyCollapsed(localStorage.getItem(SB_KEY) === '1');
+
   var pathIsBrand = location.pathname.indexOf('/portal/brand-report') === 0;
-  applySubOpen(pathIsBrand || localStorage.getItem(SUB_KEY) === '1');
+  var pathIsAdmin = location.pathname.indexOf('/portal/admin') === 0;
+  applySubOpen('navBrandSub', 'navBrandParent',
+    pathIsBrand || localStorage.getItem(SUB_BRAND_KEY) === '1', null);
+  applySubOpen('navAdminSub', 'navAdminParent',
+    pathIsAdmin || localStorage.getItem(SUB_ADMIN_KEY) === '1', null);
+
   window.sbToggle = function() {
     var c = !document.body.classList.contains('sidebar-collapsed');
     applyCollapsed(c);
     localStorage.setItem(SB_KEY, c ? '1' : '0');
   };
+
   window.sbSubToggle = function(subId, parentId) {
     var sub = document.getElementById(subId);
     if (!sub) return;
     var isOpen = !sub.classList.contains('closed');
-    applySubOpen(!isOpen);
-    localStorage.setItem(SUB_KEY, (!isOpen) ? '1' : '0');
+    var key = subId === 'navBrandSub' ? SUB_BRAND_KEY : SUB_ADMIN_KEY;
+    applySubOpen(subId, parentId, !isOpen, key);
   };
 })();
 </script>
