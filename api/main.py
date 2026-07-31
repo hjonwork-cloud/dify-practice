@@ -2352,7 +2352,7 @@ def _format_days(value) -> str:
 
 def _extract_ar_customer_query(query: str) -> tuple[str, str, int, str] | None:
     """여신/미수채권 질문에서 (고객코드, 고객명키워드, 월, YYYYMM) 추출."""
-    if not re.search(r'여신|미수\s*채권|미수금|미수\s*현황|미수\s*알려', query):
+    if not re.search(r'여신|미수\s*채권|미수금|미수\s*현황|미수\s*알려|채권\s*현황|채권\s*내역|주문가능액|채권(?!\s*귀)', query):
         return None
     # 미출고/미출은 기존 미출고 로직으로 보낸다.
     if re.search(r'미출고|미출\s*고|미출\s*건|미출\s*있어|오늘\s*미출|어제\s*미출', query):
@@ -4339,7 +4339,7 @@ def _to_kakao_text(answer: str) -> str:
                     if re.match(r'\d+월$', h) and hi < len(cells) and cells[hi] != '-':
                         month_parts.append(f'{h} {cells[hi]}')
                 if month_parts:
-                    out.append(f'  {" → ".join(month_parts)}억')
+                    out.append(f'  {" → ".join(month_parts)}백만원')
 
                 # 가맹점/점당매출 + 범용 extras
                 extras = []
@@ -5991,7 +5991,7 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
         return
 
     # ─── 미출고 현황 (Dify 바이패스) ─────────────────────────────
-    if re.search(r'미출고|미출\s*현황|미출\s*건|미출\s*있어|출고\s*안\s*된|안\s*나간\s*물건|오늘\s*미출|어제\s*미출', query):
+    if re.search(r'미출고|미출\s*현황|미출\s*내역|미출\s*건|미출\s*있어|출고\s*안\s*된|안\s*나간\s*물건|오늘\s*미출|어제\s*미출', query):
         # 영업귀책 여부 감지
         only_gyucheck = bool(
             re.search(r'귀책|영업귀책|자책|내\s*잘못|내\s*귀책', query)
@@ -6959,6 +6959,105 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
 
     # ─── 영업사원 신규매출 (Dify 바이패스) ─────────────────────
     _SP_BLACKLIST = {'전체', '사업부', '외식식재', '브랜드', '품목별', '월별', '팀별', '본사별', '사업부별', '매출액', '영업사원'}
+
+    # ① 이름+신규 단독 → 되묻기 QR ──────────────────────────────────────────────────────────
+    _sp_only_new_m = re.search(r'^([가-힣]{2,5})\s+신규$', query.strip())
+    if _sp_only_new_m and _sp_only_new_m.group(1) not in _SP_BLACKLIST:
+        _son_name = _sp_only_new_m.group(1)
+        _son_qr = [
+            {"label": "✅ 신규매출액 조회", "action": "message", "messageText": f"{_son_name} 신규매출"},
+            {"label": "📊 신규CM(공헌이익)", "action": "message", "messageText": f"{_son_name} 신규 CM"},
+            {"label": "🏠 메인 메뉴", "action": "message", "messageText": "메뉴"},
+        ]
+        _send_kakao_callback_qr(
+            callback_url,
+            f"'{_son_name}' 영업사원의 어떤 정보를 조회할까요?",
+            _son_qr, "신규단독"
+        )
+        return
+
+    # ② 연도+신규매출 현황 → 본인 담당 연도 전체 신규매출 ──────────────────────────────────
+    _year_new_m = re.search(r'(\d{2,4})년\s*신규\s*매출\s*현황', query)
+    if _year_new_m:
+        _yn_year_raw = int(_year_new_m.group(1))
+        _yn_year = (_yn_year_raw + 2000) if _yn_year_raw < 100 else _yn_year_raw
+        _yn_user = _load_users().get(user_id, {})
+        _yn_sp = re.sub(r'\s+', '', _yn_user.get('name', ''))
+        _ns_follow_qr_yn = [
+            {"label": "📅 이번 달",   "action": "message", "messageText": f"{_yn_sp} 신규매출 이번달" if _yn_sp else "내 신규매출 이번달"},
+            {"label": "📅 올해 전체", "action": "message", "messageText": f"{_yn_sp} 신규매출 올해" if _yn_sp else "내 신규매출 올해"},
+            {"label": "🏠 메인 메뉴", "action": "message", "messageText": "메뉴"},
+        ]
+        if not _yn_sp:
+            _send_kakao_callback_qr(callback_url, "챗봇 등록이 필요합니다. /등록 명령어로 등록 후 이용해주세요.", _ns_follow_qr_yn, "신규매출연도")
+            return
+        try:
+            rows_yn = _safe_query(f"""
+                WITH new_cust AS (
+                    SELECT `영업사원명`, `ZC본부`, `ZC본부명`
+                    FROM {T_MAIN}
+                    WHERE regexp_replace(`영업사원명`, ' ', '') LIKE '%{_yn_sp}%'
+                      AND `사업부명` = '외식식재사업부'
+                    GROUP BY `영업사원명`, `ZC본부`, `ZC본부명`
+                    HAVING MIN(`대금청구일`) >= '{_NEW_CUST_DATE}'
+                )
+                SELECT t.`년월`, nc.`ZC본부명`,
+                       ROUND(COALESCE(SUM(t.`매출액`),0)/1000000, 2) AS `신규매출액_억원`
+                FROM {T_MAIN} t
+                JOIN new_cust nc ON t.`영업사원명` = nc.`영업사원명` AND t.`ZC본부` = nc.`ZC본부`
+                WHERE t.`년도` = '{_yn_year}' AND t.`사업부명` = '외식식재사업부'
+                GROUP BY t.`년월`, nc.`ZC본부명`
+                ORDER BY t.`년월`, nc.`ZC본부명`
+            """)
+            if rows_yn:
+                text_yn = _build_new_sales_markdown(rows_yn, f"영업사원명 LIKE '%{_yn_sp}%'")
+                _send_kakao_callback_qr(callback_url, _to_kakao_text(text_yn), _ns_follow_qr_yn, "신규매출연도")
+            else:
+                _send_kakao_callback_qr(callback_url, f"{_yn_year}년 신규매출 데이터가 없습니다.", _ns_follow_qr_yn, "신규매출연도")
+        except Exception as _e_yn:
+            logger.error(f"[콜백] 신규매출연도 오류: {_e_yn}")
+            _send_kakao_callback(callback_url, "⚠️ 신규매출 조회 중 오류가 발생했습니다.", "신규매출연도")
+        return
+
+    # ③ 내 담당 거래처 → 담당브랜드 기능 유도 ──────────────────────────────────────────────
+    _my_cust_m = re.search(r'(?:내|본인)?\s*담당\s*(?:거래처|고객|가게|점포)(?:\s*(?:다|전체|모두|모|알\s*수\s*있|전부|리스트|목록))?', query)
+    if _my_cust_m:
+        _mc_user = _load_users().get(user_id, {})
+        _mc_name = _mc_user.get('name', '')
+        _mc_qr = [
+            {"label": "📊 담당 브랜드 매출(이번달)", "action": "message", "messageText": "내 담당브랜드 이번달"},
+            {"label": "📊 담당 브랜드 매출(올해)",   "action": "message", "messageText": "내 담당브랜드 올해"},
+            {"label": "🏠 메인 메뉴",               "action": "message", "messageText": "메뉴"},
+        ]
+        if not _mc_name:
+            _send_kakao_callback_qr(callback_url, "챗봇 등록이 필요합니다. /등록 명령어로 등록 후 이용해주세요.", [{"label": "🏠 메인 메뉴", "action": "message", "messageText": "메뉴"}], "담당거래처")
+        else:
+            _mc_text = (
+                "📋 담당 거래처 조회 안내\n\n"
+                "현재 챗봇에서는 거래처 전체 목록 조회는 지원하지 않습니다.\n"
+                "대신 '내 담당브랜드 이번달' 기능으로 브랜드별 매출 현황을 확인할 수 있습니다.\n\n"
+                "• 담당 브랜드별 월별 매출 확인\n"
+                "• 브랜드별 가맹점 수 및 점당 매출 확인\n\n"
+                "아래 버튼을 눌러 조회해보세요."
+            )
+            _send_kakao_callback_qr(callback_url, _mc_text, _mc_qr, "담당거래처")
+        return
+
+    # ④ 복수 브랜드 수익성 동시 질문 안내 ──────────────────────────────────────────────────
+    if re.search(r'수익성|[Cc][Mm]\b|공헌이익', query):
+        _kws_noisy = re.sub(r'수익성|[Cc][Mm]\b|공헌이익률?|공헌이익율?|\d{1,2}월|\d{2,4}년|알려줘|알려주세요|조회|확인|어때|보여줘', query, flags=re.IGNORECASE).strip()
+        _kw_tokens = [t for t in re.split(r'[\s,·]+', _kws_noisy) if len(t) >= 2 and re.search(r'[가-힣A-Za-z]', t) and t not in _SP_BLACKLIST]
+        if len(_kw_tokens) >= 3:
+            _brand_list = '\n'.join(f'  • {t}' for t in _kw_tokens[:6])
+            _qr_each = [{"label": t[:12], "action": "message", "messageText": f"{t} 수익성"} for t in _kw_tokens[:5]]
+            _qr_each.append({"label": "🏠 메인 메뉴", "action": "message", "messageText": "메뉴"})
+            _send_kakao_callback_qr(
+                callback_url,
+                f"복수 브랜드 동시 수익성 조회는 지원하지 않습니다.\n각 브랜드를 개별 조회해 주세요.\n\n{_brand_list}\n\n아래 버튼으로 하나씩 조회할 수 있습니다.",
+                _qr_each, "복수브랜드수익성"
+            )
+            return
+
     sp_match = re.search(r'([가-힣]{2,5})\s*(?:신규매출|신규실적|신규 매출|신규 실적)', query)
     if sp_match and '신규' in query and sp_match.group(1) not in _SP_BLACKLIST\
             and not re.search(r'수익성|[Cc][Mm]\b|공헌이익률?|공헌이익율?', query):
