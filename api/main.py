@@ -5620,6 +5620,18 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
         ).strip()
         _nm_kw = re.sub(r'\s+', ' ', _nm_kw).strip()
         _nm_kw = re.sub(r'[의는은이가을를]$', '', _nm_kw).strip()
+        # ── 복수 브랜드 동시 수익성 요청 → 개별 조회 안내 ──────────────────────────
+        _nm_tokens = [t for t in _nm_kw.split() if len(t) >= 2 and re.search(r'[가-힣A-Za-z]', t)]
+        if len(_nm_tokens) >= 2:
+            _nm_qr_each = [{"label": t[:12], "action": "message", "messageText": f"{t} 수익성"} for t in _nm_tokens[:5]]
+            _nm_qr_each.append({"label": "🏠 메인 메뉴", "action": "message", "messageText": "메뉴"})
+            _nm_brand_list = '\n'.join(f'  • {t}' for t in _nm_tokens[:6])
+            _send_kakao_callback_qr(
+                callback_url,
+                f"복수 브랜드 동시 수익성 조회는 지원하지 않습니다.\n각 브랜드를 개별 조회해 주세요.\n\n{_nm_brand_list}\n\n아래 버튼으로 하나씩 조회할 수 있습니다.",
+                _nm_qr_each, "복수브랜드수익성"
+            )
+            return
         if _nm_kw and len(_nm_kw) >= 2 and re.search(r'[가-힣A-Za-z]', _nm_kw):
             # 올해/누계/연도 키워드 처리
             _nm_period = ""
@@ -6127,6 +6139,44 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                 ]
                 _team_member_qr.append({"label": "🏠 메인 메뉴", "action": "message", "messageText": "메뉴"})
                 _send_kakao_callback_qr(callback_url, _to_kakao_text(text_u), _team_member_qr, "미출고")
+            elif not rows_u and not is_team and query_name:
+                # ── 브랜드(통합배송처명) fallback: 영업담당자로 찾지 못한 경우 ──
+                _brand_kw_u = query_name.replace(' ', '')
+
+                def _run_brand_unshipped(dc: str) -> list[dict]:
+                    return _safe_query(
+                        f"""
+                        SELECT `출고일자`, `통합배송처명`, `플랜트명`, `상품명`, `미출수량`,
+                               `미출사유명`, `귀책사유`, `주문미출내용`, `영업담당자명`
+                        FROM {T_MISULGO}
+                        WHERE {dc}
+                          AND REPLACE(`통합배송처명`, ' ', '') LIKE '%{_brand_kw_u}%'
+                          AND `미출수량` > 0
+                        ORDER BY `귀책사유` DESC, `통합배송처명`
+                        LIMIT 50
+                        """,
+                        raw=True,
+                    )
+
+                import datetime as _dt_bu
+                _today_bu = _dt_bu.date.today().strftime("%Y-%m-%d")
+                rows_brand = _run_brand_unshipped(f"`출고일자` = '{date_str}'" if date_str else f"`출고일자` = '{_today_bu}'")
+                if not rows_brand and not date_str:
+                    rows_brand = _run_brand_unshipped(f"`출고일자` = (SELECT MAX(`출고일자`) FROM {T_MISULGO})")
+
+                if rows_brand:
+                    # 브랜드 결과 포맷팅
+                    _br_lines = [f"📦 [{query_name}] 미출고 현황\n"]
+                    for _br in rows_brand[:30]:
+                        _br_lines.append(
+                            f"• {_br.get('통합배송처명','')} / {_br.get('상품명','')} "
+                            f"({_br.get('미출수량',0)}개) [{_br.get('미출사유명','') or _br.get('귀책사유','')}] "
+                            f"담당:{_br.get('영업담당자명','')}"
+                        )
+                    _br_text = '\n'.join(_br_lines)
+                    _send_kakao_callback_qr(callback_url, _br_text, _unshipped_ctx_qr, "미출고")
+                else:
+                    _send_kakao_callback_qr(callback_url, text_u, _unshipped_ctx_qr, "미출고")
             else:
                 _send_kakao_callback_qr(callback_url, _to_kakao_text(text_u), _unshipped_ctx_qr, "미출고")
         except Exception as e:
