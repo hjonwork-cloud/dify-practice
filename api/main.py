@@ -2365,7 +2365,9 @@ def _extract_ar_customer_query(query: str) -> tuple[str, str, int, str] | None:
     name = query
     name = re.sub(r'\d{2,4}년\s*\d{1,2}월|\d{1,2}월', ' ', name)
     name = re.sub(r'\b\d{5,10}\b', ' ', name)
-    name = re.sub(r'(고객|거래처)?\s*(여신|미수\s*채권|미수채권|미수금|미수\s*현황)\s*(현황|조회|알려줘|알려|확인|볼래|보여줘|해줘)?', ' ', name)
+    name = re.sub(r'(고객|거래처)?\s*(여신|미수\s*채권|미수채권|미수금|미수\s*현황|채권\s*현황|채권\s*내역|주문가능액)\s*(현황|조회|알려줘|알려|확인|볼래|보여줘|해줘)?', ' ', name)
+    # 단독 "채권" 키워드 제거 (앞에서 복합 패턴 제거 후 남은 것)
+    name = re.sub(r'\b채권\b', ' ', name)
     name = re.sub(r'(기준|좀|현재|금일|오늘|당월|이번달|이번\s*달|알려줘|알려|조회|확인|현황|해줘|보여줘)', ' ', name)
     name = re.sub(r'\s+', ' ', name).strip()
     return cust_code, name, month_num, yearmonth
@@ -5703,6 +5705,27 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                 _send_kakao_callback(callback_url, "⚠️ 수익성 조회 중 오류가 발생했습니다.", "전년동기수익성")
             return
 
+    # ─── 복수 브랜드 수익성 동시 질문 안내 (이름수익성 블록 진입 전 차단) ────────────────
+    if re.search(r'수익성|[Cc][Mm]\b|공헌이익', query) and not any(t in query for t in _PROFIT_TEAMS_SET):
+        _kws_noisy_mb = re.sub(
+            r'수익성|[Cc][Mm]\b|공헌이익률?|공헌이익율?|\d{1,2}월|\d{2,4}년|알려줘|알려주세요|조회|확인|어때|보여줘',
+            ' ', query, flags=re.IGNORECASE
+        ).strip()
+        _kw_tokens_mb = [
+            t for t in re.split(r'[\s,·]+', _kws_noisy_mb)
+            if len(t) >= 2 and re.search(r'[가-힣A-Za-z]', t)
+        ]
+        if len(_kw_tokens_mb) >= 2:
+            _brand_list_mb = '\n'.join(f'  • {t}' for t in _kw_tokens_mb[:6])
+            _qr_each_mb = [{"label": t[:12], "action": "message", "messageText": f"{t} 수익성"} for t in _kw_tokens_mb[:5]]
+            _qr_each_mb.append({"label": "🏠 메인 메뉴", "action": "message", "messageText": "메뉴"})
+            _send_kakao_callback_qr(
+                callback_url,
+                f"복수 브랜드 동시 수익성 조회는 지원하지 않습니다.\n각 브랜드를 개별 조회해 주세요.\n\n{_brand_list_mb}\n\n아래 버튼으로 하나씩 조회할 수 있습니다.",
+                _qr_each_mb, "복수브랜드수익성"
+            )
+            return
+
     _biz_profit_m = re.search(
         r'(?:(\d{1,2})월|(\d{2,4})년\s*(\d{1,2})월)\s*(.{2,10}?)\s*(?:수익성|[Cc][Mm]\b|공헌이익률?|공헌이익율?)|'
         r'(.{2,10}?)\s*(?:(\d{1,2})월|(\d{2,4})년\s*(\d{1,2})월)\s*(?:수익성|[Cc][Mm]\b|공헌이익률?|공헌이익율?)',
@@ -5991,7 +6014,7 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
         return
 
     # ─── 미출고 현황 (Dify 바이패스) ─────────────────────────────
-    if re.search(r'미출고|미출\s*현황|미출\s*내역|미출\s*건|미출\s*있어|출고\s*안\s*된|안\s*나간\s*물건|오늘\s*미출|어제\s*미출', query):
+    if re.search(r'미출고|미출\s*현황|미출\s*내역|미출\s*건|미출\s*있어|출고\s*안\s*된|안\s*나간\s*물건|오늘\s*미출|어제\s*미출|팀\s*미출|지점\s*미출|영업소\s*미출|사업부\s*미출', query):
         # 영업귀책 여부 감지
         only_gyucheck = bool(
             re.search(r'귀책|영업귀책|자책|내\s*잘못|내\s*귀책', query)
@@ -7042,21 +7065,6 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
             )
             _send_kakao_callback_qr(callback_url, _mc_text, _mc_qr, "담당거래처")
         return
-
-    # ④ 복수 브랜드 수익성 동시 질문 안내 ──────────────────────────────────────────────────
-    if re.search(r'수익성|[Cc][Mm]\b|공헌이익', query):
-        _kws_noisy = re.sub(r'수익성|[Cc][Mm]\b|공헌이익률?|공헌이익율?|\d{1,2}월|\d{2,4}년|알려줘|알려주세요|조회|확인|어때|보여줘', query, flags=re.IGNORECASE).strip()
-        _kw_tokens = [t for t in re.split(r'[\s,·]+', _kws_noisy) if len(t) >= 2 and re.search(r'[가-힣A-Za-z]', t) and t not in _SP_BLACKLIST]
-        if len(_kw_tokens) >= 3:
-            _brand_list = '\n'.join(f'  • {t}' for t in _kw_tokens[:6])
-            _qr_each = [{"label": t[:12], "action": "message", "messageText": f"{t} 수익성"} for t in _kw_tokens[:5]]
-            _qr_each.append({"label": "🏠 메인 메뉴", "action": "message", "messageText": "메뉴"})
-            _send_kakao_callback_qr(
-                callback_url,
-                f"복수 브랜드 동시 수익성 조회는 지원하지 않습니다.\n각 브랜드를 개별 조회해 주세요.\n\n{_brand_list}\n\n아래 버튼으로 하나씩 조회할 수 있습니다.",
-                _qr_each, "복수브랜드수익성"
-            )
-            return
 
     sp_match = re.search(r'([가-힣]{2,5})\s*(?:신규매출|신규실적|신규 매출|신규 실적)', query)
     if sp_match and '신규' in query and sp_match.group(1) not in _SP_BLACKLIST\
