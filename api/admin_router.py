@@ -804,3 +804,125 @@ async def audit(request: Request):
 async def api_stats(request: Request):
     _require_admin(request)
     return admin_db.dashboard_metrics()
+
+
+@router.get("/api/verify-dm-conversion")
+async def verify_dm_conversion(request: Request, cust_code: str = "0000193241",
+                                matnr: str = "100914", dm_ym: str = "202607"):
+    """DM 전환 집계 누락 검증 API (어드민 전용).
+    GET /admin/api/verify-dm-conversion?cust_code=0000193241&matnr=100914&dm_ym=202607
+    """
+    _require_admin(request)
+    import json as _json
+
+    result: dict = {
+        "params": {"cust_code": cust_code, "matnr": matnr, "dm_ym": dm_ym},
+        "sqlite": {},
+        "databricks": {},
+        "verdict": "",
+    }
+
+    # ── 1. SQLite dm_send_logs ───────────────────────────────────────────────
+    try:
+        from portal_db import list_dm_logs
+        all_logs = list_dm_logs(limit=2000)
+        cust_logs = [l for l in all_logs if str(l.get("customer_code","")).strip() == cust_code.strip()]
+        # 거래처명 fallback
+        if not cust_logs:
+            cust_logs = [l for l in all_logs if "SF송도갈비" in str(l.get("customer_name",""))]
+
+        result["sqlite"]["log_count"] = len(cust_logs)
+        result["sqlite"]["logs"] = []
+        for log in cust_logs[:5]:
+            pj = log.get("price_items_json") or ""
+            has_price = bool(pj and pj not in ("[]", "null", ""))
+            action_ym_fixed = str(log.get("created_at",""))[:7].replace("-","")
+            action_ym_price = ""
+            if has_price:
+                try:
+                    items = _json.loads(pj)
+                    dates = [str(it.get("date_from",""))[:6] for it in items if it.get("date_from")]
+                    action_ym_price = min((d for d in dates if len(d)==6), default="")
+                except Exception:
+                    pass
+            result["sqlite"]["logs"].append({
+                "id": log.get("id"),
+                "created_at": log.get("created_at"),
+                "customer_code": log.get("customer_code"),
+                "customer_name": log.get("customer_name"),
+                "action_type": log.get("action_type"),
+                "product_names": log.get("product_names"),
+                "has_price_items": has_price,
+                "current_logic": f"action_ym={action_ym_price}" if action_ym_price else "→ continue(집계제외) ← 누락원인",
+                "fixed_logic": f"action_ym={action_ym_fixed} (created_at 기반)",
+                "status": log.get("status"),
+            })
+    except Exception as e:
+        result["sqlite"]["error"] = str(e)
+
+    # ── 2. Databricks T_MAIN ────────────────────────────────────────────────
+    try:
+        import main as _m
+        T = _m.T_MAIN
+
+        # 거래처 기본 정보
+        info = _m._safe_query(
+            f"SELECT MAX(`거래처명`) AS nm, MAX(`ZC본부명`) AS brand FROM {T} WHERE `거래처`='{cust_code}'",
+            raw=True
+        )
+        result["databricks"]["cust_info"] = info[0] if info else {}
+
+        # 거래처명 불일치 확인
+        if not (info and info[0].get("nm")):
+            alt = _m._safe_query(
+                f"SELECT DISTINCT `거래처`, `거래처명` FROM {T} WHERE `거래처명` LIKE '%SF송도갈비%' LIMIT 5",
+                raw=True
+            )
+            result["databricks"]["cust_name_search"] = alt
+
+        # DM 이후 월별 매출
+        sales = _m._safe_query(f"""
+            SELECT `년월`, ROUND(SUM(`매출액`)) AS 매출액, COUNT(DISTINCT `상품코드`) AS 품목수
+            FROM {T} WHERE `거래처`='{cust_code}' AND `년월`>='{dm_ym}'
+            GROUP BY `년월` ORDER BY `년월`
+        """, raw=True)
+        result["databricks"]["sales_after_dm"] = sales or []
+
+        # 추천 상품 구매 이력
+        prod = _m._safe_query(f"""
+            SELECT `년월`, `상품명`, ROUND(SUM(`매출액`)) AS 매출액
+            FROM {T} WHERE `거래처`='{cust_code}' AND `상품코드`='{matnr}' AND `년월`>='202601'
+            GROUP BY `년월`, `상품명` ORDER BY `년월`
+        """, raw=True)
+        result["databricks"]["dm_product_history"] = prod or []
+
+        # dry-run
+        dry = _m._safe_query(f"""
+            SELECT ROUND(SUM(COALESCE(`매출액`,0))/10000) AS total_after_만원,
+                   ROUND(SUM(CASE WHEN `상품코드`='{matnr}' THEN COALESCE(`매출액`,0) ELSE 0 END)/10000) AS dm품목_만원
+            FROM {T} WHERE `거래처`='{cust_code}' AND `년월`>='{dm_ym}'
+        """, raw=True)
+        result["databricks"]["dry_run"] = dry[0] if dry else {}
+
+        # 최종 판정
+        has_log    = result["sqlite"]["log_count"] > 0
+        has_sales  = bool(sales)
+        dm_product = any(float(r.get("dm품목_만원") or 0) > 0 for r in (dry or []))
+        no_price   = has_log and not result["sqlite"]["logs"][0].get("has_price_items", True) if has_log else False
+
+        if not has_log:
+            result["verdict"] = "❌ SQLite에 DM 로그 없음 → DM 발송 자체가 기록 안 된 것. 포털 DM 발송 방식 확인 필요"
+        elif no_price and has_sales and dm_product:
+            result["verdict"] = "✅ 수정으로 해결 가능: dm_only_sent 로그 created_at → action_ym 사용하면 집계 됨"
+        elif no_price and has_sales:
+            result["verdict"] = "⚠️ DM 이후 매출 있으나 추천 상품 구매 미확인. 전체 매출 기준 전환율 집계는 수정 후 가능"
+        elif no_price and not has_sales:
+            result["verdict"] = "❌ DM 이후 T_MAIN 매출 없음. 8월 데이터 미반영 또는 거래처코드 불일치 가능성"
+        else:
+            result["verdict"] = "확인 필요: 로그 또는 데이터 상태 위 결과 직접 확인"
+
+    except Exception as e:
+        result["databricks"]["error"] = str(e)
+        result["verdict"] = f"Databricks 조회 오류: {e}"
+
+    return result
