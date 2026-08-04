@@ -305,10 +305,13 @@
     var cardBadge = document.getElementById('ann-card-badge');
     if(!cardBody) return;
     if(cardBadge) cardBadge.innerHTML = badgeHtml(a.badge) + (a.pinned ? ' <span style="font-size:.7rem;color:#d97706;font-weight:700;">📌</span>' : '');
+    var noticeUrl = '/portal/board/notice/' + a.id;
     cardBody.innerHTML =
-      '<b style="font-size:.875rem;color:#111;">' + a.title + '</b>'
+      '<a href="'+noticeUrl+'" style="text-decoration:none;color:inherit;display:block;">'
+      + '<b style="font-size:.875rem;color:#111;">' + a.title + '</b>'
       + (a.content ? '<p style="margin:.35rem 0 0;font-size:.82rem;color:#374151;white-space:pre-wrap;line-height:1.6;">' + a.content + '</p>' : '')
-      + '<div style="margin-top:.4rem;font-size:.72rem;color:#9ca3af;">' + a.created_at + '</div>';
+      + '<div style="margin-top:.4rem;font-size:.72rem;color:#9ca3af;">' + a.created_at + '</div>'
+      + '</a>';
     if(_anns.length > 1){
       cardNav.innerHTML =
         '<button onclick="event.stopPropagation();annCardPrev()" style="background:none;border:1px solid #e5e7eb;border-radius:.25rem;padding:.1rem .45rem;cursor:pointer;font-size:.72rem;">‹</button>'
@@ -345,7 +348,7 @@
       var dismissed = getDismissed();
       var seenKey   = 'ann_seen_session';
       var seen      = sessionStorage.getItem(seenKey) === '1';
-      var newAnns   = data.filter(function(a){ return dismissed.indexOf(a.id) < 0; });
+      var newAnns   = data.filter(function(a){ return a.popup_ok && dismissed.indexOf(a.id) < 0; });
       if(newAnns.length && !seen){
         sessionStorage.setItem(seenKey, '1');
         var modalBody = document.getElementById('ann-modal-body');

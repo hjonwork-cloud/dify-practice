@@ -1,0 +1,121 @@
+{% extends 'portal_base.html' %}{% block title %}공지사항 상세{% endblock %}{% block content %}
+<style>
+.ntcd-wrap { max-width: 840px; }
+.ntcd-back { display: inline-flex; align-items: center; gap: .35rem; font-size: .82rem;
+  color: #6b7280; text-decoration: none; margin-bottom: 1rem; }
+.ntcd-back:hover { color: #1e293b; }
+
+.ntcd-card { background: #fff; border: 1px solid #e5e7eb; border-radius: .8rem; padding: 1.6rem; margin-bottom: 1.25rem; }
+.ntcd-header { border-bottom: 1px solid #f3f4f6; padding-bottom: 1rem; margin-bottom: 1.1rem; }
+.ntcd-badge-row { display: flex; align-items: center; gap: .5rem; margin-bottom: .5rem; flex-wrap: wrap; }
+.ntcd-badge { display: inline-block; padding: .15rem .55rem; border-radius: .3rem; font-size: .75rem; font-weight: 700; }
+.ntcd-badge.공지   { background: #1e293b; color: #fff; }
+.ntcd-badge.이벤트 { background: #fef3c7; color: #92400e; }
+.ntcd-badge.업데이트 { background: #dbeafe; color: #1d4ed8; }
+.ntcd-badge.안내   { background: #dcfce7; color: #166534; }
+.ntcd-pin { font-size: .8rem; color: #ef4444; }
+.ntcd-title { font-size: 1.2rem; font-weight: 800; color: #111; margin: 0 0 .5rem; line-height: 1.4; }
+.ntcd-meta { font-size: .78rem; color: #9ca3af; }
+
+.ntcd-body { font-size: .9rem; color: #374151; line-height: 1.75; white-space: pre-wrap; word-break: break-word; }
+.ntcd-img  { margin-top: 1.25rem; text-align: center; }
+.ntcd-img img { max-width: 100%; border-radius: .5rem; border: 1px solid #e5e7eb; }
+
+.ntcd-admin-row { display: flex; gap: .5rem; justify-content: flex-end; margin-top: .75rem; }
+.ntcd-btn { padding: .32rem .85rem; border-radius: .35rem; font-size: .8rem; font-weight: 600; border: none; cursor: pointer; text-decoration: none; display: inline-block; }
+.ntcd-btn.edit   { background: #f3f4f6; color: #374151; }
+.ntcd-btn.edit:hover { background: #e5e7eb; }
+.ntcd-btn.toggle { background: #fef3c7; color: #92400e; }
+.ntcd-btn.del    { background: #fee2e2; color: #b91c1c; }
+.ntcd-btn.del:hover { background: #fecaca; }
+
+/* 댓글 */
+.ntcd-cmt-section { background: #fff; border: 1px solid #e5e7eb; border-radius: .75rem; padding: 1.25rem; }
+.ntcd-cmt-section h3 { font-size: .95rem; font-weight: 700; color: #1e293b; margin: 0 0 1rem; }
+.ntcd-cmt-item { padding: .7rem 0; border-bottom: 1px solid #f3f4f6; }
+.ntcd-cmt-item:last-of-type { border-bottom: none; }
+.ntcd-cmt-header { display: flex; align-items: center; gap: .5rem; margin-bottom: .3rem; flex-wrap: wrap; }
+.ntcd-cmt-name { font-weight: 700; font-size: .82rem; color: #1e293b; }
+.ntcd-cmt-team { font-size: .75rem; color: #9ca3af; }
+.ntcd-cmt-date { font-size: .73rem; color: #d1d5db; margin-left: auto; }
+.ntcd-cmt-body { font-size: .83rem; color: #374151; white-space: pre-wrap; line-height: 1.6; }
+.ntcd-cmt-del  { font-size: .72rem; color: #ef4444; background: none; border: none; cursor: pointer; margin-left: .3rem; }
+
+.ntcd-cmt-form { margin-top: 1rem; display: flex; gap: .5rem; align-items: flex-start; }
+.ntcd-cmt-form textarea { flex: 1; font-size: .83rem; padding: .45rem .65rem; border: 1px solid #d1d5db;
+  border-radius: .4rem; resize: vertical; min-height: 64px; font-family: inherit; }
+.ntcd-cmt-form button { padding: .45rem 1rem; background: #1e293b; color: #fff; border: none;
+  border-radius: .4rem; font-size: .83rem; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.ntcd-cmt-form button:hover { background: #334155; }
+.ntcd-empty-cmt { font-size: .83rem; color: #9ca3af; padding: .75rem 0; }
+</style>
+
+<div class="ntcd-wrap">
+  <a class="ntcd-back" href="/portal/board/notice">← 목록으로</a>
+
+  <div class="ntcd-card">
+    <div class="ntcd-header">
+      <div class="ntcd-badge-row">
+        {% if post.badge %}<span class="ntcd-badge {{ post.badge }}">{{ post.badge }}</span>{% endif %}
+        {% if post.pinned %}<span class="ntcd-pin">📌 고정</span>{% endif %}
+      </div>
+      <h1 class="ntcd-title">{{ post.title }}</h1>
+      <div class="ntcd-meta">{{ post.created_by }} &nbsp;·&nbsp; {{ post.created_at[:16] if post.created_at else '' }}</div>
+    </div>
+
+    <div class="ntcd-body">{{ post.content }}</div>
+
+    {% if post.image_data %}
+    <div class="ntcd-img">
+      <img src="data:{{ post.image_mime }};base64,{{ post.image_data }}" alt="첨부 이미지">
+    </div>
+    {% endif %}
+
+    {% if user and user.is_admin %}
+    <div class="ntcd-admin-row">
+      <a class="ntcd-btn edit" href="/portal/board/notice/{{ post.id }}/edit">✏️ 수정</a>
+      <form method="post" action="/portal/board/notice/{{ post.id }}/toggle" style="display:inline;">
+        <button type="submit" class="ntcd-btn toggle">
+          {% if post.is_active %}🙈 비활성화{% else %}✅ 활성화{% endif %}
+        </button>
+      </form>
+      <form method="post" action="/portal/board/notice/{{ post.id }}/delete"
+            onsubmit="return confirm('정말 삭제하시겠습니까?');" style="display:inline;">
+        <button type="submit" class="ntcd-btn del">🗑 삭제</button>
+      </form>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- 댓글 -->
+  <div class="ntcd-cmt-section">
+    <h3>💬 댓글 {{ comments|length }}개</h3>
+
+    {% if comments %}
+      {% for c in comments %}
+      <div class="ntcd-cmt-item">
+        <div class="ntcd-cmt-header">
+          <span class="ntcd-cmt-name">{{ c.emp_name }}</span>
+          <span class="ntcd-cmt-team">{{ c.team }}</span>
+          <span class="ntcd-cmt-date">{{ c.created_at[:16] if c.created_at else '' }}</span>
+          {% if user and (user.emp_code == c.emp_code or user.is_admin) %}
+          <form method="post" action="/portal/board/notice/comment/{{ c.id }}/delete"
+                onsubmit="return confirm('댓글을 삭제하시겠습니까?');" style="display:inline;">
+            <button type="submit" class="ntcd-cmt-del">✕</button>
+          </form>
+          {% endif %}
+        </div>
+        <div class="ntcd-cmt-body">{{ c.content }}</div>
+      </div>
+      {% endfor %}
+    {% else %}
+      <div class="ntcd-empty-cmt">아직 댓글이 없습니다. 첫 댓글을 남겨보세요!</div>
+    {% endif %}
+
+    <form method="post" action="/portal/board/notice/{{ post.id }}/comment" class="ntcd-cmt-form">
+      <textarea name="content" placeholder="댓글을 입력하세요..." required maxlength="500"></textarea>
+      <button type="submit">등록</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

@@ -108,14 +108,23 @@
         <a class="{% if '/portal/admin/users' in request.url.path %}active{% endif %}" href="/portal/admin/users">
           <span class="nav-icon">👥</span><span class="nav-label">사용자 관리</span>
         </a>
-        <a class="{% if '/portal/admin/announcements' in request.url.path %}active{% endif %}" href="/portal/admin/announcements">
-          <span class="nav-icon">📢</span><span class="nav-label">공지 관리</span>
-        </a>
       </div>
       {% endif %}
-      <a class="{% if '/portal/voc' in request.url.path %}active{% endif %}" href="/portal/voc">
-        <span class="nav-icon">💬</span><span class="nav-label">VOC 게시판</span>
-      </a>
+      {% set board_active = '/portal/board' in request.url.path or '/portal/voc' in request.url.path %}
+      <div class="nav-parent {% if board_active %}active open{% endif %}"
+           id="navBoardParent" onclick="sbSubToggle('navBoardSub','navBoardParent')">
+        <span class="nav-icon">📋</span>
+        <span class="nav-label">게시판</span>
+        <span class="nav-arrow">▾</span>
+      </div>
+      <div class="nav-sub {% if not board_active %}closed{% endif %}" id="navBoardSub">
+        <a class="{% if '/portal/board/notice' in request.url.path %}active{% endif %}" href="/portal/board/notice">
+          <span class="nav-icon">📢</span><span class="nav-label">공지사항</span>
+        </a>
+        <a class="{% if '/portal/voc' in request.url.path %}active{% endif %}" href="/portal/voc">
+          <span class="nav-icon">💬</span><span class="nav-label">VOC</span>
+        </a>
+      </div>
     </nav>
     <div class="portal-user-card">
       <span class="portal-avatar">{{ user.name[:1] if user else 'U' }}</span>
@@ -137,6 +146,7 @@
   var SB_KEY       = 'sb_collapsed';
   var SUB_BRAND_KEY = 'sb_brand_open';
   var SUB_ADMIN_KEY = 'sb_admin_open';
+  var SUB_BOARD_KEY = 'sb_board_open';
 
   function applyCollapsed(c) { document.body.classList.toggle('sidebar-collapsed', c); }
 
@@ -163,10 +173,13 @@
 
   var pathIsBrand = location.pathname.indexOf('/portal/brand-report') === 0;
   var pathIsAdmin = location.pathname.indexOf('/portal/admin') === 0;
+  var pathIsBoard = location.pathname.indexOf('/portal/board') === 0 || location.pathname.indexOf('/portal/voc') === 0;
   applySubOpen('navBrandSub', 'navBrandParent',
     pathIsBrand || localStorage.getItem(SUB_BRAND_KEY) === '1', null);
   applySubOpen('navAdminSub', 'navAdminParent',
     pathIsAdmin || localStorage.getItem(SUB_ADMIN_KEY) === '1', null);
+  applySubOpen('navBoardSub', 'navBoardParent',
+    pathIsBoard || localStorage.getItem(SUB_BOARD_KEY) === '1', null);
 
   window.sbToggle = function() {
     var c = !document.body.classList.contains('sidebar-collapsed');
@@ -178,7 +191,7 @@
     var sub = document.getElementById(subId);
     if (!sub) return;
     var isOpen = !sub.classList.contains('closed');
-    var key = subId === 'navBrandSub' ? SUB_BRAND_KEY : SUB_ADMIN_KEY;
+    var key = subId === 'navBrandSub' ? SUB_BRAND_KEY : subId === 'navBoardSub' ? SUB_BOARD_KEY : SUB_ADMIN_KEY;
     applySubOpen(subId, parentId, !isOpen, key);
   };
 })();

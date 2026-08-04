@@ -1,0 +1,188 @@
+{% extends 'portal_base.html' %}
+{% block title %}{% if edit_mode %}공지 수정{% else %}공지 작성{% endif %}{% endblock %}
+{% block content %}
+<style>
+.ntcw-wrap { max-width: 780px; }
+.ntcw-back { display: inline-flex; align-items: center; gap: .35rem; font-size: .82rem;
+  color: #6b7280; text-decoration: none; margin-bottom: 1rem; }
+.ntcw-back:hover { color: #1e293b; }
+.ntcw-card { background: #fff; border: 1px solid #e5e7eb; border-radius: .8rem; padding: 1.75rem; }
+.ntcw-card h2 { font-size: 1.1rem; font-weight: 800; color: #1e293b; margin: 0 0 1.5rem; }
+
+.ntcw-field { margin-bottom: 1.1rem; }
+.ntcw-field label { display: block; font-size: .82rem; font-weight: 700; color: #374151; margin-bottom: .35rem; }
+.ntcw-field input[type=text],
+.ntcw-field input[type=date],
+.ntcw-field select,
+.ntcw-field textarea {
+  width: 100%; box-sizing: border-box;
+  padding: .45rem .7rem; border: 1px solid #d1d5db; border-radius: .4rem;
+  font-size: .85rem; font-family: inherit; background: #fff; }
+.ntcw-field textarea { resize: vertical; min-height: 220px; line-height: 1.7; }
+
+.ntcw-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
+@media (max-width: 540px) { .ntcw-row2 { grid-template-columns: 1fr; } }
+
+.ntcw-check-row { display: flex; gap: 1.25rem; flex-wrap: wrap; margin-bottom: .5rem; }
+.ntcw-check-row label { display: flex; align-items: center; gap: .35rem; font-size: .83rem; font-weight: 600; color: #374151; cursor: pointer; }
+
+/* 이미지 업로드 */
+.ntcw-img-drop { border: 2px dashed #d1d5db; border-radius: .6rem; padding: 1.25rem;
+  text-align: center; cursor: pointer; background: #f9fafb; transition: background .15s; }
+.ntcw-img-drop:hover, .ntcw-img-drop.drag-over { background: #f0f9ff; border-color: #18b9c7; }
+.ntcw-img-drop p { font-size: .82rem; color: #9ca3af; margin: .35rem 0 0; }
+.ntcw-img-preview { margin-top: .75rem; text-align: center; position: relative; display: none; }
+.ntcw-img-preview img { max-width: 100%; max-height: 320px; border-radius: .45rem; border: 1px solid #e5e7eb; }
+.ntcw-img-clear { position: absolute; top: .4rem; right: .4rem; background: rgba(0,0,0,.55);
+  color: #fff; border: none; border-radius: 50%; width: 1.5rem; height: 1.5rem;
+  font-size: .8rem; cursor: pointer; line-height: 1.5rem; text-align: center; }
+
+.ntcw-actions { display: flex; gap: .6rem; justify-content: flex-end; margin-top: 1.5rem; }
+.ntcw-btn { padding: .42rem 1.1rem; border-radius: .4rem; font-size: .85rem; font-weight: 700;
+  border: none; cursor: pointer; text-decoration: none; display: inline-block; }
+.ntcw-btn.primary { background: #1e293b; color: #fff; }
+.ntcw-btn.primary:hover { background: #334155; }
+.ntcw-btn.cancel  { background: #f3f4f6; color: #374151; }
+.ntcw-btn.cancel:hover { background: #e5e7eb; }
+</style>
+
+<div class="ntcw-wrap">
+  <a class="ntcw-back" href="/portal/board/notice">← 목록으로</a>
+  <div class="ntcw-card">
+    <h2>{% if edit_mode %}✏️ 공지 수정{% else %}📢 공지 작성{% endif %}</h2>
+
+    <form method="post"
+          action="{% if edit_mode %}/portal/board/notice/{{ post.id }}/update{% else %}/portal/board/notice/admin/create{% endif %}"
+          id="ntcwForm">
+
+      <!-- 배지·제목 -->
+      <div class="ntcw-row2">
+        <div class="ntcw-field">
+          <label>배지</label>
+          <select name="badge">
+            <option value="">없음</option>
+            {% for b in ['공지','이벤트','업데이트','안내'] %}
+            <option value="{{ b }}" {% if edit_mode and post.badge==b %}selected{% endif %}>{{ b }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="ntcw-field">
+          <label>고정·활성</label>
+          <div class="ntcw-check-row" style="margin-top:.45rem;">
+            <label><input type="checkbox" name="pinned" value="1"
+              {% if edit_mode and post.pinned %}checked{% endif %}> 📌 상단 고정</label>
+            <label><input type="checkbox" name="is_active" value="1"
+              {% if not edit_mode or post.is_active %}checked{% endif %}> ✅ 활성</label>
+          </div>
+        </div>
+      </div>
+
+      <div class="ntcw-field">
+        <label>제목 <span style="color:#ef4444;">*</span></label>
+        <input type="text" name="title" maxlength="120" required
+               value="{{ post.title if edit_mode else '' }}" placeholder="공지 제목을 입력하세요">
+      </div>
+
+      <div class="ntcw-field">
+        <label>본문 <span style="color:#ef4444;">*</span></label>
+        <textarea name="content" required
+                  placeholder="공지 내용을 입력하세요...">{{ post.content if edit_mode else '' }}</textarea>
+      </div>
+
+      <!-- 이미지 인라인 첨부 -->
+      <div class="ntcw-field">
+        <label>이미지 첨부 <span style="color:#9ca3af;font-weight:400;">(선택, 인라인 저장)</span></label>
+        <div class="ntcw-img-drop" id="imgDrop" onclick="document.getElementById('imgFile').click()">
+          <div style="font-size:2rem;">🖼️</div>
+          <p>클릭하거나 이미지를 드래그하여 첨부하세요<br><small>JPG / PNG / GIF / WebP · 최대 5 MB</small></p>
+        </div>
+        <input type="file" id="imgFile" accept="image/*" style="display:none;" onchange="handleImgFile(this)">
+        <div class="ntcw-img-preview" id="imgPreview">
+          <img id="imgPreviewEl" src="" alt="미리보기">
+          <button type="button" class="ntcw-img-clear" onclick="clearImg()">✕</button>
+        </div>
+        <input type="hidden" name="image_data" id="imgDataInput"
+               value="{{ post.image_data if edit_mode else '' }}">
+        <input type="hidden" name="image_mime" id="imgMimeInput"
+               value="{{ post.image_mime if edit_mode else '' }}">
+      </div>
+
+      <!-- 팝업 기간 -->
+      <div class="ntcw-field">
+        <label>팝업 기간 <span style="color:#9ca3af;font-weight:400;">(설정 시 대시보드 팝업 표시)</span></label>
+        <div class="ntcw-row2">
+          <div>
+            <label style="font-size:.77rem;color:#9ca3af;font-weight:500;">시작일</label>
+            <input type="date" name="popup_start"
+                   value="{{ post.popup_start[:10] if edit_mode and post.popup_start else '' }}">
+          </div>
+          <div>
+            <label style="font-size:.77rem;color:#9ca3af;font-weight:500;">종료일</label>
+            <input type="date" name="popup_end"
+                   value="{{ post.popup_end[:10] if edit_mode and post.popup_end else '' }}">
+          </div>
+        </div>
+      </div>
+
+      <div class="ntcw-actions">
+        <a class="ntcw-btn cancel" href="/portal/board/notice">취소</a>
+        <button type="submit" class="ntcw-btn primary">
+          {% if edit_mode %}저장{% else %}등록{% endif %}
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+// 기존 이미지가 있으면 미리보기 표시
+(function(){
+  var d = document.getElementById('imgDataInput').value;
+  var m = document.getElementById('imgMimeInput').value;
+  if (d && m) {
+    document.getElementById('imgPreviewEl').src = 'data:' + m + ';base64,' + d;
+    document.getElementById('imgPreview').style.display = 'block';
+  }
+})();
+
+function handleImgFile(input) {
+  if (!input.files || !input.files[0]) return;
+  var file = input.files[0];
+  if (file.size > 5 * 1024 * 1024) { alert('이미지는 5MB 이하만 업로드 가능합니다.'); return; }
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    var dataUrl = e.target.result;
+    var parts = dataUrl.split(',');
+    var mime = parts[0].replace('data:','').replace(';base64','');
+    var b64  = parts[1];
+    document.getElementById('imgDataInput').value = b64;
+    document.getElementById('imgMimeInput').value = mime;
+    document.getElementById('imgPreviewEl').src = dataUrl;
+    document.getElementById('imgPreview').style.display = 'block';
+  };
+  reader.readAsDataURL(file);
+}
+
+function clearImg() {
+  document.getElementById('imgDataInput').value = '';
+  document.getElementById('imgMimeInput').value = '';
+  document.getElementById('imgPreviewEl').src = '';
+  document.getElementById('imgPreview').style.display = 'none';
+  document.getElementById('imgFile').value = '';
+}
+
+// 드래그앤드롭
+var drop = document.getElementById('imgDrop');
+drop.addEventListener('dragover', function(e){ e.preventDefault(); drop.classList.add('drag-over'); });
+drop.addEventListener('dragleave', function(){ drop.classList.remove('drag-over'); });
+drop.addEventListener('drop', function(e){
+  e.preventDefault(); drop.classList.remove('drag-over');
+  var file = e.dataTransfer.files[0];
+  if (file && file.type.startsWith('image/')) {
+    var tmp = document.getElementById('imgFile');
+    var dt = new DataTransfer(); dt.items.add(file); tmp.files = dt.files;
+    handleImgFile(tmp);
+  }
+});
+</script>
+{% endblock %}

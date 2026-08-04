@@ -164,6 +164,49 @@ def init_db() -> None:
             );
             CREATE INDEX IF NOT EXISTS idx_ann_active ON announcements(is_active, pinned DESC, created_at DESC);
         """)
+        # 공지사항 게시판 (notice_posts) 마이그레이션
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS notice_posts (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                badge        TEXT NOT NULL DEFAULT '공지',
+                title        TEXT NOT NULL,
+                content      TEXT NOT NULL,
+                image_data   TEXT,
+                image_mime   TEXT,
+                popup_start  TEXT,
+                popup_end    TEXT,
+                is_active    INTEGER NOT NULL DEFAULT 1,
+                pinned       INTEGER NOT NULL DEFAULT 0,
+                created_by   TEXT,
+                created_at   TEXT NOT NULL,
+                updated_at   TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_notice_active ON notice_posts(is_active, pinned DESC, created_at DESC);
+            CREATE TABLE IF NOT EXISTS notice_comments (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                post_id    INTEGER NOT NULL,
+                emp_code   TEXT NOT NULL,
+                emp_name   TEXT,
+                team       TEXT,
+                content    TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_notice_comments_post ON notice_comments(post_id, created_at);
+        """)
+        # announcements 데이터 → notice_posts 자동 이관 (중복 방지)
+        try:
+            migrated = conn.execute("SELECT COUNT(*) FROM notice_posts").fetchone()[0]
+            if migrated == 0:
+                conn.execute("""
+                    INSERT INTO notice_posts
+                        (badge,title,content,image_data,image_mime,popup_start,popup_end,
+                         is_active,pinned,created_by,created_at,updated_at)
+                    SELECT badge,title,content,NULL,NULL,NULL,NULL,
+                           is_active,pinned,created_by,created_at,updated_at
+                    FROM announcements
+                """)
+        except Exception:
+            pass
 
 
 def record_login(emp_code: str, emp_name: str = "", team: str = "", ip: str = "", user_agent: str = "", success: bool = True, reason: str = "") -> None:
@@ -419,7 +462,143 @@ def list_login_logs(limit: int = 200) -> list[dict]:
         return [dict(r) for r in rows]
 
 
-# ── 공지 관리 ──────────────────────────────────────────────────────────────
+# ── 공지사항 게시판 (notice_posts) ──────────────────────────────────────────
+
+def list_notice_posts(active_only: bool = False, page: int = 1, per_page: int = 20) -> tuple[list[dict], int]:
+    init_db()
+    where = "WHERE is_active = 1" if active_only else ""
+    with _connect() as conn:
+        total = conn.execute(f"SELECT COUNT(*) FROM notice_posts {where}").fetchone()[0]
+        offset = (page - 1) * per_page
+        rows = conn.execute(
+            f"""SELECT p.*, COUNT(c.id) AS comment_count
+                FROM notice_posts p
+                LEFT JOIN notice_comments c ON c.post_id = p.id
+                {where}
+                GROUP BY p.id
+                ORDER BY p.pinned DESC, p.created_at DESC
+                LIMIT ? OFFSET ?""",
+            (per_page, offset),
+        ).fetchall()
+    return [dict(r) for r in rows], total
+
+
+def get_notice_post(post_id: int) -> dict | None:
+    init_db()
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM notice_posts WHERE id=?", (post_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def list_notice_active_for_popup() -> list[dict]:
+    """팝업 기간 + is_active 조건 공지 목록."""
+    init_db()
+    today = _now()[:10]
+    with _connect() as conn:
+        rows = conn.execute(
+            """SELECT * FROM notice_posts
+               WHERE is_active = 1
+                 AND (popup_start IS NULL OR popup_start <= ?)
+                 AND (popup_end   IS NULL OR popup_end   >= ?)
+               ORDER BY pinned DESC, created_at DESC""",
+            (today, today),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def create_notice_post(*, badge: str, title: str, content: str,
+                        image_data: str = "", image_mime: str = "",
+                        popup_start: str = "", popup_end: str = "",
+                        pinned: bool = False, created_by: str = "") -> int:
+    init_db()
+    now = _now()
+    with _connect() as conn:
+        cur = conn.execute(
+            """INSERT INTO notice_posts
+               (badge,title,content,image_data,image_mime,popup_start,popup_end,
+                is_active,pinned,created_by,created_at,updated_at)
+               VALUES (?,?,?,?,?,?,?,1,?,?,?,?)""",
+            (badge, title, content,
+             image_data or None, image_mime or None,
+             popup_start or None, popup_end or None,
+             1 if pinned else 0, created_by, now, now),
+        )
+        return cur.lastrowid
+
+
+def update_notice_post(post_id: int, *, badge: str, title: str, content: str,
+                        image_data: str = "", image_mime: str = "",
+                        popup_start: str = "", popup_end: str = "",
+                        pinned: bool = False) -> None:
+    init_db()
+    with _connect() as conn:
+        conn.execute(
+            """UPDATE notice_posts
+               SET badge=?,title=?,content=?,image_data=?,image_mime=?,
+                   popup_start=?,popup_end=?,pinned=?,updated_at=?
+               WHERE id=?""",
+            (badge, title, content,
+             image_data or None, image_mime or None,
+             popup_start or None, popup_end or None,
+             1 if pinned else 0, _now(), post_id),
+        )
+
+
+def toggle_notice_post(post_id: int) -> bool:
+    init_db()
+    with _connect() as conn:
+        row = conn.execute("SELECT is_active FROM notice_posts WHERE id=?", (post_id,)).fetchone()
+        if not row:
+            return False
+        new_state = 0 if row["is_active"] else 1
+        conn.execute("UPDATE notice_posts SET is_active=?,updated_at=? WHERE id=?",
+                     (new_state, _now(), post_id))
+        return bool(new_state)
+
+
+def delete_notice_post(post_id: int) -> None:
+    init_db()
+    with _connect() as conn:
+        conn.execute("DELETE FROM notice_comments WHERE post_id=?", (post_id,))
+        conn.execute("DELETE FROM notice_posts WHERE id=?", (post_id,))
+
+
+def list_notice_comments(post_id: int) -> list[dict]:
+    init_db()
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM notice_comments WHERE post_id=? ORDER BY created_at",
+            (post_id,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def create_notice_comment(*, post_id: int, emp_code: str,
+                           emp_name: str, team: str, content: str) -> int:
+    init_db()
+    with _connect() as conn:
+        cur = conn.execute(
+            """INSERT INTO notice_comments (post_id,emp_code,emp_name,team,content,created_at)
+               VALUES (?,?,?,?,?,?)""",
+            (post_id, emp_code, emp_name, team, content, _now()),
+        )
+        return cur.lastrowid
+
+
+def delete_notice_comment(comment_id: int, emp_code: str, is_admin: bool = False) -> bool:
+    init_db()
+    with _connect() as conn:
+        if is_admin:
+            conn.execute("DELETE FROM notice_comments WHERE id=?", (comment_id,))
+        else:
+            row = conn.execute("SELECT emp_code FROM notice_comments WHERE id=?", (comment_id,)).fetchone()
+            if not row or row["emp_code"] != emp_code:
+                return False
+            conn.execute("DELETE FROM notice_comments WHERE id=?", (comment_id,))
+    return True
+
+
+# ── 공지 관리 (announcements — 하위호환 유지) ──────────────────────────────
 
 def list_announcements(active_only: bool = False) -> list[dict]:
     init_db()

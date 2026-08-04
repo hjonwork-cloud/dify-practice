@@ -2396,74 +2396,165 @@ def _auto_refresh_scheduler():
 
 @router.get("/announcements-data")
 async def announcements_data(request: Request):
-    """활성 공지 JSON (대시보드 카드 + 팝업용)."""
+    """활성 공지 JSON — 팝업 기간 포함 (대시보드 카드 + 팝업용)."""
     _require_user(request)
-    rows = portal_db.list_announcements(active_only=True)
+    # notice_posts 우선, 없으면 announcements fallback
+    rows = portal_db.list_notice_posts(active_only=True)[0]
+    popup_rows = portal_db.list_notice_active_for_popup()
+    popup_ids = {r["id"] for r in popup_rows}
     return JSONResponse([
         {"id": r["id"], "badge": r["badge"], "title": r["title"],
-         "content": r["content"], "pinned": bool(r["pinned"]),
-         "created_at": r["created_at"][:10]}
+         "content": r["content"] or "", "pinned": bool(r["pinned"]),
+         "has_image": bool(r.get("image_data")),
+         "popup_ok": r["id"] in popup_ids,
+         "created_at": r["created_at"][:10],
+         "url": f"/portal/board/notice/{r['id']}"}
         for r in rows
     ])
 
 
-@router.get("/admin/announcements")
-async def admin_announcements_page(request: Request):
+# ── 공지사항 게시판 (board/notice) ─────────────────────────────────────────
+
+@router.get("/board/notice")
+async def board_notice_list(request: Request, page: int = 1):
+    user = _require_user(request)
+    rows, total = portal_db.list_notice_posts(active_only=False, page=page, per_page=20)
+    total_pages = max(1, (total + 19) // 20)
+    return _render(request, "portal_board_notice.html",
+                   posts=rows, total=total, total_pages=total_pages,
+                   page=page, user=user)
+
+
+@router.get("/board/notice/{post_id}")
+async def board_notice_detail(request: Request, post_id: int):
+    user = _require_user(request)
+    post = portal_db.get_notice_post(post_id)
+    if not post:
+        return RedirectResponse("/portal/board/notice", status_code=303)
+    comments = portal_db.list_notice_comments(post_id)
+    return _render(request, "portal_board_notice_detail.html",
+                   post=post, comments=comments, user=user)
+
+
+@router.post("/board/notice/{post_id}/comment")
+async def board_notice_comment(request: Request, post_id: int):
+    user = _require_user(request)
+    form = await _read_form(request)
+    content = (form.get("content") or "").strip()
+    if content:
+        portal_db.create_notice_comment(
+            post_id=post_id, emp_code=user["emp_code"],
+            emp_name=user["name"], team=user["team"], content=content,
+        )
+    return RedirectResponse(f"/portal/board/notice/{post_id}", status_code=303)
+
+
+@router.post("/board/notice/comment/{comment_id}/delete")
+async def board_notice_comment_delete(request: Request, comment_id: int):
+    user = _require_user(request)
+    portal_db.delete_notice_comment(comment_id, user["emp_code"],
+                                     is_admin=user.get("is_admin", False))
+    referer = request.headers.get("referer", "/portal/board/notice")
+    return RedirectResponse(referer, status_code=303)
+
+
+# ── 공지사항 관리 (board/notice admin) ─────────────────────────────────────
+
+@router.get("/board/notice/admin/write")
+async def board_notice_write_page(request: Request):
     user = _require_user(request)
     if not user.get("is_admin"):
         raise HTTPException(status_code=403, detail="관리자 전용")
-    rows = portal_db.list_announcements(active_only=False)
-    return _render(request, "portal_admin_announcements.html", announcements=rows, user=user)
+    return _render(request, "portal_board_notice_write.html", post=None, user=user)
 
 
-@router.post("/admin/announcements/create")
-async def admin_announcements_create(request: Request):
+@router.get("/board/notice/{post_id}/edit")
+async def board_notice_edit_page(request: Request, post_id: int):
+    user = _require_user(request)
+    if not user.get("is_admin"):
+        raise HTTPException(status_code=403)
+    post = portal_db.get_notice_post(post_id)
+    if not post:
+        return RedirectResponse("/portal/board/notice", status_code=303)
+    return _render(request, "portal_board_notice_write.html", post=post, user=user)
+
+
+@router.post("/board/notice/admin/create")
+async def board_notice_create(request: Request):
     user = _require_user(request)
     if not user.get("is_admin"):
         raise HTTPException(status_code=403)
     form = await _read_form(request)
-    badge   = (form.get("badge") or "공지").strip()
-    title   = (form.get("title") or "").strip()
-    content = (form.get("content") or "").strip()
-    pinned  = form.get("pinned") == "1"
+    badge       = (form.get("badge") or "공지").strip()
+    title       = (form.get("title") or "").strip()
+    content     = (form.get("content") or "").strip()
+    popup_start = (form.get("popup_start") or "").strip()
+    popup_end   = (form.get("popup_end") or "").strip()
+    pinned      = form.get("pinned") == "1"
+    image_data  = (form.get("image_data") or "").strip()   # base64 data URL
+    image_mime  = (form.get("image_mime") or "").strip()
     if title and content:
-        portal_db.create_announcement(badge=badge, title=title, content=content,
-                                       pinned=pinned, created_by=user["emp_code"])
-    return RedirectResponse("/portal/admin/announcements", status_code=303)
+        portal_db.create_notice_post(
+            badge=badge, title=title, content=content,
+            image_data=image_data, image_mime=image_mime,
+            popup_start=popup_start, popup_end=popup_end,
+            pinned=pinned, created_by=user["emp_code"],
+        )
+    return RedirectResponse("/portal/board/notice", status_code=303)
 
 
-@router.post("/admin/announcements/{ann_id}/update")
-async def admin_announcements_update(request: Request, ann_id: int):
+@router.post("/board/notice/{post_id}/update")
+async def board_notice_update(request: Request, post_id: int):
     user = _require_user(request)
     if not user.get("is_admin"):
         raise HTTPException(status_code=403)
     form = await _read_form(request)
-    badge   = (form.get("badge") or "공지").strip()
-    title   = (form.get("title") or "").strip()
-    content = (form.get("content") or "").strip()
-    pinned  = form.get("pinned") == "1"
+    badge       = (form.get("badge") or "공지").strip()
+    title       = (form.get("title") or "").strip()
+    content     = (form.get("content") or "").strip()
+    popup_start = (form.get("popup_start") or "").strip()
+    popup_end   = (form.get("popup_end") or "").strip()
+    pinned      = form.get("pinned") == "1"
+    image_data  = (form.get("image_data") or "").strip()
+    image_mime  = (form.get("image_mime") or "").strip()
+    # 이미지 미변경 시 기존값 유지
+    if not image_data:
+        existing = portal_db.get_notice_post(post_id)
+        if existing:
+            image_data = existing.get("image_data") or ""
+            image_mime = existing.get("image_mime") or ""
     if title and content:
-        portal_db.update_announcement(ann_id, badge=badge, title=title,
-                                       content=content, pinned=pinned)
-    return RedirectResponse("/portal/admin/announcements", status_code=303)
+        portal_db.update_notice_post(
+            post_id, badge=badge, title=title, content=content,
+            image_data=image_data, image_mime=image_mime,
+            popup_start=popup_start, popup_end=popup_end, pinned=pinned,
+        )
+    return RedirectResponse(f"/portal/board/notice/{post_id}", status_code=303)
 
 
-@router.post("/admin/announcements/{ann_id}/toggle")
-async def admin_announcements_toggle(request: Request, ann_id: int):
+@router.post("/board/notice/{post_id}/toggle")
+async def board_notice_toggle(request: Request, post_id: int):
     user = _require_user(request)
     if not user.get("is_admin"):
         raise HTTPException(status_code=403)
-    portal_db.toggle_announcement(ann_id)
-    return RedirectResponse("/portal/admin/announcements", status_code=303)
+    portal_db.toggle_notice_post(post_id)
+    return RedirectResponse("/portal/board/notice", status_code=303)
 
 
-@router.post("/admin/announcements/{ann_id}/delete")
-async def admin_announcements_delete(request: Request, ann_id: int):
+@router.post("/board/notice/{post_id}/delete")
+async def board_notice_delete(request: Request, post_id: int):
     user = _require_user(request)
     if not user.get("is_admin"):
         raise HTTPException(status_code=403)
-    portal_db.delete_announcement(ann_id)
-    return RedirectResponse("/portal/admin/announcements", status_code=303)
+    portal_db.delete_notice_post(post_id)
+    return RedirectResponse("/portal/board/notice", status_code=303)
+
+
+# ── 기존 admin/announcements → board/notice 리다이렉트 ─────────────────────
+@router.get("/admin/announcements")
+async def admin_announcements_redirect(request: Request):
+    _require_user(request)
+    return RedirectResponse("/portal/board/notice", status_code=302)
 
 
 # ── VOC 게시판 ──────────────────────────────────────────────────────────────

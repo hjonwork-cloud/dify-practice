@@ -1,0 +1,110 @@
+{% extends 'portal_base.html' %}{% block title %}공지사항{% endblock %}{% block content %}
+<style>
+.ntc-wrap { max-width: 900px; }
+.ntc-heading { margin-bottom: 1.25rem; }
+.ntc-heading h1 { font-size: 1.35rem; font-weight: 800; color: #111; margin: 0 0 .25rem; }
+.ntc-heading p  { font-size: .85rem; color: #6b7280; margin: 0; }
+
+.ntc-toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: .75rem; flex-wrap: wrap; gap: .5rem; }
+.ntc-write-btn { padding: .38rem 1rem; background: #1e293b; color: #fff; border: none;
+  border-radius: .4rem; font-size: .83rem; font-weight: 700; cursor: pointer; text-decoration: none; }
+.ntc-write-btn:hover { background: #334155; }
+
+.ntc-table-wrap { background: #fff; border: 1px solid #e5e7eb; border-radius: .75rem; overflow: hidden; }
+.ntc-table { width: 100%; border-collapse: collapse; font-size: .83rem; }
+.ntc-table th { background: #1e293b; color: #fff; padding: .5rem .75rem; text-align: left; font-weight: 600; white-space: nowrap; }
+.ntc-table td { padding: .55rem .75rem; border-bottom: 1px solid #f3f4f6; vertical-align: middle; }
+.ntc-table tr:last-child td { border-bottom: none; }
+.ntc-table tr:hover td { background: #f9fafb; }
+.ntc-table a.title-link { color: #1e293b; text-decoration: none; font-weight: 600; }
+.ntc-table a.title-link:hover { color: #2563eb; text-decoration: underline; }
+
+.ntc-badge { display: inline-block; padding: .1rem .48rem; border-radius: .25rem; font-size: .7rem; font-weight: 700; margin-right: .35rem; }
+.ntc-badge.공지   { background: #1e293b; color: #fff; }
+.ntc-badge.이벤트 { background: #fef3c7; color: #92400e; }
+.ntc-badge.업데이트 { background: #dbeafe; color: #1d4ed8; }
+.ntc-badge.안내   { background: #dcfce7; color: #166534; }
+
+.pin-icon { color: #ef4444; font-size: .8rem; margin-right: .2rem; }
+.img-dot  { display: inline-block; width: .5rem; height: .5rem; border-radius: 50%; background: #18b9c7; margin-left: .3rem; vertical-align: middle; }
+.popup-dot { display: inline-block; width: .5rem; height: .5rem; border-radius: 50%; background: #f59e0b; margin-left: .25rem; vertical-align: middle; }
+
+.ntc-empty { text-align: center; padding: 3rem; color: #9ca3af; font-size: .9rem; }
+
+.ntc-paging { display: flex; gap: .35rem; justify-content: center; margin-top: 1rem; flex-wrap: wrap; }
+.ntc-paging a, .ntc-paging span {
+  padding: .3rem .7rem; border: 1px solid #e5e7eb; border-radius: .35rem;
+  font-size: .8rem; text-decoration: none; color: #374151; }
+.ntc-paging a:hover { background: #f3f4f6; }
+.ntc-paging .cur { background: #1e293b; color: #fff; border-color: #1e293b; font-weight: 700; }
+</style>
+
+<div class="ntc-wrap">
+  <div class="ntc-heading">
+    <p class="eyebrow">NOTICE BOARD</p>
+    <h1>📢 공지사항</h1>
+    <p>플랫폼 업데이트, 이벤트, 주요 공지를 확인하세요.</p>
+  </div>
+
+  <div class="ntc-toolbar">
+    <span style="font-size:.82rem;color:#6b7280;">총 <b>{{ total }}</b>건</span>
+    {% if user and user.is_admin %}
+    <a class="ntc-write-btn" href="/portal/board/notice/admin/write">✏️ 공지 작성</a>
+    {% endif %}
+  </div>
+
+  {% if posts %}
+  <div class="ntc-table-wrap">
+    <table class="ntc-table">
+      <thead>
+        <tr>
+          <th style="width:3rem">번호</th>
+          <th style="width:5rem">배지</th>
+          <th>제목</th>
+          <th style="width:6rem">작성자</th>
+          <th style="width:7rem">등록일</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in posts %}
+        <tr>
+          <td style="text-align:center;color:#9ca3af;">
+            {% if p.pinned %}<span class="pin-icon">📌</span>{% else %}{{ p.id }}{% endif %}
+          </td>
+          <td>
+            {% if p.badge %}
+            <span class="ntc-badge {{ p.badge }}">{{ p.badge }}</span>
+            {% endif %}
+          </td>
+          <td>
+            <a class="title-link" href="/portal/board/notice/{{ p.id }}">{{ p.title }}</a>
+            {% if p.image_data %}<span class="img-dot" title="이미지 첨부"></span>{% endif %}
+            {% if p.popup_start or p.popup_end %}<span class="popup-dot" title="팝업 설정됨"></span>{% endif %}
+          </td>
+          <td>{{ p.created_by }}</td>
+          <td>{{ p.created_at[:10] if p.created_at else '' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- 페이지네이션 -->
+  {% if total_pages > 1 %}
+  <div class="ntc-paging">
+    {% if page > 1 %}<a href="?page={{ page-1 }}">‹</a>{% endif %}
+    {% for n in range(1, total_pages+1) %}
+      {% if n == page %}<span class="cur">{{ n }}</span>
+      {% else %}<a href="?page={{ n }}">{{ n }}</a>{% endif %}
+    {% endfor %}
+    {% if page < total_pages %}<a href="?page={{ page+1 }}">›</a>{% endif %}
+  </div>
+  {% endif %}
+
+  {% else %}
+  <div class="ntc-table-wrap">
+    <div class="ntc-empty">📭 등록된 공지사항이 없습니다.</div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
