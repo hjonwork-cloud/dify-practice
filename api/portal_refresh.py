@@ -1070,7 +1070,7 @@ def run_action_results_refresh() -> dict:
         WHERE 1=0
         """
         try:
-            main._safe_query(empty_sql, raw=True)
+            main.run_query(empty_sql, raw=True)
         except Exception as e:
             logger.warning(f"[refresh] {T_ACTION_RESULTS} 빈 테이블 생성 실패: {e}")
         return {"status": "ok", "action_rows": 0}
@@ -1124,7 +1124,7 @@ def run_action_results_refresh() -> dict:
              a.brand_code, a.brand_name, a.action_ym, a.action_item_count, a.dm_matnr_csv
     """
     try:
-        main._safe_query(sql, raw=True)
+        main.run_query(sql, raw=True)
         logger.info(f"[refresh] {T_ACTION_RESULTS} 생성 완료 ({len(rows)}건)")
         return {"status": "ok", "action_rows": len(rows)}
     except Exception as e:

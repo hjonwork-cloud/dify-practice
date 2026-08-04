@@ -840,13 +840,24 @@ async def action_results_debug(request: Request):
     try:
         import main as _m
         from portal_refresh import T_ACTION_RESULTS
-        rows = _m._safe_query(
-            f"SELECT emp_code, customer_code, customer_name, brand_name, action_ym, "
-            f"action_item_count, sales_after_m, sample_count, dm_product_qty "
-            f"FROM {T_ACTION_RESULTS} ORDER BY action_ym DESC LIMIT 50",
-            raw=True,
-        ) or []
-        return {"table": T_ACTION_RESULTS, "row_count": len(rows), "rows": rows}
+        # 테이블 존재 여부 확인
+        try:
+            rows = _m.run_query(
+                f"SELECT emp_code, customer_code, customer_name, brand_name, action_ym, "
+                f"action_item_count, sales_after_m, sample_count, dm_product_qty "
+                f"FROM {T_ACTION_RESULTS} ORDER BY action_ym DESC LIMIT 50",
+                raw=True,
+            ) or []
+            return {"table": T_ACTION_RESULTS, "row_count": len(rows), "rows": rows}
+        except Exception as e:
+            # 테이블 없거나 DDL 권한 문제
+            return {
+                "table": T_ACTION_RESULTS,
+                "row_count": 0,
+                "rows": [],
+                "table_error": str(e),
+                "hint": "테이블이 없거나 DDL 권한 부족. Databricks에서 직접 CREATE TABLE 권한 확인 필요"
+            }
     except Exception as e:
         return {"error": str(e)}
 
