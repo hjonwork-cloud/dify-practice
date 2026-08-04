@@ -195,7 +195,8 @@
     {% endif %}
     {% set _ = brand_totals[r.brand_name].update({'sales': brand_totals[r.brand_name]['sales'] + (r.sales_after_m | default(0)), 'gp': brand_totals[r.brand_name]['gp'] + (r.gp_after_m | default(0))}) %}
   {% endfor %}
-  {% set max_sales = brand_totals.values() | map(attribute='sales') | max | default(1) %}
+  {% set max_sales = brand_totals.values() | map(attribute='sales') | max | default(0) %}
+  {% set max_sales = max_sales if max_sales > 0 else 1 %}
   {% if brand_totals | length > 1 %}
   <div class="results-chart-wrap">
     <h3>📊 브랜드별 누적 매출 (이후)</h3>
@@ -204,7 +205,7 @@
       <div class="bar-chart-row">
         <div class="bar-chart-label" title="{{ bname }}">{{ bname }}</div>
         <div class="bar-chart-track">
-          <div class="bar-chart-fill" style="width:{{ [((vals.sales / max_sales) * 100) | round | int, 2] | max }}%"></div>
+          <div class="bar-chart-fill" style="width:{{ [((vals.sales / (max_sales if max_sales > 0 else 1)) * 100) | round | int, 2] | max }}%"></div>
         </div>
         <div class="bar-chart-val">{{ '{:,}'.format(vals.sales) }}백만</div>
       </div>
