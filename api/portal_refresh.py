@@ -1110,9 +1110,9 @@ def run_action_results_refresh() -> dict:
       COALESCE(SUM(CASE WHEN COALESCE(m.`매출액`, 0) = 0
                              AND COALESCE(m.`매출수량`, 0) > 0
                         THEN 1 ELSE 0 END), 0) AS sample_count,
-      -- DM 추천 상품 구매 수량 (상품코드가 dm_matnr_csv 내에 있는 경우)
+      -- DM 추천 상품 구매 수량 (자재코드가 dm_matnr_csv 내에 있는 경우)
       COALESCE(SUM(CASE WHEN a.dm_matnr_csv <> ''
-                             AND ARRAY_CONTAINS(SPLIT(a.dm_matnr_csv, ','), m.`상품코드`)
+                             AND ARRAY_CONTAINS(SPLIT(a.dm_matnr_csv, ','), m.`자재`)
                         THEN CAST(m.`매출수량` AS BIGINT) ELSE 0 END), 0) AS dm_product_qty,
       CURRENT_TIMESTAMP() AS updated_at
     FROM actions a
