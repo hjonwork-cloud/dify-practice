@@ -831,6 +831,26 @@ async def run_action_results_refresh_api(request: Request):
     return result_holder
 
 
+@router.get("/api/action-results-debug")
+async def action_results_debug(request: Request):
+    """T_ACTION_RESULTS 실제 저장 내용 확인 (어드민 전용).
+    GET /admin/api/action-results-debug
+    """
+    _require_admin(request)
+    try:
+        import main as _m
+        from portal_refresh import T_ACTION_RESULTS
+        rows = _m._safe_query(
+            f"SELECT emp_code, customer_code, customer_name, brand_name, action_ym, "
+            f"action_item_count, sales_after_m, sample_count, dm_product_qty "
+            f"FROM {T_ACTION_RESULTS} ORDER BY action_ym DESC LIMIT 50",
+            raw=True,
+        ) or []
+        return {"table": T_ACTION_RESULTS, "row_count": len(rows), "rows": rows}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @router.get("/api/verify-dm-conversion")
 async def verify_dm_conversion(request: Request, cust_code: str = "0000193241",
                                 matnr: str = "100914", dm_ym: str = "202607"):

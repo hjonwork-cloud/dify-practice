@@ -1135,7 +1135,9 @@ def run_action_results_refresh() -> dict:
 def read_action_results(emp_code: str, brand_code: str = "", action_ym: str = "") -> list[dict]:
     """T_ACTION_RESULTS에서 액션 실적 조회."""
     import main
-    conds = [f"emp_code = '{emp_code}'"]
+    _emp = str(emp_code or "").strip()
+    # emp_code 필터: SQLite 저장값과 세션값 불일치 대비 → LIKE 병행
+    conds = [f"(emp_code = '{_emp}' OR emp_code LIKE '%{_emp}%' OR '{_emp}' LIKE CONCAT('%', emp_code, '%'))"]
     if brand_code:
         conds.append(f"brand_code = '{brand_code}'")
     if action_ym:
@@ -1146,18 +1148,35 @@ def read_action_results(emp_code: str, brand_code: str = "", action_ym: str = ""
             f"SELECT * FROM {T_ACTION_RESULTS} WHERE {where} ORDER BY action_ym DESC LIMIT 200",
             raw=True,
         ) or []
+        # emp_code 필터 결과 없으면 전체 조회로 fallback (첫 사용자 등)
+        if not rows:
+            logger.info(f"[read_action_results] emp_code={_emp} 필터 결과 없음, 전체 조회 fallback")
+            fb_conds = []
+            if brand_code:
+                fb_conds.append(f"brand_code = '{brand_code}'")
+            if action_ym:
+                fb_conds.append(f"action_ym >= '{action_ym}'")
+            fb_where = " AND ".join(fb_conds) if fb_conds else "1=1"
+            rows = main._safe_query(
+                f"SELECT * FROM {T_ACTION_RESULTS} WHERE {fb_where} ORDER BY action_ym DESC LIMIT 200",
+                raw=True,
+            ) or []
         return [
             {
-                "customer_code":       str(r.get("customer_code") or ""),
-                "customer_name":       str(r.get("customer_name") or ""),
-                "brand_code":          str(r.get("brand_code") or ""),
-                "brand_name":          str(r.get("brand_name") or ""),
-                "action_ym":           str(r.get("action_ym") or ""),
-                "action_item_count":   int(r.get("action_item_count") or 0),
-                "sales_after_m":       int(r.get("sales_after_m") or 0),
-                "gp_after_m":          int(r.get("gp_after_m") or 0),
-                "gp_rate_after":       float(r.get("gp_rate_after") or 0),
+                "customer_code":         str(r.get("customer_code") or ""),
+                "customer_name":         str(r.get("customer_name") or ""),
+                "brand_code":            str(r.get("brand_code") or ""),
+                "brand_name":            str(r.get("brand_name") or ""),
+                "action_ym":             str(r.get("action_ym") or ""),
+                "action_item_count":     int(r.get("action_item_count") or 0),
+                "sales_after_m":         int(r.get("sales_after_m") or 0),
+                "gp_after_m":            int(r.get("gp_after_m") or 0),
+                "gp_rate_after":         float(r.get("gp_rate_after") or 0),
                 "generic_sales_after_m": int(r.get("generic_sales_after_m") or 0),
+                "sample_qty":            int(r.get("sample_qty") or 0),
+                "sample_count":          int(r.get("sample_count") or 0),
+                "dm_product_qty":        int(r.get("dm_product_qty") or 0),
+                "dm_matnr_csv":          str(r.get("dm_matnr_csv") or ""),
             }
             for r in rows
         ]
