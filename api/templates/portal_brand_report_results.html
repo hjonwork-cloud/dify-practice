@@ -124,36 +124,36 @@
           <td style="color:#9ca3af;font-size:.75rem;">{{ r.customer_code }}</td>
           <td style="font-size:.78rem;">{{ r.brand_name }}</td>
           <td>{{ r.action_ym }}</td>
-          <td style="text-align:center;">{{ r.action_item_count }}품목</td>
+          <td style="text-align:center;">{{ r.action_item_count | default(0) }}품목</td>
           <td style="text-align:center;">
-            {% if r.dm_count is defined and r.dm_count > 0 %}
+            {% if (r.dm_count | default(0)) > 0 %}
               <span style="color:#7c3aed;font-weight:600;">{{ r.dm_count }}회</span>
             {% else %}<span style="color:#e5e7eb;">-</span>{% endif %}
           </td>
           <td style="text-align:center;">
-            {% if r.price_count is defined and r.price_count > 0 %}
+            {% if (r.price_count | default(0)) > 0 %}
               <span style="color:#0369a1;font-weight:600;">{{ r.price_count }}회</span>
             {% else %}<span style="color:#e5e7eb;">-</span>{% endif %}
           </td>
           <td style="text-align:center;">
-            {% if r.dm_matnr_csv is defined and r.dm_matnr_csv %}
+            {% if r.dm_matnr_csv %}
               <button class="expand-btn" onclick="event.stopPropagation();toggleDetail({{ rid }})" title="발송 품목 보기">📌 상세</button>
             {% else %}<span style="color:#e5e7eb;">-</span>{% endif %}
           </td>
-          <td style="text-align:right;">{{ '{:,}'.format(r.sales_after_m) }}</td>
-          <td style="text-align:right;">{{ '{:,}'.format(r.gp_after_m) }}</td>
+          <td style="text-align:right;">{{ '{:,}'.format(r.sales_after_m | default(0)) }}</td>
+          <td style="text-align:right;">{{ '{:,}'.format(r.gp_after_m | default(0)) }}</td>
           <td style="text-align:right;">
-            {% set gp = r.gp_rate_after %}
+            {% set gp = r.gp_rate_after | default(0) %}
             <span class="gp-chip {% if gp >= 20 %}up{% elif gp >= 10 %}mid{% else %}down{% endif %}">{{ gp }}%</span>
           </td>
-          <td style="text-align:right;">{{ '{:,}'.format(r.generic_sales_after_m) }}</td>
+          <td style="text-align:right;">{{ '{:,}'.format(r.generic_sales_after_m | default(0)) }}</td>
           <td style="text-align:center;">
-            {% if r.sample_count is defined and r.sample_count > 0 %}
-              <span title="수량 {{ r.sample_qty }}개" style="color:#16a34a;font-weight:600;">✅ {{ r.sample_count }}건</span>
+            {% if (r.sample_count | default(0)) > 0 %}
+              <span title="수량 {{ r.sample_qty | default(0) }}개" style="color:#16a34a;font-weight:600;">✅ {{ r.sample_count }}건</span>
             {% else %}<span style="color:#e5e7eb;">-</span>{% endif %}
           </td>
           <td style="text-align:center;">
-            {% if r.dm_product_qty is defined and r.dm_product_qty > 0 %}
+            {% if (r.dm_product_qty | default(0)) > 0 %}
               <span style="color:#2563eb;font-weight:600;">{{ r.dm_product_qty }}개</span>
             {% else %}<span style="color:#e5e7eb;">-</span>{% endif %}
           </td>
@@ -175,8 +175,8 @@
               <span style="color:#9ca3af;">상품코드 정보 없음</span>
               {% endif %}
               <div style="margin-top:.5rem;color:#6b7280;font-size:.72rem;">
-                DM발송 {{ r.dm_count if r.dm_count is defined else 0 }}회 ·
-                판가설정 {{ r.price_count if r.price_count is defined else 0 }}회 ·
+                DM발송 {{ r.dm_count | default(0) }}회 ·
+                판가설정 {{ r.price_count | default(0) }}회 ·
                 액션시작월 {{ r.action_ym }}
               </div>
             </div>
