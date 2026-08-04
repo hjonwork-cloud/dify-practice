@@ -1002,22 +1002,39 @@ def run_action_results_refresh() -> dict:
     except Exception as e:
         return {"status": "error", "reason": str(e), "step": "read_logs"}
 
-    # 판가설정 있는 로그만, (emp, customer, brand) 기준으로 가장 이른 action_ym 추출
+    # 판가설정 또는 DM 발송 로그 → (emp, customer, brand) 기준으로 가장 이른 action_ym 추출
     agg: dict = {}
     for log in logs:
         pj = log.get("price_items_json") or ""
-        if not pj:
+        action_type = str(log.get("action_type") or "")
+        product_names = str(log.get("product_names") or "")
+
+        # action_ym 결정
+        action_ym = ""
+        if pj and pj not in ("[]", "null"):
+            try:
+                items = _json.loads(pj)
+                if items:
+                    dates = [str(it.get("date_from") or "")[:6] for it in items if it.get("date_from")]
+                    action_ym = min((d for d in dates if len(d) == 6), default="")
+            except Exception:
+                pass
+        # dm_only_sent: price_items 없음 → created_at 기반 fallback
+        if not action_ym:
+            action_ym = str(log.get("created_at") or "")[:7].replace("-", "")
+        if len(action_ym) != 6 or not action_ym.isdigit():
             continue
-        try:
-            items = _json.loads(pj)
-            if not items:
-                continue
-            dates = [str(it.get("date_from") or "")[:6] for it in items if it.get("date_from")]
-            action_ym = min((d for d in dates if len(d) == 6), default="")
-            if not action_ym:
-                continue
-        except Exception:
-            continue
+
+        # dm_matnr_csv: price_items matnr 우선, 없으면 product_names 사용
+        dm_matnr_csv = ""
+        if pj and pj not in ("[]", "null"):
+            try:
+                items = _json.loads(pj)
+                dm_matnr_csv = ",".join(str(it.get("matnr") or "") for it in items if it.get("matnr"))
+            except Exception:
+                pass
+        if not dm_matnr_csv and product_names:
+            dm_matnr_csv = product_names.replace(", ", ",").replace(" ", ",")
 
         key = (
             str(log.get("emp_code") or ""),
@@ -1031,7 +1048,8 @@ def run_action_results_refresh() -> dict:
             "brand_code":    key[2],
             "brand_name":    str(log.get("brand_name") or "").replace("'", "''"),
             "action_ym":     action_ym,
-            "item_count":    len(items),
+            "item_count":    len(_json.loads(pj)) if (pj and pj not in ("[]", "null")) else 0,
+            "dm_matnr_csv":  dm_matnr_csv.replace("'", ""),
         }
         if key not in agg or action_ym < agg[key]["action_ym"]:
             agg[key] = entry
@@ -1043,9 +1061,11 @@ def run_action_results_refresh() -> dict:
         CREATE OR REPLACE TABLE {T_ACTION_RESULTS} AS
         SELECT '' AS emp_code, '' AS customer_code, '' AS customer_name,
                '' AS brand_code, '' AS brand_name, '' AS action_ym,
-               0 AS action_item_count,
+               0 AS action_item_count, '' AS dm_matnr_csv,
                CAST(0 AS BIGINT) AS sales_after_m, CAST(0 AS BIGINT) AS gp_after_m,
                CAST(0.0 AS DOUBLE) AS gp_rate_after, CAST(0 AS BIGINT) AS generic_sales_after_m,
+               CAST(0 AS BIGINT) AS sample_qty, CAST(0 AS BIGINT) AS sample_count,
+               CAST(0 AS BIGINT) AS dm_product_qty,
                CURRENT_TIMESTAMP() AS updated_at
         WHERE 1=0
         """
@@ -1058,7 +1078,7 @@ def run_action_results_refresh() -> dict:
     rows = list(agg.values())
     values_parts = ", ".join(
         f"('{r['emp_code']}', '{r['customer_code']}', '{r['customer_name']}', "
-        f"'{r['brand_code']}', '{r['brand_name']}', '{r['action_ym']}', {r['item_count']})"
+        f"'{r['brand_code']}', '{r['brand_name']}', '{r['action_ym']}', {r['item_count']}, '{r['dm_matnr_csv']}')"
         for r in rows
     )
 
@@ -1067,12 +1087,13 @@ def run_action_results_refresh() -> dict:
     WITH actions AS (
       SELECT column1 AS emp_code, column2 AS customer_code, column3 AS customer_name,
              column4 AS brand_code, column5 AS brand_name,
-             column6 AS action_ym,  column7 AS action_item_count
+             column6 AS action_ym,  column7 AS action_item_count,
+             column8 AS dm_matnr_csv
       FROM VALUES {values_parts}
     )
     SELECT
       a.emp_code, a.customer_code, a.customer_name,
-      a.brand_code, a.brand_name, a.action_ym, a.action_item_count,
+      a.brand_code, a.brand_name, a.action_ym, a.action_item_count, a.dm_matnr_csv,
       ROUND(SUM(COALESCE(m.`매출액`, 0)) / 10000)    AS sales_after_m,
       ROUND((SUM(COALESCE(m.`매출액`, 0)) - SUM(COALESCE(m.`매출원가`, 0))) / 10000) AS gp_after_m,
       CASE WHEN SUM(COALESCE(m.`매출액`, 0)) = 0 THEN 0.0
@@ -1082,6 +1103,17 @@ def run_action_results_refresh() -> dict:
       ROUND(SUM(CASE WHEN m.`자재그룹명` IS NOT NULL
                      AND COALESCE(m.`자재그룹명`, '') <> 'FC전용상품'
                      THEN COALESCE(m.`매출액`, 0) ELSE 0 END) / 10000) AS generic_sales_after_m,
+      -- 샘플출고: 매출액=0 이고 수량>0 인 행 (추천 상품 샘플 출고 확인)
+      COALESCE(SUM(CASE WHEN COALESCE(m.`매출액`, 0) = 0
+                             AND COALESCE(m.`매출수량`, 0) > 0
+                        THEN CAST(m.`매출수량` AS BIGINT) ELSE 0 END), 0) AS sample_qty,
+      COALESCE(SUM(CASE WHEN COALESCE(m.`매출액`, 0) = 0
+                             AND COALESCE(m.`매출수량`, 0) > 0
+                        THEN 1 ELSE 0 END), 0) AS sample_count,
+      -- DM 추천 상품 구매 수량 (상품코드가 dm_matnr_csv 내에 있는 경우)
+      COALESCE(SUM(CASE WHEN a.dm_matnr_csv <> ''
+                             AND ARRAY_CONTAINS(SPLIT(a.dm_matnr_csv, ','), m.`상품코드`)
+                        THEN CAST(m.`매출수량` AS BIGINT) ELSE 0 END), 0) AS dm_product_qty,
       CURRENT_TIMESTAMP() AS updated_at
     FROM actions a
     LEFT JOIN {main.T_MAIN} m
@@ -1089,7 +1121,7 @@ def run_action_results_refresh() -> dict:
           AND m.`ZC본부`  = a.brand_code
           AND m.`년월`    >= a.action_ym
     GROUP BY a.emp_code, a.customer_code, a.customer_name,
-             a.brand_code, a.brand_name, a.action_ym, a.action_item_count
+             a.brand_code, a.brand_name, a.action_ym, a.action_item_count, a.dm_matnr_csv
     """
     try:
         main._safe_query(sql, raw=True)

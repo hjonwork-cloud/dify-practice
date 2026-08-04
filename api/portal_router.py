@@ -1913,9 +1913,10 @@ class _DmSendPayload(BaseModel):
     customer_name: str = ""
     brand_code: str = ""
     brand_name: str = ""
-    action_type: str = "dm_only"      # "dm_only" | "price_and_dm"
+    action_type: str = "dm_only"      # "dm_only" | "price_and_dm" | "price_only"
     dm_message: str = ""
     price_items: list[dict] = []      # [{plant,kunnr,matnr,price,date_from,date_to}]
+    dm_matnr_list: list[str] = []     # dm_only 시 추천 상품코드 목록
     sap_result: dict = {}             # 브라우저에서 SAP Bridge 직접 호출 후 결과 전달
 
 
@@ -1931,6 +1932,16 @@ async def dm_send_with_price(request: Request, body: _DmSendPayload):
     sap_result: dict = body.sap_result or {}
     saved_count = int(sap_result.get("saved_count") or (len(body.price_items) if body.price_items else 0))
 
+    # product_names: price_items 있으면 matnr, dm_only면 dm_matnr_list, 없으면 메시지에서 추출 시도
+    if body.price_items:
+        _product_names = ", ".join(str(p.get("matnr") or "") for p in body.price_items)
+    elif body.dm_matnr_list:
+        _product_names = ", ".join(str(m) for m in body.dm_matnr_list)
+    else:
+        # 메시지에서 상품코드 패턴 추출 ([숫자] 형태)
+        import re as _re_dm
+        _product_names = ", ".join(_re_dm.findall(r'\[(\d{5,10})\]', body.dm_message))
+
     # ── DM 로그 저장 ──────────────────────────────────
     from portal_db import record_dm_log_v2
     record_dm_log_v2(
@@ -1942,7 +1953,7 @@ async def dm_send_with_price(request: Request, body: _DmSendPayload):
         customer_code=body.customer_code,
         customer_name=body.customer_name,
         action_type=body.action_type,
-        product_names=", ".join(str(p.get("matnr") or "") for p in body.price_items) if body.price_items else "",
+        product_names=_product_names,
         message=body.dm_message,
         price_items_json=_json.dumps(body.price_items, ensure_ascii=False),
         sap_saved_count=saved_count,
@@ -1952,8 +1963,8 @@ async def dm_send_with_price(request: Request, body: _DmSendPayload):
             else "dm_only_sent"),
     )
 
-    # ── 판가설정 액션이면 실적 테이블 백그라운드 갱신 ─────────────────
-    if body.action_type in ("price_and_dm", "price_only"):
+    # ── 판가설정 또는 DM 발송 액션 시 실적 테이블 백그라운드 갱신 ──────────
+    if body.action_type in ("price_and_dm", "price_only", "dm_only"):
         def _refresh_action_results():
             try:
                 from portal_refresh import run_action_results_refresh
