@@ -53,7 +53,7 @@
 .matnr-pill{display:inline-block;padding:.15rem .5rem;border-radius:.3rem;background:#dbeafe;
   color:#1d4ed8;font-size:.72rem;font-weight:600;font-family:monospace;}
 .expand-btn{background:none;border:1px solid #d1d5db;border-radius:.3rem;cursor:pointer;
-  font-size:.72rem;padding:.15rem .45rem;color:#6b7280;line-height:1;}
+  font-size:.72rem;padding:.15rem .45rem;color:#6b7280;line-height:1;white-space:nowrap;}
 .expand-btn:hover{background:#f3f4f6;}
 /* 자재별 상세 테이블 */
 .matnr-detail-table{width:100%;border-collapse:collapse;font-size:.75rem;margin-top:.5rem;}
@@ -315,18 +315,26 @@
       '<th style="text-align:center;">매출수량</th><th style="text-align:center;">샘플</th>' +
       '<th style="text-align:center;">전환</th></tr></thead><tbody>';
     rows.forEach(function(r) {
+      var hasSales  = r.sales_qty > 0;
+      var hasSample = r.sample_qty > 0;
+      var rowStyle  = (!hasSales && !hasSample) ? ' style="opacity:.45;"' : '';
       var gpCls = r.gp_rate >= 20 ? 'up' : r.gp_rate >= 10 ? 'mid' : 'down';
-      var setPriceStr = r.set_price != null ? '₩' + r.set_price.toLocaleString() : '-';
-      var converted = r.net_qty > 0 ? '✅' : '<span style="color:#e5e7eb;">-</span>';
-      var sampleStr = r.sample_qty > 0 ? r.sample_qty + '개' : '<span style="color:#e5e7eb;">-</span>';
-      html += '<tr>' +
+      var setPriceStr = r.set_price != null ? '&#8361;' + r.set_price.toLocaleString() : '-';
+      // 전환 컨력: 매출수량>0 → ✅ / 샘플만 → 공비칸 / 둘다 0 → -
+      var converted = hasSales ? '✅' : '<span style="color:#e5e7eb;">-</span>';
+      var salesMStr = hasSales ? r.sales_after_m.toFixed(2) + '백만' : '<span style="color:#e5e7eb;">-</span>';
+      var gpMStr    = hasSales ? r.gp_after_m.toFixed(2) + '백만' : '<span style="color:#e5e7eb;">-</span>';
+      var gpChip    = hasSales ? '<span class="gp-chip ' + gpCls + '">' + r.gp_rate + '%</span>' : '<span style="color:#e5e7eb;">-</span>';
+      var salesQStr = hasSales ? r.sales_qty + '개' : '<span style="color:#e5e7eb;">-</span>';
+      var sampleStr = hasSample ? '<span style="color:#16a34a;font-weight:600;">' + r.sample_qty + '개</span>' : '<span style="color:#e5e7eb;">-</span>';
+      html += '<tr' + rowStyle + '>' +
         '<td class="matnr-code">' + r.matnr + '</td>' +
         '<td>' + (r.matnr_name || '-') + '</td>' +
         '<td style="text-align:right;">' + setPriceStr + '</td>' +
-        '<td style="text-align:right;">' + r.sales_after_m.toFixed(2) + '백만</td>' +
-        '<td style="text-align:right;">' + r.gp_after_m.toFixed(2) + '백만</td>' +
-        '<td style="text-align:center;"><span class="gp-chip ' + gpCls + '">' + r.gp_rate + '%</span></td>' +
-        '<td style="text-align:center;">' + r.sales_qty + '개</td>' +
+        '<td style="text-align:right;">' + salesMStr + '</td>' +
+        '<td style="text-align:right;">' + gpMStr + '</td>' +
+        '<td style="text-align:center;">' + gpChip + '</td>' +
+        '<td style="text-align:center;">' + salesQStr + '</td>' +
         '<td style="text-align:center;">' + sampleStr + '</td>' +
         '<td style="text-align:center;">' + converted + '</td>' +
         '</tr>';

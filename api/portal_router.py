@@ -1949,6 +1949,7 @@ async def action_matnr_sales(
               AND `대금청구일` >= '{action_date}'
               AND TRIM(`자재`) IN ({matnr_in})
             GROUP BY TRIM(`자재`)
+            HAVING sales_m > 0 OR sample_qty > 0
         """, raw=True) or []
     except Exception as e:
         return JSONResponse({"rows": [], "error": str(e)})
