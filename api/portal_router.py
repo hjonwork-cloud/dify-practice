@@ -1903,13 +1903,19 @@ async def action_matnr_sales(
 ):
     """자재별 상세 실적 조회: dm_send_logs 판가 + T_MAIN 집계."""
     user = _require_user(request)
-    if not customer_code or not brand_code or not action_date:
-        return JSONResponse({"rows": [], "error": "customer_code/brand_code/action_date 필수"})
+    if not customer_code:
+        return JSONResponse({"rows": [], "error": "customer_code 필수"})
+    # action_date 빈값이면 전체 이력 조회 (fallback)
+    if not action_date:
+        action_date = "20000101"
     # 1) dm_send_logs 에서 price_items 좌회 → 자재별 설정판가 맵
     logs = portal_db.list_dm_logs(emp_code=user["emp_code"], brand_code=brand_code or None)
     price_map: dict[str, int | None] = {}  # matnr → 판가(없으면 None)
     for log in logs:
         if str(log.get("customer_code") or "") != customer_code:
+            continue
+        # brand_code 필터: 빈값이면 모든 로그 허용
+        if brand_code and str(log.get("brand_code") or "") not in ("", brand_code):
             continue
         pj = log.get("price_items_json") or ""
         if pj and pj not in ("[]", "null"):
@@ -1929,11 +1935,12 @@ async def action_matnr_sales(
                 if m:
                     price_map.setdefault(m, None)
     if not price_map:
-        return JSONResponse({"rows": []})
+        return JSONResponse({"rows": [], "no_price_map": True})
     # 2) T_MAIN 에서 자재별 집계
     import main
     matnrs = list(price_map.keys())
     matnr_in = ", ".join(f"'{m}'" for m in matnrs)
+    brand_cond = f"AND `ZC본부` = '{brand_code}'" if brand_code else ""
     try:
         db_rows = main._safe_query(f"""
             SELECT TRIM(`자재`) AS matnr,
@@ -1945,7 +1952,7 @@ async def action_matnr_sales(
                    COALESCE(SUM(CASE WHEN `매출액` = 0 AND `매출수량` > 0 THEN CAST(`매출수량` AS BIGINT) ELSE 0 END), 0) AS sample_qty
             FROM {main.T_MAIN}
             WHERE `거래처` = '{customer_code}'
-              AND `ZC본부` = '{brand_code}'
+              {brand_cond}
               AND `대금청구일` >= '{action_date}'
               AND TRIM(`자재`) IN ({matnr_in})
             GROUP BY TRIM(`자재`)

@@ -211,7 +211,7 @@
         <div class="bar-chart-track">
           <div class="bar-chart-fill" style="width:{{ [((vals.sales / (max_sales if max_sales > 0 else 1)) * 100) | round | int, 2] | max }}%"></div>
         </div>
-        <div class="bar-chart-val">{{ '{:,}'.format(vals.sales) }}백만</div>
+        <div class="bar-chart-val">{{ '{:.2f}'.format(vals.sales | float) }}백만</div>
       </div>
       {% endfor %}
     </div>
@@ -285,11 +285,12 @@
     const matnrCsv = dataRow.dataset.matnrCsv || '';
     if (!matnrCsv) {
       tableEl.innerHTML = '<span style="color:#9ca3af;">자재코드 없음</span>';
+      tableEl.dataset.loaded = '1';
       return;
     }
     const customerCode = dataRow.dataset.customer || '';
     const brandCode    = dataRow.dataset.brand || '';
-    const actionDate   = dataRow.dataset.actionDate || '';
+    const actionDate   = dataRow.dataset.actionDate || '';  // 빈값이면 API가 20000101 fallback
     tableEl.innerHTML = '<span style="color:#9ca3af;">⏳ 조회 중...</span>';
     fetch('/portal/action-matnr-sales?customer_code=' + encodeURIComponent(customerCode) +
           '&brand_code='    + encodeURIComponent(brandCode) +
@@ -298,9 +299,23 @@
       .then(r => r.json())
       .then(data => {
         tableEl.dataset.loaded = '1';
-        renderMatnrTable(tableEl, data.rows || []);
+        if (data.rows && data.rows.length > 0) {
+          renderMatnrTable(tableEl, data.rows);
+        } else {
+          // 실적 없음 — 자재코드만 pill로 표시
+          var pills = matnrCsv.split(',').filter(m => m.trim())
+            .map(m => '<span class="matnr-pill">' + m.trim() + '</span>').join(' ');
+          tableEl.innerHTML = '<div class="matnr-pills" style="margin-top:.25rem;">' + pills + '</div>' +
+            '<div style="font-size:.72rem;color:#9ca3af;margin-top:.3rem;">발송일 이후 실적 없음</div>';
+        }
       })
-      .catch(e => { tableEl.innerHTML = '<span style="color:#ef4444;">조회 실패: ' + e.message + '</span>'; });
+      .catch(e => {
+        tableEl.dataset.loaded = '1';
+        var pills = matnrCsv.split(',').filter(m => m.trim())
+          .map(m => '<span class="matnr-pill">' + m.trim() + '</span>').join(' ');
+        tableEl.innerHTML = '<div class="matnr-pills">' + pills + '</div>' +
+          '<div style="font-size:.72rem;color:#ef4444;margin-top:.25rem;">조회 실패: ' + e.message + '</div>';
+      });
   }
 
   function renderMatnrTable(el, rows) {
