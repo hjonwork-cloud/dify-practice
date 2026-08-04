@@ -21,13 +21,19 @@
 
 <!-- ★ 공지 카드 (대시보드 상시) -->
 <div id="ann-card" style="display:none;background:#fff;border:1px solid #e5e7eb;border-radius:.85rem;
-     padding:1rem 1.25rem;margin-bottom:1.25rem;border-left:4px solid #18b9c7;">
-  <div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.5rem;">
-    <span style="font-size:1rem;">📢</span>
-    <b style="font-size:.88rem;color:#1e293b;">공지사항</b>
+     margin-bottom:1.25rem;border-left:4px solid #18b9c7;overflow:hidden;">
+  <!-- 헤더: 항상 표시, 클릭으로 접기/펼치기 -->
+  <div style="display:flex;align-items:center;gap:.6rem;padding:.75rem 1.25rem;
+              cursor:pointer;user-select:none;" onclick="annCardToggle()">
+    <span style="font-size:.95rem;">📢</span>
+    <b style="font-size:.85rem;color:#1e293b;">공지사항</b>
+    <div id="ann-card-badge" style="margin-left:.1rem;"></div>
     <div id="ann-card-nav" style="margin-left:auto;display:flex;align-items:center;gap:.35rem;font-size:.75rem;color:#9ca3af;"></div>
+    <span id="ann-card-chevron" style="font-size:.72rem;color:#9ca3af;margin-left:.4rem;
+          transition:transform .2s;display:inline-block;">▼</span>
   </div>
-  <div id="ann-card-body"></div>
+  <!-- 본문: 접기/펼치기 -->
+  <div id="ann-card-body" style="padding:0 1.25rem .85rem;"></div>
 </div>
 
 <div class="portal-heading">
@@ -274,28 +280,46 @@
     return '<span style="display:inline-block;padding:.1rem .45rem;border-radius:.25rem;font-size:.7rem;font-weight:700;'+style+'">'+badge+'</span>';
   }
 
+  var ANN_COLLAPSE_KEY = 'ann_card_collapsed';
+
+  function annCardSetCollapsed(collapsed) {
+    var body     = document.getElementById('ann-card-body');
+    var chevron  = document.getElementById('ann-card-chevron');
+    var nav      = document.getElementById('ann-card-nav');
+    if (body)    body.style.display    = collapsed ? 'none' : 'block';
+    if (chevron) chevron.style.transform = collapsed ? 'rotate(-90deg)' : 'rotate(0deg)';
+    if (nav)     nav.style.display     = collapsed ? 'none' : 'flex';
+    localStorage.setItem(ANN_COLLAPSE_KEY, collapsed ? '1' : '0');
+  }
+
+  window.annCardToggle = function() {
+    var collapsed = document.getElementById('ann-card-body').style.display === 'none';
+    annCardSetCollapsed(!collapsed);
+  };
+
   function renderCard(){
     if(!_anns.length) return;
     var a = _anns[_cardIdx];
-    var cardBody = document.getElementById('ann-card-body');
-    var cardNav  = document.getElementById('ann-card-nav');
+    var cardBody  = document.getElementById('ann-card-body');
+    var cardNav   = document.getElementById('ann-card-nav');
+    var cardBadge = document.getElementById('ann-card-badge');
     if(!cardBody) return;
+    if(cardBadge) cardBadge.innerHTML = badgeHtml(a.badge) + (a.pinned ? ' <span style="font-size:.7rem;color:#d97706;font-weight:700;">📌</span>' : '');
     cardBody.innerHTML =
-      '<div style="display:flex;align-items:baseline;gap:.5rem;flex-wrap:wrap;">'
-      + badgeHtml(a.badge)
-      + '<b style="font-size:.875rem;color:#111;">'+a.title+'</b>'
-      + '<span style="font-size:.72rem;color:#9ca3af;">'+a.created_at+'</span>'
-      + '</div>'
-      + (a.content ? '<p style="margin:.4rem 0 0;font-size:.82rem;color:#374151;white-space:pre-wrap;">'+a.content+'</p>' : '');
+      '<b style="font-size:.875rem;color:#111;">' + a.title + '</b>'
+      + (a.content ? '<p style="margin:.35rem 0 0;font-size:.82rem;color:#374151;white-space:pre-wrap;line-height:1.6;">' + a.content + '</p>' : '')
+      + '<div style="margin-top:.4rem;font-size:.72rem;color:#9ca3af;">' + a.created_at + '</div>';
     if(_anns.length > 1){
       cardNav.innerHTML =
-        '<button onclick="annCardPrev()" style="background:none;border:1px solid #e5e7eb;border-radius:.25rem;padding:.1rem .45rem;cursor:pointer;font-size:.72rem;">‹</button>'
+        '<button onclick="event.stopPropagation();annCardPrev()" style="background:none;border:1px solid #e5e7eb;border-radius:.25rem;padding:.1rem .45rem;cursor:pointer;font-size:.72rem;">‹</button>'
         + '<span>' + (_cardIdx+1) + ' / ' + _anns.length + '</span>'
-        + '<button onclick="annCardNext()" style="background:none;border:1px solid #e5e7eb;border-radius:.25rem;padding:.1rem .45rem;cursor:pointer;font-size:.72rem;">›</button>';
+        + '<button onclick="event.stopPropagation();annCardNext()" style="background:none;border:1px solid #e5e7eb;border-radius:.25rem;padding:.1rem .45rem;cursor:pointer;font-size:.72rem;">›</button>';
     } else {
       cardNav.innerHTML = '';
     }
     document.getElementById('ann-card').style.display = 'block';
+    // 이전 접기 상태 복원
+    annCardSetCollapsed(localStorage.getItem(ANN_COLLAPSE_KEY) === '1');
   }
 
   window.annCardPrev = function(){ _cardIdx = (_cardIdx - 1 + _anns.length) % _anns.length; renderCard(); };
