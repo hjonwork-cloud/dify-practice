@@ -2592,8 +2592,26 @@ async def voc_detail(request: Request, post_id: int):
     if not post:
         return RedirectResponse("/portal/voc", status_code=303)
     comments = portal_db.list_voc_comments(post_id)
+    emp_code = user.get("emp_code", "")
+    post_likes = portal_db.get_voc_likes("post", [post_id], emp_code)
+    comment_likes = portal_db.get_voc_likes("comment", [c["id"] for c in comments], emp_code)
     return _render(request, "portal_voc_detail.html",
-                   post=post, comments=comments, user=user)
+                   post=post, comments=comments, user=user,
+                   post_likes=post_likes, comment_likes=comment_likes)
+
+
+@router.post("/voc/{post_id}/like")
+async def voc_post_like(request: Request, post_id: int):
+    user = _require_user(request)
+    liked, count = portal_db.toggle_voc_like("post", post_id, user["emp_code"])
+    return JSONResponse({"liked": liked, "count": count})
+
+
+@router.post("/voc/comment/{comment_id}/like")
+async def voc_comment_like(request: Request, comment_id: int):
+    user = _require_user(request)
+    liked, count = portal_db.toggle_voc_like("comment", comment_id, user["emp_code"])
+    return JSONResponse({"liked": liked, "count": count})
 
 
 @router.post("/voc/{post_id}/comment")
@@ -2607,6 +2625,20 @@ async def voc_comment_create(request: Request, post_id: int):
             emp_name=user["name"], team=user["team"], content=content,
         )
     return RedirectResponse(f"/portal/voc/{post_id}", status_code=303)
+
+
+@router.post("/voc/{post_id}/like")
+async def voc_post_like(request: Request, post_id: int):
+    user = _require_user(request)
+    liked, count = portal_db.toggle_voc_like("post", post_id, user["emp_code"])
+    return JSONResponse({"liked": liked, "count": count})
+
+
+@router.post("/voc/comment/{comment_id}/like")
+async def voc_comment_like(request: Request, comment_id: int):
+    user = _require_user(request)
+    liked, count = portal_db.toggle_voc_like("comment", comment_id, user["emp_code"])
+    return JSONResponse({"liked": liked, "count": count})
 
 
 @router.post("/voc/{post_id}/delete")

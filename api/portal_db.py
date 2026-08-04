@@ -148,6 +148,15 @@ def init_db() -> None:
                 created_at TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_voc_comments_post ON voc_comments(post_id, created_at);
+            CREATE TABLE IF NOT EXISTS voc_likes (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                target_type TEXT NOT NULL,
+                target_id   INTEGER NOT NULL,
+                emp_code    TEXT NOT NULL,
+                created_at  TEXT NOT NULL,
+                UNIQUE(target_type, target_id, emp_code)
+            );
+            CREATE INDEX IF NOT EXISTS idx_voc_likes ON voc_likes(target_type, target_id);
         """)
         # 공지 테이블 마이그레이션
         conn.executescript("""
@@ -726,6 +735,55 @@ def list_voc_comments(post_id: int) -> list[dict]:
             (post_id,),
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+def toggle_voc_like(target_type: str, target_id: int, emp_code: str) -> tuple[bool, int]:
+    """좋아요 토글. (is_liked_now, total_count) 반환."""
+    init_db()
+    with _connect() as conn:
+        existing = conn.execute(
+            "SELECT id FROM voc_likes WHERE target_type=? AND target_id=? AND emp_code=?",
+            (target_type, target_id, emp_code),
+        ).fetchone()
+        if existing:
+            conn.execute(
+                "DELETE FROM voc_likes WHERE target_type=? AND target_id=? AND emp_code=?",
+                (target_type, target_id, emp_code),
+            )
+            liked = False
+        else:
+            conn.execute(
+                "INSERT INTO voc_likes(target_type,target_id,emp_code,created_at) VALUES(?,?,?,?)",
+                (target_type, target_id, emp_code, _now()),
+            )
+            liked = True
+        count = conn.execute(
+            "SELECT COUNT(*) FROM voc_likes WHERE target_type=? AND target_id=?",
+            (target_type, target_id),
+        ).fetchone()[0]
+    return liked, count
+
+
+def get_voc_likes(target_type: str, target_ids: list[int], emp_code: str) -> dict:
+    """다수 target의 (count, my_like) 정보 반환. {id: {count, liked}} 형태."""
+    if not target_ids:
+        return {}
+    init_db()
+    placeholders = ",".join(["?"] * len(target_ids))
+    with _connect() as conn:
+        rows = conn.execute(
+            f"SELECT target_id, COUNT(*) as cnt FROM voc_likes"
+            f" WHERE target_type=? AND target_id IN ({placeholders}) GROUP BY target_id",
+            [target_type] + target_ids,
+        ).fetchall()
+        my_rows = conn.execute(
+            f"SELECT target_id FROM voc_likes"
+            f" WHERE target_type=? AND target_id IN ({placeholders}) AND emp_code=?",
+            [target_type] + target_ids + [emp_code],
+        ).fetchall() if emp_code else []
+    counts = {r["target_id"]: r["cnt"] for r in rows}
+    my_liked = {r["target_id"] for r in my_rows}
+    return {tid: {"count": counts.get(tid, 0), "liked": tid in my_liked} for tid in target_ids}
 
 
 def create_voc_comment(*, post_id: int, emp_code: str, emp_name: str,

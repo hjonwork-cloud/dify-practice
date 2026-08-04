@@ -21,6 +21,19 @@
                background: #fff; color: #dc2626; border-radius: .35rem; cursor: pointer; }
 .voc-btn-del:hover { background: #fef2f2; }
 
+/* 좋아요 버튼 */
+.like-btn {
+  display: inline-flex; align-items: center; gap: .3rem;
+  padding: .28rem .75rem; border-radius: 999px;
+  border: 1px solid #e5e7eb; background: #fff;
+  font-size: .78rem; font-weight: 600; color: #6b7280;
+  cursor: pointer; transition: all .15s;
+  user-select: none;
+}
+.like-btn:hover { border-color: #f87171; color: #ef4444; background: #fff5f5; }
+.like-btn.liked { border-color: #fca5a5; background: #fff1f2; color: #ef4444; }
+.like-btn .like-count { font-size: .78rem; }
+
 /* 댓글 */
 .voc-comments-section { margin-bottom: 1.25rem; }
 .voc-comments-section h2 { font-size: .9rem; font-weight: 700; color: #1e293b;
@@ -78,14 +91,22 @@
       <span>💬 댓글 {{ comments | length }}개</span>
     </div>
     <div class="voc-post-content">{{ post.content }}</div>
-    {% if user and (user.emp_code == post.emp_code or user.is_admin) %}
-    <div class="voc-post-actions">
-      <form method="post" action="/portal/voc/{{ post.id }}/delete"
-            onsubmit="return confirm('이 게시글을 삭제하시겠습니까?')">
-        <button type="submit" class="voc-btn-del">🗑 삭제</button>
-      </form>
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-top:.85rem; flex-wrap:wrap; gap:.5rem;">
+      <button class="like-btn {% if post_likes.get(post.id, {}).get('liked') %}liked{% endif %}"
+              id="like-post-{{ post.id }}"
+              onclick="toggleLike('post', {{ post.id }}, this)">
+        ❤️ 좋아요
+        <span class="like-count">{{ post_likes.get(post.id, {}).get('count', 0) }}</span>
+      </button>
+      {% if user and (user.emp_code == post.emp_code or user.is_admin) %}
+      <div class="voc-post-actions" style="margin-top:0;">
+        <form method="post" action="/portal/voc/{{ post.id }}/delete"
+              onsubmit="return confirm('이 게시글을 삭제하시겠습니까?')">
+          <button type="submit" class="voc-btn-del">🗑 삭제</button>
+        </form>
+      </div>
+      {% endif %}
     </div>
-    {% endif %}
   </div>
 
   <!-- 댓글 목록 -->
@@ -106,6 +127,13 @@
           {% endif %}
         </div>
         <div class="voc-comment-body">{{ c.content }}</div>
+        <div style="margin-top:.45rem;">
+          <button class="like-btn {% if comment_likes.get(c.id, {}).get('liked') %}liked{% endif %}"
+                  onclick="toggleLike('comment', {{ c.id }}, this)">
+            ❤️ 좋아요
+            <span class="like-count">{{ comment_likes.get(c.id, {}).get('count', 0) }}</span>
+          </button>
+        </div>
       </div>
       {% endfor %}
     {% else %}
@@ -123,4 +151,21 @@
     </form>
   </div>
 </div>
+
+<script>
+function toggleLike(type, id, btn) {
+  var url = type === 'post'
+    ? '/portal/voc/' + id + '/like'
+    : '/portal/voc/comment/' + id + '/like';
+  fetch(url, {method: 'POST', credentials: 'same-origin'})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      var cnt = btn.querySelector('.like-count');
+      if (cnt) cnt.textContent = d.count;
+      if (d.liked) btn.classList.add('liked');
+      else btn.classList.remove('liked');
+    })
+    .catch(function(e){ console.error(e); });
+}
+</script>
 {% endblock %}
