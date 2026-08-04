@@ -1085,10 +1085,10 @@ def run_action_results_refresh() -> dict:
     sql = f"""
     CREATE OR REPLACE TABLE {T_ACTION_RESULTS} AS
     WITH actions AS (
-      SELECT column1 AS emp_code, column2 AS customer_code, column3 AS customer_name,
-             column4 AS brand_code, column5 AS brand_name,
-             column6 AS action_ym,  column7 AS action_item_count,
-             column8 AS dm_matnr_csv
+      SELECT col1 AS emp_code, col2 AS customer_code, col3 AS customer_name,
+             col4 AS brand_code, col5 AS brand_name,
+             col6 AS action_ym,  col7 AS action_item_count,
+             col8 AS dm_matnr_csv
       FROM VALUES {values_parts}
     )
     SELECT
