@@ -242,19 +242,22 @@
       th.classList.remove('sorted-asc', 'sorted-desc');
       if (i === colIdx) th.classList.add('sorted-' + dir);
     });
-    dataRows.sort(function(a, b) {
-      var av = a.cells[colIdx]?.textContent?.trim() || '';
-      var bv = b.cells[colIdx]?.textContent?.trim() || '';
+    // 정렬 전에 (data행, detail행) 쌍을 미리 캡처 — appendChild 후 nextSibling이 바뀌는 문제 방지
+    var pairs = dataRows.map(function(dr) {
+      var next = dr.nextElementSibling;
+      return [dr, (next && next.classList.contains('detail-row')) ? next : null];
+    });
+    pairs.sort(function(pa, pb) {
+      var av = pa[0].cells[colIdx]?.textContent?.trim() || '';
+      var bv = pb[0].cells[colIdx]?.textContent?.trim() || '';
       var an = parseFloat(av.replace(/,/g, ''));
       var bn = parseFloat(bv.replace(/,/g, ''));
       var cmp = (!isNaN(an) && !isNaN(bn)) ? an - bn : av.localeCompare(bv, 'ko');
       return dir === 'desc' ? -cmp : cmp;
     });
-    // data 행 + 바로 뒤 detail 행을 쌍으로 재삽입
-    dataRows.forEach(function(dr) {
-      tbody.appendChild(dr);
-      var detail = dr.nextElementSibling;
-      if (detail && detail.classList.contains('detail-row')) tbody.appendChild(detail);
+    pairs.forEach(function(p) {
+      tbody.appendChild(p[0]);
+      if (p[1]) tbody.appendChild(p[1]);
     });
   };
   // 기본 정렬: 이후누적매출 내림차순 (col index 8로 변경)

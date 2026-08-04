@@ -952,10 +952,6 @@ def read_brand_report_from_table(
         customer_page_items, customer_pagination = _page(customers, customer_page)
         target_page_items, target_pagination = _page(targets, target_page)
 
-        # 내 담당 매출 = T_BRANDS 의 my_sales_m (emp 스코프)
-        picked_my_sales_m = int(next(
-            (b.get("my_sales_m") for b in brands_list if b.get("brand_code") == brand_code), 0
-        ) or 0)
         return {
             "brand": {"brand_code": brand_code, "brand_name": brand_name},
             "brands": brands_list,
@@ -966,7 +962,7 @@ def read_brand_report_from_table(
             "period_months": months_3,
             "monthly_sales": monthly_sales,
             "brand_avg": brand_avg,
-            "brand_total_sales_m": picked_my_sales_m,
+            "brand_total_sales_m": brand_total_sales_m,  # selected_ym 기준 T_BRAND_SUMMARY 값
             "customers": customers,
             "customer_page": customer_page_items,
             "customer_pagination": customer_pagination,

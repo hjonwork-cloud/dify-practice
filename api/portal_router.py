@@ -1006,7 +1006,7 @@ def brand_report(
         "period_months": months,
         "monthly_sales": monthly_sales,
         "brand_avg": avg,
-        "brand_total_sales_m": int(picked.get("my_sales_m") or 0),
+        "brand_total_sales_m": _money_m(sum(float(r.get("sales") or 0) for r in rows)),  # selected_ym 기준 내 담당 합산
         "customers": customers,
         "customer_page": customer_page_items,
         "customer_pagination": customer_pagination,
