@@ -1894,6 +1894,89 @@ async def action_results(
     }))
 
 
+@router.get("/action-matnr-sales")
+async def action_matnr_sales(
+    request: Request,
+    customer_code: str = "",
+    brand_code: str = "",
+    action_date: str = "",
+):
+    """자재별 상세 실적 조회: dm_send_logs 판가 + T_MAIN 집계."""
+    user = _require_user(request)
+    if not customer_code or not brand_code or not action_date:
+        return JSONResponse({"rows": [], "error": "customer_code/brand_code/action_date 필수"})
+    # 1) dm_send_logs 에서 price_items 좌회 → 자재별 설정판가 맵
+    logs = portal_db.list_dm_logs(emp_code=user["emp_code"], brand_code=brand_code or None)
+    price_map: dict[str, int | None] = {}  # matnr → 판가(없으면 None)
+    for log in logs:
+        if str(log.get("customer_code") or "") != customer_code:
+            continue
+        pj = log.get("price_items_json") or ""
+        if pj and pj not in ("[]", "null"):
+            try:
+                items = json.loads(pj)
+                for it in items:
+                    m = str(it.get("matnr") or "").strip()
+                    p = it.get("price")
+                    if m and m not in price_map:
+                        price_map[m] = int(p) if p is not None else None
+            except Exception:
+                pass
+        # product_names fallback
+        if not price_map:
+            for m in (log.get("product_names") or "").split(","):
+                m = m.strip()
+                if m:
+                    price_map.setdefault(m, None)
+    if not price_map:
+        return JSONResponse({"rows": []})
+    # 2) T_MAIN 에서 자재별 집계
+    import main
+    matnrs = list(price_map.keys())
+    matnr_in = ", ".join(f"'{m}'" for m in matnrs)
+    try:
+        db_rows = main._safe_query(f"""
+            SELECT TRIM(`자재`) AS matnr,
+                   MAX(`자재명`) AS matnr_name,
+                   ROUND(SUM(CASE WHEN `매출액` > 0 THEN `매출액` ELSE 0 END) / 10000.0, 2) AS sales_m,
+                   ROUND((SUM(CASE WHEN `매출액` > 0 THEN `매출액` ELSE 0 END)
+                         - SUM(CASE WHEN `매출액` > 0 THEN COALESCE(`매출원가`,0) ELSE 0 END)) / 10000.0, 2) AS gp_m,
+                   COALESCE(SUM(CASE WHEN `매출액` > 0 THEN CAST(`매출수량` AS BIGINT) ELSE 0 END), 0) AS sales_qty,
+                   COALESCE(SUM(CASE WHEN `매출액` = 0 AND `매출수량` > 0 THEN CAST(`매출수량` AS BIGINT) ELSE 0 END), 0) AS sample_qty
+            FROM {main.T_MAIN}
+            WHERE `거래처` = '{customer_code}'
+              AND `ZC본부` = '{brand_code}'
+              AND `대금청구일` >= '{action_date}'
+              AND TRIM(`자재`) IN ({matnr_in})
+            GROUP BY TRIM(`자재`)
+        """, raw=True) or []
+    except Exception as e:
+        return JSONResponse({"rows": [], "error": str(e)})
+    result_map = {str(r.get("matnr") or ""): r for r in db_rows}
+    out = []
+    for matnr in matnrs:
+        r = result_map.get(matnr, {})
+        sales_m   = float(r.get("sales_m") or 0)
+        gp_m      = float(r.get("gp_m") or 0)
+        sales_qty = int(r.get("sales_qty") or 0)
+        sample_qty= int(r.get("sample_qty") or 0)
+        net_qty   = sales_qty  # 매출액>0인 행만 이미 필터됨
+        gp_rate   = round(gp_m / sales_m * 100, 1) if sales_m > 0 else 0.0
+        out.append({
+            "matnr":        matnr,
+            "matnr_name":   str(r.get("matnr_name") or "-"),
+            "set_price":    price_map.get(matnr),
+            "sales_after_m": sales_m,
+            "gp_after_m":   gp_m,
+            "gp_rate":      gp_rate,
+            "sales_qty":    sales_qty,
+            "sample_qty":   sample_qty,
+            "net_qty":      net_qty,
+            "converted":    net_qty > 0,
+        })
+    return JSONResponse({"rows": out})
+
+
 @router.post("/refresh-action-results")
 async def portal_refresh_action_results(request: Request):
     """포털 사용자용 T_ACTION_RESULTS 수동 리프레시 (로그인 필요)."""

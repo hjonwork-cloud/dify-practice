@@ -1242,6 +1242,7 @@ def read_action_results(emp_code: str, brand_code: str = "", action_ym: str = ""
                 "brand_code":            str(r.get("brand_code") or ""),
                 "brand_name":            str(r.get("brand_name") or ""),
                 "action_ym":             str(r.get("action_ym") or ""),
+                "action_date":           str(r.get("action_date") or ""),
                 "action_item_count":     int(r.get("action_item_count") or 0),
                 "dm_count":              int(r.get("dm_count") or 0),
                 "price_count":           int(r.get("price_count") or 0),
@@ -1253,7 +1254,6 @@ def read_action_results(emp_code: str, brand_code: str = "", action_ym: str = ""
                 "sample_qty":            int(r.get("sample_qty") or 0),
                 "sample_count":          int(r.get("sample_count") or 0),
                 "dm_product_qty":        int(r.get("dm_product_qty") or 0),
-                "dm_matnr_csv":          str(r.get("dm_matnr_csv") or ""),
             }
             for r in rows
         ]

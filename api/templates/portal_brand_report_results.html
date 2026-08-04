@@ -55,6 +55,13 @@
 .expand-btn{background:none;border:1px solid #d1d5db;border-radius:.3rem;cursor:pointer;
   font-size:.72rem;padding:.15rem .45rem;color:#6b7280;line-height:1;}
 .expand-btn:hover{background:#f3f4f6;}
+/* 자재별 상세 테이블 */
+.matnr-detail-table{width:100%;border-collapse:collapse;font-size:.75rem;margin-top:.5rem;}
+.matnr-detail-table th{background:#1e293b;color:#fff;padding:.3rem .5rem;text-align:left;white-space:nowrap;font-weight:600;}
+.matnr-detail-table td{padding:.3rem .5rem;border-bottom:1px solid #e5e7eb;vertical-align:middle;}
+.matnr-detail-table tr:last-child td{border-bottom:none;}
+.matnr-detail-table tr:hover td{background:#f1f5f9;}
+.matnr-detail-table .matnr-code{font-family:monospace;color:#1d4ed8;font-weight:600;}
 </style>
 
 <div class="portal-heading">
@@ -119,7 +126,12 @@
       <tbody id="resultsTbody">
         {% for r in rows %}
         {% set rid = loop.index %}
-        <tr class="result-row" onclick="toggleDetail({{ rid }})" style="cursor:pointer;">
+        <tr class="result-row" onclick="toggleDetail({{ rid }})" style="cursor:pointer;"
+            data-rid="{{ rid }}"
+            data-customer="{{ r.customer_code }}"
+            data-brand="{{ r.brand_code }}"
+            data-action-date="{{ r.action_date | default('') }}"
+            data-matnr-csv="{{ r.dm_matnr_csv | default('') | e }}">
           <td><b>{{ r.customer_name }}</b></td>
           <td style="color:#9ca3af;font-size:.75rem;">{{ r.customer_code }}</td>
           <td style="font-size:.78rem;">{{ r.brand_name }}</td>
@@ -162,21 +174,13 @@
         <tr class="detail-row" id="detail-{{ rid }}">
           <td colspan="14">
             <div style="font-size:.78rem;color:#374151;">
-              <b style="color:#1e293b;">📦 DM 발송 품목</b>
-              {% if r.dm_matnr_csv is defined and r.dm_matnr_csv %}
-              <div class="matnr-pills" style="margin-top:.4rem;">
-                {% for matnr in r.dm_matnr_csv.split(',') %}
-                  {% if matnr.strip() %}
-                  <span class="matnr-pill">{{ matnr.strip() }}</span>
-                  {% endif %}
-                {% endfor %}
+              <b style="color:#1e293b;">📦 DM 발송 품목 상세</b>
+              <div id="detail-table-{{ rid }}" style="margin-top:.4rem;">
+                <span style="color:#9ca3af;font-size:.75rem;">▸ 상세 버튼을 눌러 조회</span>
               </div>
-              {% else %}
-              <span style="color:#9ca3af;">상품코드 정보 없음</span>
-              {% endif %}
               <div style="margin-top:.5rem;color:#6b7280;font-size:.72rem;">
-                DM발송 {{ r.dm_count | default(0) }}회 ·
-                판가설정 {{ r.price_count | default(0) }}회 ·
+                DM발송 {{ r.dm_count | default(0) }}회 &middot;
+                판가설정 {{ r.price_count | default(0) }}회 &middot;
                 액션시작월 {{ r.action_ym }}
               </div>
             </div>
@@ -263,11 +267,73 @@
   // 기본 정렬: 이후누적매출 내림차순 (col index 8로 변경)
   window.sortTable(8);
 
-  // 펼침/접기 토글
+  // 펼침/접기 토글 + AJAX 자재별 상세 로드
   window.toggleDetail = function(rid) {
     const el = document.getElementById('detail-' + rid);
-    if (el) el.classList.toggle('open');
+    if (!el) return;
+    el.classList.toggle('open');
+    if (el.classList.contains('open')) {
+      // data는 result-row에 있음
+      const dataRow = document.querySelector('[data-rid="' + rid + '"]');
+      if (dataRow) loadMatnrDetail(rid, dataRow);
+    }
   };
+
+  function loadMatnrDetail(rid, dataRow) {
+    const tableEl = document.getElementById('detail-table-' + rid);
+    if (!tableEl || tableEl.dataset.loaded === '1') return;
+    const matnrCsv = dataRow.dataset.matnrCsv || '';
+    if (!matnrCsv) {
+      tableEl.innerHTML = '<span style="color:#9ca3af;">자재코드 없음</span>';
+      return;
+    }
+    const customerCode = dataRow.dataset.customer || '';
+    const brandCode    = dataRow.dataset.brand || '';
+    const actionDate   = dataRow.dataset.actionDate || '';
+    tableEl.innerHTML = '<span style="color:#9ca3af;">⏳ 조회 중...</span>';
+    fetch('/portal/action-matnr-sales?customer_code=' + encodeURIComponent(customerCode) +
+          '&brand_code='    + encodeURIComponent(brandCode) +
+          '&action_date='   + encodeURIComponent(actionDate),
+          {credentials: 'same-origin'})
+      .then(r => r.json())
+      .then(data => {
+        tableEl.dataset.loaded = '1';
+        renderMatnrTable(tableEl, data.rows || []);
+      })
+      .catch(e => { tableEl.innerHTML = '<span style="color:#ef4444;">조회 실패: ' + e.message + '</span>'; });
+  }
+
+  function renderMatnrTable(el, rows) {
+    if (!rows.length) {
+      el.innerHTML = '<span style="color:#9ca3af;">발송일 이후 실적 없음</span>';
+      return;
+    }
+    var html = '<table class="matnr-detail-table"><thead><tr>' +
+      '<th>자재코드</th><th>자재명</th><th style="text-align:right;">설정판가</th>' +
+      '<th style="text-align:right;">발송후 매출</th><th style="text-align:right;">발송후 GP</th>' +
+      '<th style="text-align:center;">GP율</th>' +
+      '<th style="text-align:center;">매출수량</th><th style="text-align:center;">샘플</th>' +
+      '<th style="text-align:center;">전환</th></tr></thead><tbody>';
+    rows.forEach(function(r) {
+      var gpCls = r.gp_rate >= 20 ? 'up' : r.gp_rate >= 10 ? 'mid' : 'down';
+      var setPriceStr = r.set_price != null ? '₩' + r.set_price.toLocaleString() : '-';
+      var converted = r.net_qty > 0 ? '✅' : '<span style="color:#e5e7eb;">-</span>';
+      var sampleStr = r.sample_qty > 0 ? r.sample_qty + '개' : '<span style="color:#e5e7eb;">-</span>';
+      html += '<tr>' +
+        '<td class="matnr-code">' + r.matnr + '</td>' +
+        '<td>' + (r.matnr_name || '-') + '</td>' +
+        '<td style="text-align:right;">' + setPriceStr + '</td>' +
+        '<td style="text-align:right;">' + r.sales_after_m.toFixed(2) + '백만</td>' +
+        '<td style="text-align:right;">' + r.gp_after_m.toFixed(2) + '백만</td>' +
+        '<td style="text-align:center;"><span class="gp-chip ' + gpCls + '">' + r.gp_rate + '%</span></td>' +
+        '<td style="text-align:center;">' + r.sales_qty + '개</td>' +
+        '<td style="text-align:center;">' + sampleStr + '</td>' +
+        '<td style="text-align:center;">' + converted + '</td>' +
+        '</tr>';
+    });
+    html += '</tbody></table>';
+    el.innerHTML = html;
+  }
 
   // 실적 리프레시
   window.doRefresh = async function(btn) {
