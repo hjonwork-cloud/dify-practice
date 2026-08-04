@@ -51,13 +51,29 @@ def _is_team_leader(emp_code: str) -> bool:
 def _leader_team(emp_code: str) -> str:
     return _TEAM_LEADERS.get(emp_code, "")
 
+def _is_readonly_all(emp_code: str) -> bool:
+    """FULL_SCOPE_TEAMS 소속 여부 확인 (베타테스터 + 화이트리스트 모두 체크)."""
+    code = str(emp_code or "").strip()
+    # 베타테스터에서 team 확인
+    beta = access_control.load_beta_testers()
+    if code in beta:
+        return beta[code].get("team", "") in access_control.FULL_SCOPE_TEAMS
+    # 화이트리스트에서 확인
+    wl = _employee_whitelist()
+    if code in wl:
+        return (wl[code].get("team") or "") in access_control.FULL_SCOPE_TEAMS
+    return False
+
+
 def _scope_cond(emp_code: str) -> str:
-    """팀 리더: 지점명 기준 팀 전체, 관리자: 전체 사업부, 일반: 영업사원 개인"""
+    """팀 리더: 지점명 기준 팀 전체, 관리자/readonly_all: 전체 사업부, 일반: 영업사원 개인"""
     if access_control.is_admin_emp(emp_code):
+        return f"`사업부명` = {_sql(access_control.AUTH_DEPT)}"
+    # readonly_all: 전체 사업부 조회 가능 (신규개발파트 등)
+    if _is_readonly_all(emp_code):
         return f"`사업부명` = {_sql(access_control.AUTH_DEPT)}"
     if emp_code in _TEAM_LEADERS:
         team = _TEAM_LEADERS[emp_code]
-        # LIKE 매칭으로 '(FC)영남지점' 등 prefix 변형도 포함
         return f"`지점명` LIKE {_sql('%' + team + '%')}"
     return f"`영업사원` = {_sql(emp_code)}"
 
@@ -226,7 +242,7 @@ def _portal_user(emp_code: str) -> dict | None:
             "emp_code": code,
             "name": name,
             "team": team,
-            "role": "admin" if is_admin else "user",
+            "role": "admin" if is_admin else ("readonly_all" if team in access_control.FULL_SCOPE_TEAMS else "user"),
             "is_admin": is_admin,
         }
     # 일반 영업사원: Databricks 화이트리스트 확인 (캐시 6시간)
@@ -234,11 +250,14 @@ def _portal_user(emp_code: str) -> dict | None:
     if code not in allowed:
         return None
     info = allowed.get(code) or {}
+    team = info.get("team") or ""
+    # 신규개발파트 등 FULL_SCOPE_TEAMS → readonly_all role
+    role = "readonly_all" if team in access_control.FULL_SCOPE_TEAMS else "user"
     return {
         "emp_code": code,
         "name": info.get("name") or code,
-        "team": info.get("team") or "",
-        "role": "user",
+        "team": team,
+        "role": role,
         "is_admin": False,
     }
 
@@ -2373,7 +2392,75 @@ def _auto_refresh_scheduler():
         time.sleep(6 * 3600)  # 6시간 대기
 
 
-# ── 백그라운드 스레드 기동 (싱글턴 락으로 보호) ────────────────
+# ── VOC 게시판 ──────────────────────────────────────────────────────────────
+
+@router.get("/voc")
+async def voc_list(request: Request, category: str = "", page: int = 1):
+    user = _require_user(request)
+    rows, total = portal_db.list_voc_posts(category=category, page=page, per_page=20)
+    total_pages = max(1, (total + 19) // 20)
+    return _render(request, "portal_voc.html",
+                   posts=rows, total=total, total_pages=total_pages,
+                   page=page, category=category, user=user)
+
+
+@router.post("/voc/post")
+async def voc_post_create(request: Request):
+    user = _require_user(request)
+    form = await _read_form(request)
+    category = (form.get("category") or "플랫폼").strip()
+    title    = (form.get("title") or "").strip()
+    content  = (form.get("content") or "").strip()
+    if not title or not content:
+        return RedirectResponse("/portal/voc?error=empty", status_code=303)
+    portal_db.create_voc_post(
+        emp_code=user["emp_code"], emp_name=user["name"], team=user["team"],
+        category=category, title=title, content=content,
+    )
+    return RedirectResponse("/portal/voc", status_code=303)
+
+
+@router.get("/voc/{post_id}")
+async def voc_detail(request: Request, post_id: int):
+    user = _require_user(request)
+    post = portal_db.get_voc_post(post_id)
+    if not post:
+        return RedirectResponse("/portal/voc", status_code=303)
+    comments = portal_db.list_voc_comments(post_id)
+    return _render(request, "portal_voc_detail.html",
+                   post=post, comments=comments, user=user)
+
+
+@router.post("/voc/{post_id}/comment")
+async def voc_comment_create(request: Request, post_id: int):
+    user = _require_user(request)
+    form = await _read_form(request)
+    content = (form.get("content") or "").strip()
+    if content:
+        portal_db.create_voc_comment(
+            post_id=post_id, emp_code=user["emp_code"],
+            emp_name=user["name"], team=user["team"], content=content,
+        )
+    return RedirectResponse(f"/portal/voc/{post_id}", status_code=303)
+
+
+@router.post("/voc/{post_id}/delete")
+async def voc_post_delete(request: Request, post_id: int):
+    user = _require_user(request)
+    portal_db.delete_voc_post(post_id, user["emp_code"], is_admin=user.get("is_admin", False))
+    return RedirectResponse("/portal/voc", status_code=303)
+
+
+@router.post("/voc/comment/{comment_id}/delete")
+async def voc_comment_delete(request: Request, comment_id: int):
+    user = _require_user(request)
+    portal_db.delete_voc_comment(comment_id, user["emp_code"], is_admin=user.get("is_admin", False))
+    # referer로 돌아가기
+    referer = request.headers.get("referer", "/portal/voc")
+    return RedirectResponse(referer, status_code=303)
+
+
+# ── 백그라운드 스레드 기동 ────────────────
 # workers=1 이 기본이지만 만약 -w N 으로 뜨더라도 아래 락이 리더 워커 하나만
 # 아래 세 스레드를 돌리도록 보장한다. 리더가 아닌 워커는 요청 처리만 수행.
 #

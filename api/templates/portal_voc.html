@@ -1,0 +1,161 @@
+{% extends 'portal_base.html' %}{% block title %}VOC 게시판{% endblock %}{% block content %}
+<style>
+.voc-wrap { max-width: 860px; }
+.voc-heading { margin-bottom: 1.25rem; }
+.voc-heading h1 { font-size: 1.35rem; font-weight: 800; color: #111; margin: 0 0 .25rem; }
+.voc-heading p  { font-size: .85rem; color: #6b7280; margin: 0; }
+
+/* 필터 탭 */
+.voc-tabs { display: flex; gap: .5rem; margin-bottom: 1rem; flex-wrap: wrap; }
+.voc-tab  { padding: .3rem .85rem; border-radius: 999px; font-size: .8rem; font-weight: 600;
+            border: 1px solid #e5e7eb; background: #fff; color: #6b7280; cursor: pointer;
+            text-decoration: none; }
+.voc-tab.active { background: #1e293b; color: #fff; border-color: #1e293b; }
+.voc-tab:hover:not(.active) { background: #f3f4f6; }
+
+/* 글쓰기 폼 */
+.voc-form-panel { background: #fff; border: 1px solid #e5e7eb; border-radius: .75rem;
+                  padding: 1.25rem; margin-bottom: 1.25rem; }
+.voc-form-panel h2 { font-size: .95rem; font-weight: 700; color: #1e293b; margin: 0 0 .85rem; }
+.voc-form-row { display: flex; gap: .6rem; flex-wrap: wrap; margin-bottom: .6rem; align-items: center; }
+.voc-form-row label { font-size: .82rem; color: #374151; font-weight: 600; white-space: nowrap; }
+.voc-form-row select, .voc-form-row input[type=text] {
+  font-size: .82rem; padding: .35rem .6rem; border: 1px solid #d1d5db;
+  border-radius: .35rem; background: #fff; }
+.voc-form-row input[type=text] { flex: 1; min-width: 200px; }
+.voc-form-textarea { width: 100%; box-sizing: border-box; font-size: .83rem;
+  padding: .5rem .7rem; border: 1px solid #d1d5db; border-radius: .45rem;
+  resize: vertical; min-height: 90px; font-family: inherit; margin-bottom: .6rem; }
+.voc-form-submit { font-size: .85rem; padding: .4rem 1.1rem; background: #1e293b;
+  color: #fff; border: none; border-radius: .4rem; cursor: pointer; font-weight: 600; }
+.voc-form-submit:hover { background: #334155; }
+
+/* 목록 */
+.voc-table-wrap { background: #fff; border: 1px solid #e5e7eb; border-radius: .75rem; overflow: hidden; }
+.voc-table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+.voc-table th { background: #1e293b; color: #fff; padding: .5rem .75rem; text-align: left;
+  font-weight: 600; white-space: nowrap; }
+.voc-table td { padding: .5rem .75rem; border-bottom: 1px solid #f3f4f6; vertical-align: middle; }
+.voc-table tr:last-child td { border-bottom: none; }
+.voc-table tr:hover td { background: #f9fafb; }
+.voc-table a { color: #1e293b; text-decoration: none; font-weight: 600; }
+.voc-table a:hover { color: #2563eb; text-decoration: underline; }
+.cat-badge { display: inline-block; padding: .1rem .45rem; border-radius: .25rem;
+  font-size: .7rem; font-weight: 700; }
+.cat-badge.chatbot  { background: #fef3c7; color: #92400e; }
+.cat-badge.platform { background: #dbeafe; color: #1d4ed8; }
+.cat-badge.etc      { background: #f3f4f6; color: #374151; }
+.comment-cnt { color: #6b7280; font-size: .75rem; margin-left: .3rem; }
+.voc-empty { text-align: center; padding: 3rem; color: #9ca3af; font-size: .9rem; }
+
+/* 페이지네이션 */
+.voc-paging { display: flex; gap: .35rem; justify-content: center; margin-top: 1rem; flex-wrap: wrap; }
+.voc-paging a, .voc-paging span {
+  padding: .3rem .7rem; border: 1px solid #e5e7eb; border-radius: .35rem;
+  font-size: .8rem; text-decoration: none; color: #374151; }
+.voc-paging a:hover { background: #f3f4f6; }
+.voc-paging .cur { background: #1e293b; color: #fff; border-color: #1e293b; font-weight: 700; }
+</style>
+
+<div class="voc-wrap">
+  <div class="voc-heading">
+    <p class="eyebrow">VOC BOARD</p>
+    <h1>💬 VOC 게시판</h1>
+    <p>챗봇·플랫폼 이용 중 불편사항, 버그, 개선 제안을 자유롭게 남겨주세요. 모든 사용자가 열람 가능합니다.</p>
+  </div>
+
+  <!-- 카테고리 탭 -->
+  <div class="voc-tabs">
+    <a href="/portal/voc" class="voc-tab {% if not category %}active{% endif %}">전체</a>
+    <a href="/portal/voc?category=챗봇" class="voc-tab {% if category=='챗봇' %}active{% endif %}">챗봇</a>
+    <a href="/portal/voc?category=플랫폼" class="voc-tab {% if category=='플랫폼' %}active{% endif %}">플랫폼</a>
+    <a href="/portal/voc?category=기타" class="voc-tab {% if category=='기타' %}active{% endif %}">기타</a>
+  </div>
+
+  <!-- 글쓰기 폼 -->
+  <div class="voc-form-panel">
+    <h2>✏️ 의견 남기기</h2>
+    <form method="post" action="/portal/voc/post">
+      <div class="voc-form-row">
+        <label>구분</label>
+        <select name="category">
+          <option value="챗봇">챗봇</option>
+          <option value="플랫폼" selected>플랫폼</option>
+          <option value="기타">기타</option>
+        </select>
+        <label>제목</label>
+        <input type="text" name="title" placeholder="제목을 입력하세요" maxlength="100" required>
+      </div>
+      <textarea class="voc-form-textarea" name="content"
+                placeholder="버그, 불편사항, 개선 제안 등 자유롭게 입력해 주세요." required></textarea>
+      <button type="submit" class="voc-form-submit">등록</button>
+    </form>
+  </div>
+
+  <!-- 게시글 목록 -->
+  {% if posts %}
+  <div class="voc-table-wrap">
+    <table class="voc-table">
+      <thead>
+        <tr>
+          <th style="width:52px;">구분</th>
+          <th>제목</th>
+          <th style="width:80px;">작성자</th>
+          <th style="width:72px;">팀</th>
+          <th style="width:110px;">작성일</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in posts %}
+        <tr>
+          <td>
+            {% if p.category == '챗봇' %}
+              <span class="cat-badge chatbot">챗봇</span>
+            {% elif p.category == '플랫폼' %}
+              <span class="cat-badge platform">플랫폼</span>
+            {% else %}
+              <span class="cat-badge etc">{{ p.category }}</span>
+            {% endif %}
+          </td>
+          <td>
+            <a href="/portal/voc/{{ p.id }}">{{ p.title }}</a>
+            {% if (p.comment_count | default(0)) > 0 %}
+              <span class="comment-cnt">[{{ p.comment_count }}]</span>
+            {% endif %}
+          </td>
+          <td style="color:#374151;">{{ p.emp_name or p.emp_code }}</td>
+          <td style="color:#6b7280;font-size:.75rem;">{{ p.team or '-' }}</td>
+          <td style="color:#9ca3af;font-size:.75rem;">{{ p.created_at[:16] }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- 페이지네이션 -->
+  {% if total_pages > 1 %}
+  <div class="voc-paging">
+    {% if page > 1 %}
+      <a href="/portal/voc?category={{ category }}&page={{ page - 1 }}">‹ 이전</a>
+    {% endif %}
+    {% for p in range(1, total_pages + 1) %}
+      {% if p == page %}
+        <span class="cur">{{ p }}</span>
+      {% else %}
+        <a href="/portal/voc?category={{ category }}&page={{ p }}">{{ p }}</a>
+      {% endif %}
+    {% endfor %}
+    {% if page < total_pages %}
+      <a href="/portal/voc?category={{ category }}&page={{ page + 1 }}">다음 ›</a>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% else %}
+  <div class="voc-empty">
+    <b>등록된 VOC가 없습니다</b>
+    첫 번째로 의견을 남겨보세요.
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

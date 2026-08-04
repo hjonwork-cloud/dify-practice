@@ -125,6 +125,30 @@ def init_db() -> None:
                 updated_at    TEXT NOT NULL
             );
         """)
+        # VOC 게시판 마이그레이션
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS voc_posts (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                emp_code   TEXT NOT NULL,
+                emp_name   TEXT,
+                team       TEXT,
+                category   TEXT NOT NULL DEFAULT '플랫폼',
+                title      TEXT NOT NULL,
+                content    TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_voc_posts_created ON voc_posts(created_at DESC);
+            CREATE TABLE IF NOT EXISTS voc_comments (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                post_id    INTEGER NOT NULL,
+                emp_code   TEXT NOT NULL,
+                emp_name   TEXT,
+                team       TEXT,
+                content    TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_voc_comments_post ON voc_comments(post_id, created_at);
+        """)
 
 
 def record_login(emp_code: str, emp_name: str = "", team: str = "", ip: str = "", user_agent: str = "", success: bool = True, reason: str = "") -> None:
@@ -378,6 +402,109 @@ def list_login_logs(limit: int = 200) -> list[dict]:
             (limit,),
         ).fetchall()
         return [dict(r) for r in rows]
+
+
+# ── VOC 게시판 ──────────────────────────────────────────────────────────────
+
+def create_voc_post(*, emp_code: str, emp_name: str, team: str,
+                    category: str, title: str, content: str) -> int:
+    """VOC 글 작성. 생성된 id 반환."""
+    init_db()
+    with _connect() as conn:
+        cur = conn.execute(
+            """INSERT INTO voc_posts (emp_code, emp_name, team, category, title, content, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (emp_code, emp_name, team, category, title, content, _now()),
+        )
+        return cur.lastrowid
+
+
+def list_voc_posts(category: str = "", page: int = 1, per_page: int = 20) -> tuple[list[dict], int]:
+    """VOC 글 목록 + 댓글수. (rows, total) 반환."""
+    init_db()
+    conds, params = [], []
+    if category:
+        conds.append("p.category = ?"); params.append(category)
+    where = ("WHERE " + " AND ".join(conds)) if conds else ""
+    with _connect() as conn:
+        total = conn.execute(
+            f"SELECT COUNT(*) FROM voc_posts p {where}", params
+        ).fetchone()[0]
+        offset = (page - 1) * per_page
+        rows = conn.execute(
+            f"""SELECT p.*, COUNT(c.id) AS comment_count
+                FROM voc_posts p
+                LEFT JOIN voc_comments c ON c.post_id = p.id
+                {where}
+                GROUP BY p.id
+                ORDER BY p.created_at DESC
+                LIMIT ? OFFSET ?""",
+            params + [per_page, offset],
+        ).fetchall()
+    return [dict(r) for r in rows], total
+
+
+def get_voc_post(post_id: int) -> dict | None:
+    """단건 조회."""
+    init_db()
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM voc_posts WHERE id = ?", (post_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def delete_voc_post(post_id: int, emp_code: str, is_admin: bool = False) -> bool:
+    """본인 또는 관리자만 삭제. 성공 시 True."""
+    init_db()
+    with _connect() as conn:
+        if is_admin:
+            conn.execute("DELETE FROM voc_comments WHERE post_id = ?", (post_id,))
+            conn.execute("DELETE FROM voc_posts WHERE id = ?", (post_id,))
+        else:
+            row = conn.execute(
+                "SELECT emp_code FROM voc_posts WHERE id = ?", (post_id,)
+            ).fetchone()
+            if not row or row["emp_code"] != emp_code:
+                return False
+            conn.execute("DELETE FROM voc_comments WHERE post_id = ?", (post_id,))
+            conn.execute("DELETE FROM voc_posts WHERE id = ?", (post_id,))
+    return True
+
+
+def list_voc_comments(post_id: int) -> list[dict]:
+    init_db()
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM voc_comments WHERE post_id = ? ORDER BY created_at",
+            (post_id,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def create_voc_comment(*, post_id: int, emp_code: str, emp_name: str,
+                        team: str, content: str) -> int:
+    init_db()
+    with _connect() as conn:
+        cur = conn.execute(
+            """INSERT INTO voc_comments (post_id, emp_code, emp_name, team, content, created_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (post_id, emp_code, emp_name, team, content, _now()),
+        )
+        return cur.lastrowid
+
+
+def delete_voc_comment(comment_id: int, emp_code: str, is_admin: bool = False) -> bool:
+    init_db()
+    with _connect() as conn:
+        if is_admin:
+            conn.execute("DELETE FROM voc_comments WHERE id = ?", (comment_id,))
+        else:
+            row = conn.execute(
+                "SELECT emp_code FROM voc_comments WHERE id = ?", (comment_id,)
+            ).fetchone()
+            if not row or row["emp_code"] != emp_code:
+                return False
+            conn.execute("DELETE FROM voc_comments WHERE id = ?", (comment_id,))
+    return True
 
 
 # ── 모듈 로드 시 DB 초기화 ──────────────────────────────────────────────────

@@ -1,0 +1,126 @@
+{% extends 'portal_base.html' %}{% block title %}{{ post.title }} | VOC{% endblock %}{% block content %}
+<style>
+.voc-detail-wrap { max-width: 860px; }
+.voc-back { font-size: .82rem; color: #6b7280; text-decoration: none; display: inline-flex;
+            align-items: center; gap: .3rem; margin-bottom: 1rem; }
+.voc-back:hover { color: #2563eb; }
+
+/* 게시글 본문 */
+.voc-post-card { background: #fff; border: 1px solid #e5e7eb; border-radius: .75rem;
+                 padding: 1.25rem; margin-bottom: 1.25rem; }
+.voc-post-header { display: flex; align-items: flex-start; justify-content: space-between;
+                   gap: 1rem; margin-bottom: .75rem; flex-wrap: wrap; }
+.voc-post-header h1 { font-size: 1.1rem; font-weight: 800; color: #111; margin: 0; flex: 1; min-width: 200px; }
+.voc-post-meta { font-size: .75rem; color: #9ca3af; display: flex; gap: .75rem; flex-wrap: wrap;
+                 padding-bottom: .75rem; border-bottom: 1px solid #f3f4f6; margin-bottom: .85rem; }
+.voc-post-meta span { display: flex; align-items: center; gap: .25rem; }
+.voc-post-content { font-size: .875rem; color: #374151; line-height: 1.7;
+                    white-space: pre-wrap; word-break: break-word; }
+.voc-post-actions { display: flex; gap: .5rem; margin-top: .85rem; justify-content: flex-end; }
+.voc-btn-del { font-size: .78rem; padding: .3rem .7rem; border: 1px solid #fca5a5;
+               background: #fff; color: #dc2626; border-radius: .35rem; cursor: pointer; }
+.voc-btn-del:hover { background: #fef2f2; }
+
+/* 댓글 */
+.voc-comments-section { margin-bottom: 1.25rem; }
+.voc-comments-section h2 { font-size: .9rem; font-weight: 700; color: #1e293b;
+                            margin: 0 0 .75rem; }
+.voc-comment-item { background: #fff; border: 1px solid #e5e7eb; border-radius: .6rem;
+                    padding: .75rem 1rem; margin-bottom: .5rem; }
+.voc-comment-header { display: flex; align-items: center; gap: .5rem; margin-bottom: .4rem; flex-wrap: wrap; }
+.voc-comment-author { font-size: .8rem; font-weight: 700; color: #1e293b; }
+.voc-comment-team   { font-size: .72rem; color: #9ca3af; }
+.voc-comment-date   { font-size: .72rem; color: #9ca3af; margin-left: auto; }
+.voc-comment-body   { font-size: .82rem; color: #374151; white-space: pre-wrap;
+                      word-break: break-word; line-height: 1.6; }
+.voc-comment-del    { font-size: .72rem; color: #dc2626; background: none; border: none;
+                      cursor: pointer; padding: .1rem .4rem; }
+.voc-comment-del:hover { text-decoration: underline; }
+
+/* 댓글 입력 */
+.voc-comment-form { background: #fff; border: 1px solid #e5e7eb; border-radius: .6rem; padding: .85rem 1rem; }
+.voc-comment-form h3 { font-size: .85rem; font-weight: 700; color: #1e293b; margin: 0 0 .5rem; }
+.voc-comment-textarea { width: 100%; box-sizing: border-box; font-size: .82rem;
+  padding: .45rem .65rem; border: 1px solid #d1d5db; border-radius: .4rem;
+  resize: vertical; min-height: 72px; font-family: inherit; margin-bottom: .5rem; }
+.voc-comment-submit { font-size: .82rem; padding: .35rem 1rem; background: #1e293b;
+  color: #fff; border: none; border-radius: .35rem; cursor: pointer; font-weight: 600; }
+.voc-comment-submit:hover { background: #334155; }
+
+.cat-badge { display: inline-block; padding: .1rem .45rem; border-radius: .25rem;
+  font-size: .7rem; font-weight: 700; }
+.cat-badge.chatbot  { background: #fef3c7; color: #92400e; }
+.cat-badge.platform { background: #dbeafe; color: #1d4ed8; }
+.cat-badge.etc      { background: #f3f4f6; color: #374151; }
+</style>
+
+<div class="voc-detail-wrap">
+  <a class="voc-back" href="/portal/voc">← VOC 목록</a>
+
+  <!-- 게시글 본문 -->
+  <div class="voc-post-card">
+    <div class="voc-post-header">
+      <h1>
+        {% if post.category == '챗봇' %}
+          <span class="cat-badge chatbot">챗봇</span>
+        {% elif post.category == '플랫폼' %}
+          <span class="cat-badge platform">플랫폼</span>
+        {% else %}
+          <span class="cat-badge etc">{{ post.category }}</span>
+        {% endif %}
+        &nbsp;{{ post.title }}
+      </h1>
+    </div>
+    <div class="voc-post-meta">
+      <span>✍️ {{ post.emp_name or post.emp_code }}</span>
+      <span>🏢 {{ post.team or '-' }}</span>
+      <span>🕐 {{ post.created_at[:16] }}</span>
+      <span>💬 댓글 {{ comments | length }}개</span>
+    </div>
+    <div class="voc-post-content">{{ post.content }}</div>
+    {% if user and (user.emp_code == post.emp_code or user.is_admin) %}
+    <div class="voc-post-actions">
+      <form method="post" action="/portal/voc/{{ post.id }}/delete"
+            onsubmit="return confirm('이 게시글을 삭제하시겠습니까?')">
+        <button type="submit" class="voc-btn-del">🗑 삭제</button>
+      </form>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- 댓글 목록 -->
+  <div class="voc-comments-section">
+    <h2>💬 댓글 {{ comments | length }}개</h2>
+    {% if comments %}
+      {% for c in comments %}
+      <div class="voc-comment-item">
+        <div class="voc-comment-header">
+          <span class="voc-comment-author">{{ c.emp_name or c.emp_code }}</span>
+          <span class="voc-comment-team">{{ c.team or '' }}</span>
+          <span class="voc-comment-date">{{ c.created_at[:16] }}</span>
+          {% if user and (user.emp_code == c.emp_code or user.is_admin) %}
+          <form method="post" action="/portal/voc/comment/{{ c.id }}/delete"
+                style="margin:0;" onsubmit="return confirm('댓글을 삭제하시겠습니까?')">
+            <button type="submit" class="voc-comment-del">삭제</button>
+          </form>
+          {% endif %}
+        </div>
+        <div class="voc-comment-body">{{ c.content }}</div>
+      </div>
+      {% endfor %}
+    {% else %}
+      <div style="color:#9ca3af;font-size:.83rem;padding:.75rem 0;">아직 댓글이 없습니다. 첫 댓글을 남겨보세요.</div>
+    {% endif %}
+  </div>
+
+  <!-- 댓글 입력 -->
+  <div class="voc-comment-form">
+    <h3>댓글 작성</h3>
+    <form method="post" action="/portal/voc/{{ post.id }}/comment">
+      <textarea class="voc-comment-textarea" name="content"
+                placeholder="의견이나 답변을 입력해 주세요." required></textarea>
+      <button type="submit" class="voc-comment-submit">댓글 등록</button>
+    </form>
+  </div>
+</div>
+{% endblock %}
