@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1080">
+<title>AI 영업지원 서비스 오픈 카드뉴스</title>
+<style>
+@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #1a1a2e; font-family: 'Pretendard', 'Apple SD Gothic Neo', sans-serif; }
+
+/* 공통 카드 */
+.card {
+  width: 1080px;
+  height: 1080px;
+  position: relative;
+  overflow: hidden;
+  margin: 0 auto 32px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ─── 공통 헤더/푸터 ─── */
+.card-footer {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 64px;
+  background: rgba(7,11,16,.85);
+  display: flex;
+  align-items: center;
+  padding: 0 48px;
+  justify-content: space-between;
+}
+.card-footer .brand { font-size: 15px; font-weight: 700; color: #18b9c7; letter-spacing: .05em; }
+.card-footer .pg    { font-size: 14px; color: rgba(255,255,255,.4); }
+
+/* ─── CARD 1: 표지 ─── */
+.c1 { background: #070b10; }
+.c1 .bg-circle {
+  position: absolute;
+  border-radius: 50%;
+  background: radial-gradient(circle, #18b9c7 0%, transparent 70%);
+  opacity: .15;
+}
+.c1 .bg-circle.c1 { width: 780px; height: 780px; top: -200px; right: -200px; }
+.c1 .bg-circle.c2 { width: 480px; height: 480px; bottom: -120px; left: -120px; }
+.c1 .body {
+  position: relative; z-index: 1;
+  display: flex; flex-direction: column;
+  justify-content: center; align-items: flex-start;
+  height: 100%; padding: 96px 80px 96px;
+}
+.c1 .eyebrow { font-size: 16px; font-weight: 600; color: #18b9c7; letter-spacing: .2em; text-transform: uppercase; margin-bottom: 20px; }
+.c1 h1 { font-size: 64px; font-weight: 900; color: #fff; line-height: 1.15; margin-bottom: 28px; }
+.c1 h1 em { color: #18b9c7; font-style: normal; }
+.c1 .subtitle { font-size: 22px; color: rgba(255,255,255,.65); line-height: 1.6; margin-bottom: 48px; max-width: 720px; }
+.c1 .tag { display: inline-block; background: #18b9c7; color: #070b10; font-weight: 800; font-size: 15px; padding: 8px 20px; border-radius: 999px; letter-spacing: .05em; }
+.c1 .date-badge { display: inline-block; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.15); color: rgba(255,255,255,.6); font-size: 15px; padding: 8px 20px; border-radius: 999px; margin-left: 12px; }
+
+/* ─── CARD 2: 일정 ─── */
+.c2 { background: #f0fafa; }
+.c2 .top-bar { height: 10px; background: linear-gradient(90deg, #18b9c7, #0ea5e9); }
+.c2 .inner { padding: 64px 80px 100px; flex: 1; }
+.c2 .section-label { font-size: 13px; font-weight: 700; color: #18b9c7; letter-spacing: .18em; text-transform: uppercase; margin-bottom: 12px; }
+.c2 h2 { font-size: 48px; font-weight: 900; color: #070b10; margin-bottom: 8px; }
+.c2 .sub { font-size: 18px; color: #6b7280; margin-bottom: 56px; }
+
+.timeline { display: flex; flex-direction: column; gap: 0; }
+.tl-item { display: flex; gap: 32px; padding: 28px 0; border-bottom: 1px solid #e5e7eb; position: relative; }
+.tl-item:last-child { border-bottom: none; }
+.tl-dot { flex-shrink: 0; width: 52px; height: 52px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 22px; margin-top: 4px; }
+.tl-dot.cyan  { background: #18b9c7; }
+.tl-dot.blue  { background: #0ea5e9; }
+.tl-dot.green { background: #10b981; }
+.tl-info {}
+.tl-step { font-size: 12px; font-weight: 700; letter-spacing: .15em; color: #9ca3af; text-transform: uppercase; margin-bottom: 4px; }
+.tl-title { font-size: 24px; font-weight: 800; color: #111; margin-bottom: 4px; }
+.tl-date  { font-size: 16px; font-weight: 600; color: #18b9c7; margin-bottom: 4px; }
+.tl-desc  { font-size: 15px; color: #6b7280; line-height: 1.55; }
+.c2-footer-bar { position: absolute; bottom: 0; left: 0; right: 0; height: 64px; background: #070b10; display: flex; align-items: center; padding: 0 80px; justify-content: space-between; }
+.c2-footer-bar .brand { font-size: 15px; font-weight: 700; color: #18b9c7; }
+.c2-footer-bar .pg    { font-size: 14px; color: rgba(255,255,255,.4); }
+
+/* ─── CARD 3: 챗봇 소개 ─── */
+.c3 { background: #070b10; }
+.c3-accent-line { height: 6px; background: linear-gradient(90deg, #18b9c7, #0ea5e9); }
+.c3 .inner { padding: 60px 80px 100px; flex: 1; }
+.c3 .section-label { font-size: 13px; font-weight: 700; color: #18b9c7; letter-spacing: .18em; margin-bottom: 16px; }
+.c3 h2 { font-size: 46px; font-weight: 900; color: #fff; margin-bottom: 10px; line-height: 1.2; }
+.c3 .quote { font-size: 18px; color: rgba(255,255,255,.55); border-left: 3px solid #18b9c7; padding-left: 18px; margin: 28px 0 40px; line-height: 1.7; font-style: italic; }
+.feature-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.feature-item { background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1); border-radius: 16px; padding: 28px 28px; }
+.feature-item .icon { font-size: 32px; margin-bottom: 12px; }
+.feature-item .ft { font-size: 16px; font-weight: 800; color: #fff; margin-bottom: 6px; }
+.feature-item .fd { font-size: 14px; color: rgba(255,255,255,.5); line-height: 1.5; }
+
+/* ─── CARD 4: 챗봇 접속 (QR) ─── */
+.c4 { background: #fff; }
+.c4-top { height: 8px; background: linear-gradient(90deg, #18b9c7, #0ea5e9); }
+.c4 .inner { padding: 60px 80px 100px; flex: 1; display: flex; flex-direction: column; }
+.c4 .section-label { font-size: 13px; font-weight: 700; color: #18b9c7; letter-spacing: .18em; margin-bottom: 12px; }
+.c4 h2 { font-size: 44px; font-weight: 900; color: #070b10; margin-bottom: 8px; }
+.c4 .sub { font-size: 17px; color: #6b7280; margin-bottom: 40px; }
+.c4-steps { display: flex; flex-direction: column; gap: 16px; margin-bottom: 44px; }
+.c4-step { display: flex; align-items: flex-start; gap: 20px; }
+.c4-step-num { width: 36px; height: 36px; border-radius: 50%; background: #070b10; color: #18b9c7; font-size: 16px; font-weight: 900; display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 2px; }
+.c4-step-text { font-size: 18px; color: #374151; font-weight: 600; line-height: 1.5; }
+.c4-step-text em { color: #070b10; font-style: normal; font-weight: 800; }
+.qr-box { flex: 1; display: flex; align-items: center; justify-content: center; gap: 48px; }
+.qr-placeholder { width: 260px; height: 260px; border-radius: 20px; background: #f3f4f6; border: 2px dashed #d1d5db; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; }
+.qr-placeholder .qr-icon { font-size: 64px; }
+.qr-placeholder .qr-text { font-size: 14px; color: #9ca3af; font-weight: 600; }
+.qr-info { display: flex; flex-direction: column; gap: 16px; max-width: 380px; }
+.qr-info .qi-label { font-size: 13px; font-weight: 700; color: #9ca3af; letter-spacing: .1em; margin-bottom: 4px; }
+.qr-info .qi-value { font-size: 17px; font-weight: 700; color: #111; }
+.qr-badge { display: inline-block; background: #070b10; color: #18b9c7; font-size: 13px; font-weight: 700; padding: 5px 14px; border-radius: 999px; margin-top: 4px; }
+.c4-footer-bar { position: absolute; bottom: 0; left: 0; right: 0; height: 64px; background: #070b10; display: flex; align-items: center; padding: 0 80px; justify-content: space-between; }
+.c4-footer-bar .brand { font-size: 15px; font-weight: 700; color: #18b9c7; }
+.c4-footer-bar .pg    { font-size: 14px; color: rgba(255,255,255,.4); }
+
+/* ─── CARD 5: 플랫폼 소개 ─── */
+.c5 { background: #070b10; }
+.c5-bar { height: 6px; background: linear-gradient(90deg, #18b9c7, #0ea5e9); }
+.c5 .inner { padding: 56px 80px 100px; flex: 1; }
+.c5 .section-label { font-size: 13px; font-weight: 700; color: #18b9c7; letter-spacing: .18em; margin-bottom: 16px; }
+.c5 h2 { font-size: 44px; font-weight: 900; color: #fff; margin-bottom: 10px; line-height: 1.2; }
+.c5 .quote { font-size: 17px; color: rgba(255,255,255,.5); border-left: 3px solid #18b9c7; padding-left: 18px; margin: 24px 0 36px; line-height: 1.7; font-style: italic; }
+.flow-steps { display: flex; align-items: center; gap: 0; margin-bottom: 40px; flex-wrap: nowrap; overflow: hidden; }
+.flow-step { flex: 1; text-align: center; }
+.flow-step .fs-icon { font-size: 28px; margin-bottom: 6px; }
+.flow-step .fs-label { font-size: 14px; font-weight: 700; color: #fff; }
+.flow-step .fs-sub   { font-size: 12px; color: rgba(255,255,255,.4); margin-top: 2px; }
+.flow-arrow { font-size: 22px; color: #18b9c7; flex-shrink: 0; padding: 0 4px; margin-top: -18px; }
+.platform-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.pg-item { background: rgba(24,185,199,.08); border: 1px solid rgba(24,185,199,.25); border-radius: 14px; padding: 22px 24px; }
+.pg-item .pi-icon { font-size: 26px; margin-bottom: 8px; }
+.pg-item .pi-title { font-size: 15px; font-weight: 800; color: #fff; margin-bottom: 4px; }
+.pg-item .pi-desc  { font-size: 13px; color: rgba(255,255,255,.5); line-height: 1.5; }
+
+/* ─── CARD 6: 플랫폼 접속 ─── */
+.c6 { background: #f0fafa; }
+.c6-top { height: 8px; background: linear-gradient(90deg, #18b9c7, #0ea5e9); }
+.c6 .inner { padding: 60px 80px 100px; flex: 1; }
+.c6 .section-label { font-size: 13px; font-weight: 700; color: #18b9c7; letter-spacing: .18em; margin-bottom: 12px; }
+.c6 h2 { font-size: 44px; font-weight: 900; color: #070b10; margin-bottom: 8px; }
+.c6 .sub { font-size: 17px; color: #6b7280; margin-bottom: 44px; }
+.access-card { background: #fff; border-radius: 20px; border: 1px solid #e5e7eb; padding: 40px 48px; margin-bottom: 28px; box-shadow: 0 4px 24px rgba(0,0,0,.07); }
+.access-row { display: flex; align-items: center; gap: 20px; padding: 14px 0; border-bottom: 1px solid #f3f4f6; }
+.access-row:last-child { border-bottom: none; }
+.access-icon { width: 44px; height: 44px; border-radius: 12px; background: #f0fafa; display: flex; align-items: center; justify-content: center; font-size: 22px; flex-shrink: 0; }
+.access-label { font-size: 13px; font-weight: 700; color: #9ca3af; margin-bottom: 2px; }
+.access-value { font-size: 16px; font-weight: 700; color: #111; word-break: break-all; }
+.access-value.url { font-size: 14px; color: #0ea5e9; }
+.note-box { background: #fffbeb; border: 1px solid #fbbf24; border-radius: 14px; padding: 20px 28px; display: flex; gap: 14px; align-items: flex-start; }
+.note-box .ni { font-size: 22px; }
+.note-box .nt { font-size: 15px; color: #92400e; line-height: 1.6; font-weight: 500; }
+.c6-footer-bar { position: absolute; bottom: 0; left: 0; right: 0; height: 64px; background: #070b10; display: flex; align-items: center; padding: 0 80px; justify-content: space-between; }
+.c6-footer-bar .brand { font-size: 15px; font-weight: 700; color: #18b9c7; }
+.c6-footer-bar .pg    { font-size: 14px; color: rgba(255,255,255,.4); }
+
+/* ─── CARD 7: 권한 구조 ─── */
+.c7 { background: #070b10; }
+.c7-bar { height: 6px; background: linear-gradient(90deg, #18b9c7, #0ea5e9); }
+.c7 .inner { padding: 56px 80px 100px; flex: 1; }
+.c7 .section-label { font-size: 13px; font-weight: 700; color: #18b9c7; letter-spacing: .18em; margin-bottom: 16px; }
+.c7 h2 { font-size: 44px; font-weight: 900; color: #fff; margin-bottom: 8px; }
+.c7 .sub { font-size: 17px; color: rgba(255,255,255,.4); margin-bottom: 44px; }
+.role-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.role-card { border-radius: 16px; padding: 28px; display: flex; flex-direction: column; gap: 10px; }
+.role-card.role-all    { background: rgba(24,185,199,.12); border: 1.5px solid rgba(24,185,199,.35); }
+.role-card.role-admin  { background: rgba(245,158,11,.1); border: 1.5px solid rgba(245,158,11,.35); }
+.role-card.role-ro_all { background: rgba(14,165,233,.1); border: 1.5px solid rgba(14,165,233,.3); }
+.role-card.role-branch { background: rgba(255,255,255,.05); border: 1.5px solid rgba(255,255,255,.1); }
+.role-icon { font-size: 30px; }
+.role-name { font-size: 18px; font-weight: 800; color: #fff; }
+.role-code { font-size: 12px; font-weight: 700; color: #18b9c7; background: rgba(24,185,199,.15); padding: 2px 10px; border-radius: 999px; display: inline-block; }
+.role-desc { font-size: 14px; color: rgba(255,255,255,.5); line-height: 1.5; }
+.role-perms { display: flex; flex-direction: column; gap: 4px; }
+.role-perm { font-size: 13px; color: rgba(255,255,255,.7); display: flex; gap: 6px; }
+.role-perm::before { content: "✓"; color: #18b9c7; font-weight: 700; flex-shrink: 0; }
+
+/* ─── CARD 8: VOC 문의 ─── */
+.c8 { background: #070b10; }
+.c8 .inner { padding: 0; flex: 1; display: flex; flex-direction: column; }
+.c8-top { padding: 64px 80px 0; }
+.c8 .section-label { font-size: 13px; font-weight: 700; color: #18b9c7; letter-spacing: .18em; margin-bottom: 16px; }
+.c8 h2 { font-size: 48px; font-weight: 900; color: #fff; margin-bottom: 12px; }
+.c8 .sub { font-size: 18px; color: rgba(255,255,255,.5); margin-bottom: 40px; line-height: 1.6; }
+.voc-types { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin: 0 80px 40px; }
+.voc-type { background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1); border-radius: 16px; padding: 24px 20px; text-align: center; }
+.voc-type .vt-icon { font-size: 32px; margin-bottom: 10px; }
+.voc-type .vt-name { font-size: 15px; font-weight: 700; color: #fff; margin-bottom: 6px; }
+.voc-type .vt-desc { font-size: 13px; color: rgba(255,255,255,.4); line-height: 1.4; }
+.c8-cta { margin: 0 80px 0; background: linear-gradient(135deg, #18b9c7 0%, #0ea5e9 100%); border-radius: 20px; padding: 32px 40px; display: flex; align-items: center; justify-content: space-between; }
+.c8-cta .cta-text h3 { font-size: 22px; font-weight: 800; color: #fff; margin-bottom: 6px; }
+.c8-cta .cta-text p  { font-size: 15px; color: rgba(255,255,255,.75); }
+.c8-cta .cta-badge { background: rgba(0,0,0,.2); color: #fff; font-size: 14px; font-weight: 700; padding: 10px 24px; border-radius: 999px; white-space: nowrap; }
+
+/* print helper */
+@media print {
+  .card { page-break-after: always; margin: 0; }
+  body { background: #fff; }
+}
+</style>
+</head>
+<body>
+
+<!-- ══════════════════════════════════════
+     CARD 1 | 표지
+════════════════════════════════════════ -->
+<div class="card c1">
+  <div class="bg-circle c1"></div>
+  <div class="bg-circle c2"></div>
+  <div class="body">
+    <div class="eyebrow">동원홈푸드 외식식재사업부</div>
+    <h1>AI 영업지원<br>서비스 <em>전체 오픈</em></h1>
+    <p class="subtitle">
+      AI 챗봇과 세일즈 액션 플랫폼이<br>
+      외식식재사업부 전체에 정식 오픈됩니다.
+    </p>
+    <div>
+      <span class="tag">🚀 2026년 8월 오픈</span>
+      <span class="date-badge">외식식재사업부 전체</span>
+    </div>
+  </div>
+  <div class="card-footer">
+    <span class="brand">DW FSI Platform</span>
+    <span class="pg">1 / 8</span>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════
+     CARD 2 | 일정
+════════════════════════════════════════ -->
+<div class="card c2" style="position:relative;">
+  <div class="top-bar"></div>
+  <div class="inner">
+    <div class="section-label">SCHEDULE</div>
+    <h2>📅 오픈 일정 안내</h2>
+    <p class="sub">단계별로 안정적인 오픈을 준비했습니다</p>
+    <div class="timeline">
+      <div class="tl-item">
+        <div class="tl-dot cyan">🔓</div>
+        <div class="tl-info">
+          <div class="tl-step">STEP 01</div>
+          <div class="tl-title">사전 오픈 (현재)</div>
+          <div class="tl-date">2026.08.03 ~ 08.14</div>
+          <div class="tl-desc">전체 사업부 오픈 · 기능 탐색 및 피드백 수집</div>
+        </div>
+      </div>
+      <div class="tl-item">
+        <div class="tl-dot blue">⚙️</div>
+        <div class="tl-info">
+          <div class="tl-step">STEP 02</div>
+          <div class="tl-title">운영 안정화</div>
+          <div class="tl-date">2026.08.15 ~ 08.31</div>
+          <div class="tl-desc">VOC 기반 기능 수정 · KPI 설정 · DM 발송 방식 확정</div>
+        </div>
+      </div>
+      <div class="tl-item">
+        <div class="tl-dot green">🏁</div>
+        <div class="tl-info">
+          <div class="tl-step">STEP 03</div>
+          <div class="tl-title">정식 운영 배포</div>
+          <div class="tl-date">2026.09.01 ~</div>
+          <div class="tl-desc">KPI 연동 실운영 · 성과 추적 본격화</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="c2-footer-bar">
+    <span class="brand">DW FSI Platform</span>
+    <span class="pg">2 / 8</span>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════
+     CARD 3 | 챗봇 소개
+════════════════════════════════════════ -->
+<div class="card c3" style="position:relative;">
+  <div class="c3-accent-line"></div>
+  <div class="inner">
+    <div class="section-label">KAKAO CHATBOT</div>
+    <h2>🤖 AI 영업지원 챗봇</h2>
+    <div class="quote">
+      "거래처의 매출·재고·채권 현황을<br>카카오톡으로 즉시 조회하세요"
+    </div>
+    <div class="feature-grid">
+      <div class="feature-item">
+        <div class="icon">📊</div>
+        <div class="ft">매출 현황 조회</div>
+        <div class="fd">담당 거래처 월별·품목별 매출을 사번 기반으로 조회</div>
+      </div>
+      <div class="feature-item">
+        <div class="icon">💳</div>
+        <div class="ft">채권·미수 현황</div>
+        <div class="fd">미수채권, 어음, 연체 현황 실시간 확인</div>
+      </div>
+      <div class="feature-item">
+        <div class="icon">📦</div>
+        <div class="ft">미출고 현황</div>
+        <div class="fd">주문 후 미출고 상품 건별 조회 및 현황 파악</div>
+      </div>
+      <div class="feature-item">
+        <div class="icon">💬</div>
+        <div class="ft">자연어 질문</div>
+        <div class="fd">"OO 거래처 이번달 매출 알려줘" 형태로 자유롭게 질문</div>
+      </div>
+    </div>
+  </div>
+  <div class="card-footer">
+    <span class="brand">DW FSI Platform</span>
+    <span class="pg">3 / 8</span>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════
+     CARD 4 | 챗봇 접속 (QR)
+════════════════════════════════════════ -->
+<div class="card c4" style="position:relative;">
+  <div class="c4-top"></div>
+  <div class="inner">
+    <div class="section-label">HOW TO START</div>
+    <h2>📱 챗봇 접속 방법</h2>
+    <p class="sub">카카오톡 채널 친구추가 → 대화 시작</p>
+    <div class="c4-steps">
+      <div class="c4-step">
+        <div class="c4-step-num">1</div>
+        <div class="c4-step-text">휴대폰 카메라로 <em>QR 코드 촬영</em> → 카카오톡 자동 열림</div>
+      </div>
+      <div class="c4-step">
+        <div class="c4-step-num">2</div>
+        <div class="c4-step-text"><em>친구추가</em> 클릭 → 챗봇 대화 시작</div>
+      </div>
+      <div class="c4-step">
+        <div class="c4-step-num">3</div>
+        <div class="c4-step-text">대화창에 <em>사번 입력</em> → 등록 절차 진행 <span style="color:#9ca3af;font-weight:400;font-size:.9em;">(최초 1회)</span></div>
+      </div>
+      <div class="c4-step">
+        <div class="c4-step-num">4</div>
+        <div class="c4-step-text">등록 완료 → 이후부터 <em>바로 대화 시작</em></div>
+      </div>
+    </div>
+    <div class="qr-box">
+      <div class="qr-placeholder">
+        <div class="qr-icon">📷</div>
+        <div class="qr-text">QR 코드</div>
+      </div>
+      <div class="qr-info">
+        <div>
+          <div class="qi-label">채널명</div>
+          <div class="qi-value">동원홈푸드 영업지원 챗봇</div>
+        </div>
+        <div>
+          <div class="qi-label">플랫폼</div>
+          <div class="qi-value">카카오톡 채널 <span class="qr-badge">Kakao</span></div>
+        </div>
+        <div>
+          <div class="qi-label">지원 기기</div>
+          <div class="qi-value">스마트폰 (iOS/Android)</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="c4-footer-bar">
+    <span class="brand">DW FSI Platform</span>
+    <span class="pg">4 / 8</span>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════
+     CARD 5 | 플랫폼 소개
+════════════════════════════════════════ -->
+<div class="card c5" style="position:relative;">
+  <div class="c5-bar"></div>
+  <div class="inner">
+    <div class="section-label">WEB PLATFORM</div>
+    <h2>🖥 세일즈 액션 플랫폼</h2>
+    <div class="quote">
+      "범용상품 판매 비중이 낮은 가맹점을 찾아<br>DM 발송까지 원스톱으로 처리하세요"
+    </div>
+    <div class="flow-steps" style="margin-bottom:32px;">
+      <div class="flow-step">
+        <div class="fs-icon">🔍</div>
+        <div class="fs-label">분석</div>
+        <div class="fs-sub">구성비 분포</div>
+      </div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step">
+        <div class="fs-icon">🤖</div>
+        <div class="fs-label">AI 추천</div>
+        <div class="fs-sub">미판매 상품</div>
+      </div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step">
+        <div class="fs-icon">💰</div>
+        <div class="fs-label">판가 설정</div>
+        <div class="fs-sub">기존/예판</div>
+      </div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step">
+        <div class="fs-icon">📬</div>
+        <div class="fs-label">DM 발송</div>
+        <div class="fs-sub">카카오 알림톡</div>
+      </div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step">
+        <div class="fs-icon">📈</div>
+        <div class="fs-label">실적 추적</div>
+        <div class="fs-sub">매출·GP</div>
+      </div>
+    </div>
+    <div class="platform-grid">
+      <div class="pg-item">
+        <div class="pi-icon">📊</div>
+        <div class="pi-title">브랜드별 구성비 분석</div>
+        <div class="pi-desc">가맹점별 범용상품 비중을 브랜드 전체 분포와 비교</div>
+      </div>
+      <div class="pg-item">
+        <div class="pi-icon">✨</div>
+        <div class="pi-title">AI 상품 추천</div>
+        <div class="pi-desc">타 가맹점 대비 미판매 상품을 자동으로 추천</div>
+      </div>
+      <div class="pg-item">
+        <div class="pi-icon">📬</div>
+        <div class="pi-title">DM 발송 실행</div>
+        <div class="pi-desc">판가 설정 후 카카오 알림톡으로 즉시 발송</div>
+      </div>
+      <div class="pg-item">
+        <div class="pi-icon">📈</div>
+        <div class="pi-title">발송 후 실적 추적</div>
+        <div class="pi-desc">DM 발송 이후 매출·GP 변화를 자동으로 모니터링</div>
+      </div>
+    </div>
+  </div>
+  <div class="card-footer">
+    <span class="brand">DW FSI Platform</span>
+    <span class="pg">5 / 8</span>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════
+     CARD 6 | 플랫폼 접속 방법
+════════════════════════════════════════ -->
+<div class="card c6" style="position:relative;">
+  <div class="c6-top"></div>
+  <div class="inner">
+    <div class="section-label">WEB ACCESS</div>
+    <h2>🔗 플랫폼 접속 방법</h2>
+    <p class="sub">PC 브라우저로 아래 주소에 접속하세요</p>
+    <div class="access-card">
+      <div class="access-row">
+        <div class="access-icon">🌐</div>
+        <div>
+          <div class="access-label">접속 주소 (URL)</div>
+          <div class="access-value url">https://dw-fsi-platform-cgg6apc4ffaxb4d5<br>.koreacentral-01.azurewebsites.net/portal</div>
+        </div>
+      </div>
+      <div class="access-row">
+        <div class="access-icon">🔑</div>
+        <div>
+          <div class="access-label">초기 비밀번호</div>
+          <div class="access-value">사번 뒤 4자리</div>
+        </div>
+      </div>
+      <div class="access-row">
+        <div class="access-icon">🖥️</div>
+        <div>
+          <div class="access-label">지원 브라우저</div>
+          <div class="access-value">Chrome, Edge (PC 권장)</div>
+        </div>
+      </div>
+      <div class="access-row">
+        <div class="access-icon">🔐</div>
+        <div>
+          <div class="access-label">계정 발급 기준</div>
+          <div class="access-value">외식식재사업부 전체 사원 (사번 기반 자동 등록)</div>
+        </div>
+      </div>
+    </div>
+    <div class="note-box">
+      <div class="ni">⚠️</div>
+      <div class="nt">로그인 후 반드시 <b>비밀번호를 변경</b>해 주세요.<br>접속 문제 발생 시 플랫폼 내 VOC 게시판에 남겨주세요.</div>
+    </div>
+  </div>
+  <div class="c6-footer-bar">
+    <span class="brand">DW FSI Platform</span>
+    <span class="pg">6 / 8</span>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════
+     CARD 7 | 권한 구조
+════════════════════════════════════════ -->
+<div class="card c7" style="position:relative;">
+  <div class="c7-bar"></div>
+  <div class="inner">
+    <div class="section-label">ACCESS CONTROL</div>
+    <h2>🔐 사용자 권한 안내</h2>
+    <p class="sub">역할에 따라 조회 범위가 달라집니다</p>
+    <div class="role-grid">
+      <div class="role-card role-all">
+        <div class="role-icon">👤</div>
+        <div class="role-name">일반 영업사원</div>
+        <div class="role-code">일반 권한</div>
+        <div class="role-perms">
+          <div class="role-perm">본인 담당 거래처만 조회</div>
+          <div class="role-perm">구성비 분석 · AI 추천</div>
+          <div class="role-perm">DM 발송 · 실적 확인</div>
+        </div>
+      </div>
+      <div class="role-card role-ro_all">
+        <div class="role-icon">👁</div>
+        <div class="role-name">전체 조회</div>
+        <div class="role-code">readonly_all</div>
+        <div class="role-perms">
+          <div class="role-perm">전체 사업부 데이터 열람</div>
+          <div class="role-perm">팀/브랜드 전체 현황 파악</div>
+          <div class="role-perm">DM 발송 불가 (조회 전용)</div>
+        </div>
+      </div>
+      <div class="role-card role-branch">
+        <div class="role-icon">🏢</div>
+        <div class="role-name">지점장 / 팀장</div>
+        <div class="role-code">지점 권한</div>
+        <div class="role-perms">
+          <div class="role-perm">소속 팀 전체 거래처 조회</div>
+          <div class="role-perm">팀원 실적 현황 확인</div>
+          <div class="role-perm">DM 발송 가능</div>
+        </div>
+      </div>
+      <div class="role-card role-admin">
+        <div class="role-icon">⚙️</div>
+        <div class="role-name">시스템 관리자</div>
+        <div class="role-code">admin</div>
+        <div class="role-perms">
+          <div class="role-perm">전체 데이터 · 사용자 관리</div>
+          <div class="role-perm">공지사항 작성 · 관리</div>
+          <div class="role-perm">VOC 관리 및 처리</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="card-footer">
+    <span class="brand">DW FSI Platform</span>
+    <span class="pg">7 / 8</span>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════
+     CARD 8 | VOC 문의
+════════════════════════════════════════ -->
+<div class="card c8" style="position:relative;">
+  <div class="inner">
+    <div class="c8-top">
+      <div class="section-label">FEEDBACK</div>
+      <h2>💬 VOC 게시판 안내</h2>
+      <p class="sub">
+        사용 중 불편사항, 버그, 개선 제안을 자유롭게 남겨주세요.<br>
+        모든 의견을 적극 반영하겠습니다.
+      </p>
+    </div>
+    <div class="voc-types">
+      <div class="voc-type">
+        <div class="vt-icon">🤖</div>
+        <div class="vt-name">챗봇</div>
+        <div class="vt-desc">답변 오류<br>기능 요청<br>연동 문제</div>
+      </div>
+      <div class="voc-type">
+        <div class="vt-icon">🖥</div>
+        <div class="vt-name">플랫폼</div>
+        <div class="vt-desc">UI 개선<br>데이터 오류<br>속도 문제</div>
+      </div>
+      <div class="voc-type">
+        <div class="vt-icon">💡</div>
+        <div class="vt-name">기타</div>
+        <div class="vt-desc">새 기능 제안<br>권한 요청<br>기타 문의</div>
+      </div>
+    </div>
+    <div class="c8-cta">
+      <div class="cta-text">
+        <h3>플랫폼 내 VOC 게시판 바로가기</h3>
+        <p>로그인 → 좌측 메뉴 "게시판" → "VOC"</p>
+      </div>
+      <div class="cta-badge">게시판 → VOC →</div>
+    </div>
+  </div>
+  <div class="card-footer" style="background:rgba(255,255,255,.05);border-top:1px solid rgba(255,255,255,.1);">
+    <span class="brand">DW FSI Platform</span>
+    <span class="pg">8 / 8</span>
+  </div>
+</div>
+
+</body>
+</html>
