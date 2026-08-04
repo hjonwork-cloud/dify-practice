@@ -1832,17 +1832,20 @@ async def brand_report_results_page(
     action_ym: str = "",
 ):
     """액션 실적 상세 페이지."""
+    import traceback as _tb
     user = _require_user(request)
     try:
         from portal_refresh import read_action_results
         rows = read_action_results(user["emp_code"], brand_code=brand_code, action_ym=action_ym)
     except Exception:
         rows = []
-    # 브랜드 목록 (필터용)
-    brands = _brand_rows(user["emp_code"])
-    total_sales   = sum(r.get("sales_after_m", 0) for r in rows)
-    total_gp      = sum(r.get("gp_after_m", 0) for r in rows)
-    total_generic = sum(r.get("generic_sales_after_m", 0) for r in rows)
+    try:
+        brands = _brand_rows(user["emp_code"])
+    except Exception:
+        brands = []
+    total_sales   = sum(r.get("sales_after_m") or 0 for r in rows)
+    total_gp      = sum(r.get("gp_after_m") or 0 for r in rows)
+    total_generic = sum(r.get("generic_sales_after_m") or 0 for r in rows)
     summary = {
         "count":                 len(rows),
         "total_sales_after_m":   total_sales,
@@ -1850,12 +1853,18 @@ async def brand_report_results_page(
         "total_generic_after_m": total_generic,
         "avg_gp_rate":           round(total_gp / total_sales * 100, 1) if total_sales else 0,
     }
-    # DM 발송 이력
-    dm_logs = portal_db.list_dm_logs(user["emp_code"], brand_code=brand_code or None, action_ym=action_ym or None)
-    return _render(request, "portal_brand_report_results.html",
-                   rows=rows, brands=brands, summary=summary,
-                   sel_brand_code=brand_code, sel_action_ym=action_ym,
-                   dm_logs=dm_logs)
+    try:
+        dm_logs = portal_db.list_dm_logs(emp_code=user["emp_code"], brand_code=brand_code or None, action_ym=action_ym or None)
+    except Exception:
+        dm_logs = []
+    try:
+        return _render(request, "portal_brand_report_results.html",
+                       rows=rows, brands=brands, summary=summary,
+                       sel_brand_code=brand_code, sel_action_ym=action_ym,
+                       dm_logs=dm_logs)
+    except Exception as e:
+        logger.error(f"[results page] render error: {e}", exc_info=True)
+        return HTMLResponse(f"<pre style='color:red'>렌더링 오류:\n{_tb.format_exc()}</pre>", status_code=500)
 
 
 @router.get("/action-results")
