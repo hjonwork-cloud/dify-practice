@@ -1,4 +1,35 @@
 ﻿{% extends 'portal_base.html' %}{% block title %}내 대시보드{% endblock %}{% block content %}
+
+<!-- ★ 공지 팝업 (최초 1회) -->
+<div id="ann-modal" style="display:none;position:fixed;inset:0;background:rgba(9,13,18,.62);z-index:1000;align-items:center;justify-content:center;">
+  <div style="background:#fff;border-radius:1.25rem;box-shadow:0 32px 80px rgba(9,13,18,.32);
+              max-width:480px;width:calc(100% - 2rem);padding:2rem;position:relative;max-height:80vh;overflow-y:auto;">
+    <div style="display:flex;align-items:center;gap:.6rem;margin-bottom:1.25rem;">
+      <span style="font-size:1.4rem;">📢</span>
+      <h2 style="margin:0;font-size:1.1rem;font-weight:800;color:#111;">플랫폼 공지</h2>
+      <button onclick="closeAnnModal()" style="margin-left:auto;background:none;border:none;font-size:1.3rem;cursor:pointer;color:#9ca3af;line-height:1;">✕</button>
+    </div>
+    <div id="ann-modal-body" style="display:grid;gap:.85rem;"></div>
+    <div style="display:flex;gap:.6rem;justify-content:flex-end;margin-top:1.5rem;flex-wrap:wrap;">
+      <button onclick="dismissAnnForever()" style="font-size:.8rem;padding:.4rem .9rem;border:1px solid #e5e7eb;
+        border-radius:.4rem;background:#fff;color:#6b7280;cursor:pointer;">다시 보지 않기</button>
+      <button onclick="closeAnnModal()" style="font-size:.8rem;padding:.4rem 1.1rem;border:none;
+        border-radius:.4rem;background:#1e293b;color:#fff;cursor:pointer;font-weight:600;">확인</button>
+    </div>
+  </div>
+</div>
+
+<!-- ★ 공지 카드 (대시보드 상시) -->
+<div id="ann-card" style="display:none;background:#fff;border:1px solid #e5e7eb;border-radius:.85rem;
+     padding:1rem 1.25rem;margin-bottom:1.25rem;border-left:4px solid #18b9c7;">
+  <div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.5rem;">
+    <span style="font-size:1rem;">📢</span>
+    <b style="font-size:.88rem;color:#1e293b;">공지사항</b>
+    <div id="ann-card-nav" style="margin-left:auto;display:flex;align-items:center;gap:.35rem;font-size:.75rem;color:#9ca3af;"></div>
+  </div>
+  <div id="ann-card-body"></div>
+</div>
+
 <div class="portal-heading">
   <div>
     <p class="eyebrow" id="dash-eyebrow">MY DASHBOARD</p>
@@ -214,6 +245,104 @@
           : '데이터를 불러오지 못했습니다. 페이지를 새로고침해 주세요.';
       }
     });
+})();
+
+/* ── 공지 카드 + 팝업 ── */
+(function(){
+  var DISMISS_KEY = 'ann_dismissed_ids';
+  var _anns = [];
+  var _cardIdx = 0;
+
+  function getDismissed(){
+    try{ return JSON.parse(localStorage.getItem(DISMISS_KEY) || '[]'); }
+    catch(e){ return []; }
+  }
+  function addDismissed(ids){
+    var cur = getDismissed();
+    ids.forEach(function(id){ if(cur.indexOf(id) < 0) cur.push(id); });
+    localStorage.setItem(DISMISS_KEY, JSON.stringify(cur));
+  }
+
+  function badgeHtml(badge){
+    var colors = {
+      '공지':   'background:#dbeafe;color:#1d4ed8',
+      '업데이트':'background:#dcfce7;color:#15803d',
+      '점검':   'background:#fee2e2;color:#b91c1c',
+      '이벤트': 'background:#fef3c7;color:#92400e'
+    };
+    var style = colors[badge] || 'background:#f3f4f6;color:#374151';
+    return '<span style="display:inline-block;padding:.1rem .45rem;border-radius:.25rem;font-size:.7rem;font-weight:700;'+style+'">'+badge+'</span>';
+  }
+
+  function renderCard(){
+    if(!_anns.length) return;
+    var a = _anns[_cardIdx];
+    var cardBody = document.getElementById('ann-card-body');
+    var cardNav  = document.getElementById('ann-card-nav');
+    if(!cardBody) return;
+    cardBody.innerHTML =
+      '<div style="display:flex;align-items:baseline;gap:.5rem;flex-wrap:wrap;">'
+      + badgeHtml(a.badge)
+      + '<b style="font-size:.875rem;color:#111;">'+a.title+'</b>'
+      + '<span style="font-size:.72rem;color:#9ca3af;">'+a.created_at+'</span>'
+      + '</div>'
+      + (a.content ? '<p style="margin:.4rem 0 0;font-size:.82rem;color:#374151;white-space:pre-wrap;">'+a.content+'</p>' : '');
+    if(_anns.length > 1){
+      cardNav.innerHTML =
+        '<button onclick="annCardPrev()" style="background:none;border:1px solid #e5e7eb;border-radius:.25rem;padding:.1rem .45rem;cursor:pointer;font-size:.72rem;">‹</button>'
+        + '<span>' + (_cardIdx+1) + ' / ' + _anns.length + '</span>'
+        + '<button onclick="annCardNext()" style="background:none;border:1px solid #e5e7eb;border-radius:.25rem;padding:.1rem .45rem;cursor:pointer;font-size:.72rem;">›</button>';
+    } else {
+      cardNav.innerHTML = '';
+    }
+    document.getElementById('ann-card').style.display = 'block';
+  }
+
+  window.annCardPrev = function(){ _cardIdx = (_cardIdx - 1 + _anns.length) % _anns.length; renderCard(); };
+  window.annCardNext = function(){ _cardIdx = (_cardIdx + 1) % _anns.length; renderCard(); };
+
+  window.closeAnnModal = function(){
+    var m = document.getElementById('ann-modal');
+    if(m) m.style.display = 'none';
+  };
+  window.dismissAnnForever = function(){
+    addDismissed(_anns.map(function(a){ return a.id; }));
+    closeAnnModal();
+  };
+
+  fetch('/portal/announcements-data', {credentials:'same-origin'})
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      if(!data || !data.length) return;
+      _anns = data;
+      renderCard();
+
+      // 팝업: 이번 세션에 안 본 + dismiss 안 한 공지만
+      var dismissed = getDismissed();
+      var seenKey   = 'ann_seen_session';
+      var seen      = sessionStorage.getItem(seenKey) === '1';
+      var newAnns   = data.filter(function(a){ return dismissed.indexOf(a.id) < 0; });
+      if(newAnns.length && !seen){
+        sessionStorage.setItem(seenKey, '1');
+        var modalBody = document.getElementById('ann-modal-body');
+        if(modalBody){
+          modalBody.innerHTML = newAnns.map(function(a){
+            return '<div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:.65rem;padding:.85rem 1rem;">'
+              + '<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.4rem;">'
+              + badgeHtml(a.badge)
+              + (a.pinned ? '<span style="font-size:.7rem;color:#d97706;font-weight:700;">📌 중요</span>' : '')
+              + '<span style="font-size:.72rem;color:#9ca3af;margin-left:auto;">'+a.created_at+'</span>'
+              + '</div>'
+              + '<b style="font-size:.875rem;color:#111;">'+a.title+'</b>'
+              + (a.content ? '<p style="margin:.35rem 0 0;font-size:.8rem;color:#374151;white-space:pre-wrap;line-height:1.6;">'+a.content+'</p>' : '')
+              + '</div>';
+          }).join('');
+        }
+        var modal = document.getElementById('ann-modal');
+        if(modal) modal.style.display = 'flex';
+      }
+    })
+    .catch(function(){});  // 공지 실패해도 대시보드 정상 표시
 })();
 </script>
 {% endblock %}

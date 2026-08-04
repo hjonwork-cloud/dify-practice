@@ -2392,6 +2392,80 @@ def _auto_refresh_scheduler():
         time.sleep(6 * 3600)  # 6시간 대기
 
 
+# ── 공지 API ──────────────────────────────────────────────────────────────
+
+@router.get("/announcements-data")
+async def announcements_data(request: Request):
+    """활성 공지 JSON (대시보드 카드 + 팝업용)."""
+    _require_user(request)
+    rows = portal_db.list_announcements(active_only=True)
+    return JSONResponse([
+        {"id": r["id"], "badge": r["badge"], "title": r["title"],
+         "content": r["content"], "pinned": bool(r["pinned"]),
+         "created_at": r["created_at"][:10]}
+        for r in rows
+    ])
+
+
+@router.get("/admin/announcements")
+async def admin_announcements_page(request: Request):
+    user = _require_user(request)
+    if not user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="관리자 전용")
+    rows = portal_db.list_announcements(active_only=False)
+    return _render(request, "portal_admin_announcements.html", announcements=rows, user=user)
+
+
+@router.post("/admin/announcements/create")
+async def admin_announcements_create(request: Request):
+    user = _require_user(request)
+    if not user.get("is_admin"):
+        raise HTTPException(status_code=403)
+    form = await _read_form(request)
+    badge   = (form.get("badge") or "공지").strip()
+    title   = (form.get("title") or "").strip()
+    content = (form.get("content") or "").strip()
+    pinned  = form.get("pinned") == "1"
+    if title and content:
+        portal_db.create_announcement(badge=badge, title=title, content=content,
+                                       pinned=pinned, created_by=user["emp_code"])
+    return RedirectResponse("/portal/admin/announcements", status_code=303)
+
+
+@router.post("/admin/announcements/{ann_id}/update")
+async def admin_announcements_update(request: Request, ann_id: int):
+    user = _require_user(request)
+    if not user.get("is_admin"):
+        raise HTTPException(status_code=403)
+    form = await _read_form(request)
+    badge   = (form.get("badge") or "공지").strip()
+    title   = (form.get("title") or "").strip()
+    content = (form.get("content") or "").strip()
+    pinned  = form.get("pinned") == "1"
+    if title and content:
+        portal_db.update_announcement(ann_id, badge=badge, title=title,
+                                       content=content, pinned=pinned)
+    return RedirectResponse("/portal/admin/announcements", status_code=303)
+
+
+@router.post("/admin/announcements/{ann_id}/toggle")
+async def admin_announcements_toggle(request: Request, ann_id: int):
+    user = _require_user(request)
+    if not user.get("is_admin"):
+        raise HTTPException(status_code=403)
+    portal_db.toggle_announcement(ann_id)
+    return RedirectResponse("/portal/admin/announcements", status_code=303)
+
+
+@router.post("/admin/announcements/{ann_id}/delete")
+async def admin_announcements_delete(request: Request, ann_id: int):
+    user = _require_user(request)
+    if not user.get("is_admin"):
+        raise HTTPException(status_code=403)
+    portal_db.delete_announcement(ann_id)
+    return RedirectResponse("/portal/admin/announcements", status_code=303)
+
+
 # ── VOC 게시판 ──────────────────────────────────────────────────────────────
 
 @router.get("/voc")

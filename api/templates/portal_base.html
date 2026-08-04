@@ -108,6 +108,9 @@
         <a class="{% if '/portal/admin/users' in request.url.path %}active{% endif %}" href="/portal/admin/users">
           <span class="nav-icon">👥</span><span class="nav-label">사용자 관리</span>
         </a>
+        <a class="{% if '/portal/admin/announcements' in request.url.path %}active{% endif %}" href="/portal/admin/announcements">
+          <span class="nav-icon">📢</span><span class="nav-label">공지 관리</span>
+        </a>
       </div>
       {% endif %}
       <a class="{% if '/portal/voc' in request.url.path %}active{% endif %}" href="/portal/voc">

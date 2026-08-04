@@ -1,0 +1,184 @@
+{% extends 'portal_base.html' %}{% block title %}공지 관리{% endblock %}{% block content %}
+<style>
+.ann-wrap { max-width: 860px; }
+.ann-heading h1 { font-size: 1.35rem; font-weight: 800; color: #111; margin: 0 0 .2rem; }
+.ann-heading p  { font-size: .85rem; color: #6b7280; margin: 0 0 1.25rem; }
+
+/* 작성 폼 */
+.ann-form-panel { background: #fff; border: 1px solid #e5e7eb; border-radius: .85rem;
+                  padding: 1.25rem; margin-bottom: 1.5rem; }
+.ann-form-panel h2 { font-size: .9rem; font-weight: 700; color: #1e293b; margin: 0 0 .9rem;
+                     display: flex; align-items: center; gap: .4rem; }
+.ann-row { display: flex; gap: .6rem; flex-wrap: wrap; align-items: center; margin-bottom: .6rem; }
+.ann-row label { font-size: .82rem; font-weight: 600; color: #374151; white-space: nowrap; }
+.ann-row select, .ann-row input[type=text] {
+  font-size: .82rem; padding: .35rem .65rem; border: 1px solid #d1d5db;
+  border-radius: .4rem; background: #fff; }
+.ann-row input[type=text] { flex: 1; min-width: 200px; }
+.ann-row input[type=checkbox] { width: 16px; height: 16px; accent-color: #f59e0b; cursor: pointer; }
+.ann-textarea { width: 100%; box-sizing: border-box; font-size: .83rem;
+  padding: .5rem .7rem; border: 1px solid #d1d5db; border-radius: .45rem;
+  resize: vertical; min-height: 88px; font-family: inherit; margin-bottom: .65rem; }
+.ann-submit { font-size: .85rem; padding: .42rem 1.15rem; background: #1e293b;
+  color: #fff; border: none; border-radius: .4rem; cursor: pointer; font-weight: 600; }
+.ann-submit:hover { background: #334155; }
+
+/* 목록 */
+.ann-list { display: grid; gap: .75rem; }
+.ann-item { background: #fff; border: 1px solid #e5e7eb; border-radius: .75rem;
+            padding: 1rem 1.25rem; position: relative; }
+.ann-item.inactive { opacity: .55; }
+.ann-item-head { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;
+                 margin-bottom: .4rem; }
+.ann-item-title { font-size: .92rem; font-weight: 700; color: #111; flex: 1; min-width: 140px; }
+.ann-item-content { font-size: .82rem; color: #374151; white-space: pre-wrap;
+                    line-height: 1.6; margin-bottom: .75rem; }
+.ann-item-meta { font-size: .72rem; color: #9ca3af; margin-bottom: .65rem; }
+.ann-actions { display: flex; gap: .4rem; flex-wrap: wrap; }
+.ann-btn { font-size: .76rem; padding: .28rem .7rem; border-radius: .35rem;
+           border: 1px solid #e5e7eb; background: #fff; cursor: pointer; font-weight: 600; }
+.ann-btn:hover { background: #f3f4f6; }
+.ann-btn.toggle-on  { border-color: #22c55e; color: #15803d; }
+.ann-btn.toggle-off { border-color: #f59e0b; color: #b45309; }
+.ann-btn.del  { border-color: #fca5a5; color: #dc2626; }
+.ann-btn.del:hover { background: #fef2f2; }
+.ann-badge { display: inline-block; padding: .1rem .45rem; border-radius: .25rem;
+  font-size: .7rem; font-weight: 700; }
+.ann-badge.공지   { background: #dbeafe; color: #1d4ed8; }
+.ann-badge.업데이트 { background: #dcfce7; color: #15803d; }
+.ann-badge.점검   { background: #fee2e2; color: #b91c1c; }
+.ann-badge.이벤트  { background: #fef3c7; color: #92400e; }
+.pin-chip { font-size: .7rem; color: #d97706; font-weight: 700; }
+.active-chip { font-size: .7rem; font-weight: 700; padding: .1rem .4rem;
+               border-radius: .25rem; }
+.active-chip.on  { background: #dcfce7; color: #15803d; }
+.active-chip.off { background: #f3f4f6; color: #9ca3af; }
+
+/* 인라인 수정 폼 */
+.ann-edit-form { display: none; background: #f8fafc; border: 1px solid #e5e7eb;
+                 border-radius: .6rem; padding: .85rem; margin-top: .6rem; }
+.ann-edit-form.open { display: block; }
+.ann-edit-submit { font-size: .8rem; padding: .3rem .9rem; background: #2563eb;
+  color: #fff; border: none; border-radius: .35rem; cursor: pointer; font-weight: 600; }
+.ann-edit-submit:hover { background: #1d4ed8; }
+
+.ann-empty { text-align: center; padding: 2.5rem; color: #9ca3af;
+             background: #fff; border: 1px solid #e5e7eb; border-radius: .75rem; }
+</style>
+
+<div class="ann-wrap">
+  <div class="ann-heading">
+    <p class="eyebrow">ADMIN · ANNOUNCEMENTS</p>
+    <h1>📢 공지 관리</h1>
+    <p>공지를 작성하면 모든 사용자의 대시보드 카드와 로그인 후 팝업에 표시됩니다.</p>
+  </div>
+
+  <!-- 작성 폼 -->
+  <div class="ann-form-panel">
+    <h2>✏️ 새 공지 작성</h2>
+    <form method="post" action="/portal/admin/announcements/create">
+      <div class="ann-row">
+        <label>구분</label>
+        <select name="badge">
+          <option value="공지">📢 공지</option>
+          <option value="업데이트">🆕 업데이트</option>
+          <option value="점검">🔧 점검</option>
+          <option value="이벤트">🎉 이벤트</option>
+        </select>
+        <label>제목</label>
+        <input type="text" name="title" placeholder="공지 제목" maxlength="80" required>
+        <label style="display:flex;align-items:center;gap:.3rem;cursor:pointer;">
+          <input type="checkbox" name="pinned" value="1"> 중요📌
+        </label>
+      </div>
+      <textarea class="ann-textarea" name="content"
+                placeholder="공지 내용을 입력하세요. (여러 줄 입력 가능)"></textarea>
+      <button type="submit" class="ann-submit">📤 등록</button>
+    </form>
+  </div>
+
+  <!-- 공지 목록 -->
+  {% if announcements %}
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.65rem;">
+    <b style="font-size:.88rem;color:#374151;">전체 {{ announcements|length }}건</b>
+    <span style="font-size:.75rem;color:#9ca3af;">활성 공지만 사용자에게 표시됩니다</span>
+  </div>
+  <div class="ann-list">
+    {% for a in announcements %}
+    <div class="ann-item {% if not a.is_active %}inactive{% endif %}" id="ann-item-{{ a.id }}">
+      <div class="ann-item-head">
+        <span class="ann-badge {{ a.badge }}">{{ a.badge }}</span>
+        {% if a.pinned %}<span class="pin-chip">📌 중요</span>{% endif %}
+        <span class="ann-item-title">{{ a.title }}</span>
+        <span class="active-chip {% if a.is_active %}on{% else %}off{% endif %}">
+          {{ '● 활성' if a.is_active else '○ 비활성' }}
+        </span>
+      </div>
+      {% if a.content %}
+      <div class="ann-item-content">{{ a.content }}</div>
+      {% endif %}
+      <div class="ann-item-meta">
+        등록일 {{ a.created_at[:16] }}
+        {% if a.updated_at != a.created_at %} · 수정 {{ a.updated_at[:16] }}{% endif %}
+      </div>
+      <div class="ann-actions">
+        <button class="ann-btn" onclick="toggleEditForm({{ a.id }})">✏️ 수정</button>
+        <form method="post" action="/portal/admin/announcements/{{ a.id }}/toggle" style="margin:0;display:inline;">
+          {% if a.is_active %}
+            <button type="submit" class="ann-btn toggle-off">⏸ 비활성화</button>
+          {% else %}
+            <button type="submit" class="ann-btn toggle-on">▶ 활성화</button>
+          {% endif %}
+        </form>
+        <form method="post" action="/portal/admin/announcements/{{ a.id }}/delete"
+              style="margin:0;display:inline;"
+              onsubmit="return confirm('이 공지를 삭제하시겠습니까?')">
+          <button type="submit" class="ann-btn del">🗑 삭제</button>
+        </form>
+      </div>
+
+      <!-- 인라인 수정 폼 -->
+      <div class="ann-edit-form" id="ann-edit-{{ a.id }}">
+        <form method="post" action="/portal/admin/announcements/{{ a.id }}/update">
+          <div class="ann-row" style="margin-bottom:.5rem;">
+            <label>구분</label>
+            <select name="badge">
+              <option value="공지"    {% if a.badge=='공지' %}selected{% endif %}>📢 공지</option>
+              <option value="업데이트" {% if a.badge=='업데이트' %}selected{% endif %}>🆕 업데이트</option>
+              <option value="점검"    {% if a.badge=='점검' %}selected{% endif %}>🔧 점검</option>
+              <option value="이벤트"  {% if a.badge=='이벤트' %}selected{% endif %}>🎉 이벤트</option>
+            </select>
+            <label>제목</label>
+            <input type="text" name="title" value="{{ a.title }}" required maxlength="80">
+            <label style="display:flex;align-items:center;gap:.3rem;cursor:pointer;">
+              <input type="checkbox" name="pinned" value="1" {% if a.pinned %}checked{% endif %}> 중요📌
+            </label>
+          </div>
+          <textarea class="ann-textarea" name="content" style="min-height:70px;">{{ a.content }}</textarea>
+          <div style="display:flex;gap:.4rem;">
+            <button type="submit" class="ann-edit-submit">💾 저장</button>
+            <button type="button" onclick="toggleEditForm({{ a.id }})"
+                    style="font-size:.8rem;padding:.3rem .7rem;border:1px solid #e5e7eb;
+                           border-radius:.35rem;background:#fff;cursor:pointer;">취소</button>
+          </div>
+        </form>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="ann-empty">
+    <b style="display:block;margin-bottom:.3rem;">등록된 공지가 없습니다</b>
+    위 폼에서 첫 번째 공지를 작성해보세요.
+  </div>
+  {% endif %}
+</div>
+
+<script>
+function toggleEditForm(id) {
+  var el = document.getElementById('ann-edit-' + id);
+  if (!el) return;
+  el.classList.toggle('open');
+}
+</script>
+{% endblock %}

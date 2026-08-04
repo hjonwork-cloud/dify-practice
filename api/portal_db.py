@@ -149,6 +149,21 @@ def init_db() -> None:
             );
             CREATE INDEX IF NOT EXISTS idx_voc_comments_post ON voc_comments(post_id, created_at);
         """)
+        # 공지 테이블 마이그레이션
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS announcements (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                badge       TEXT NOT NULL DEFAULT '공지',
+                title       TEXT NOT NULL,
+                content     TEXT NOT NULL,
+                is_active   INTEGER NOT NULL DEFAULT 1,
+                pinned      INTEGER NOT NULL DEFAULT 0,
+                created_by  TEXT,
+                created_at  TEXT NOT NULL,
+                updated_at  TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_ann_active ON announcements(is_active, pinned DESC, created_at DESC);
+        """)
 
 
 def record_login(emp_code: str, emp_name: str = "", team: str = "", ip: str = "", user_agent: str = "", success: bool = True, reason: str = "") -> None:
@@ -402,6 +417,60 @@ def list_login_logs(limit: int = 200) -> list[dict]:
             (limit,),
         ).fetchall()
         return [dict(r) for r in rows]
+
+
+# ── 공지 관리 ──────────────────────────────────────────────────────────────
+
+def list_announcements(active_only: bool = False) -> list[dict]:
+    init_db()
+    where = "WHERE is_active = 1" if active_only else ""
+    with _connect() as conn:
+        rows = conn.execute(
+            f"SELECT * FROM announcements {where} ORDER BY pinned DESC, created_at DESC"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def create_announcement(*, badge: str, title: str, content: str,
+                         pinned: bool = False, created_by: str = "") -> int:
+    init_db()
+    now = _now()
+    with _connect() as conn:
+        cur = conn.execute(
+            """INSERT INTO announcements (badge, title, content, is_active, pinned, created_by, created_at, updated_at)
+               VALUES (?, ?, ?, 1, ?, ?, ?, ?)""",
+            (badge, title, content, 1 if pinned else 0, created_by, now, now),
+        )
+        return cur.lastrowid
+
+
+def update_announcement(ann_id: int, *, badge: str, title: str, content: str, pinned: bool) -> None:
+    init_db()
+    with _connect() as conn:
+        conn.execute(
+            """UPDATE announcements SET badge=?, title=?, content=?, pinned=?, updated_at=?
+               WHERE id=?""",
+            (badge, title, content, 1 if pinned else 0, _now(), ann_id),
+        )
+
+
+def toggle_announcement(ann_id: int) -> bool:
+    """활성/비활성 토글. 현재 상태 반환."""
+    init_db()
+    with _connect() as conn:
+        row = conn.execute("SELECT is_active FROM announcements WHERE id=?", (ann_id,)).fetchone()
+        if not row:
+            return False
+        new_state = 0 if row["is_active"] else 1
+        conn.execute("UPDATE announcements SET is_active=?, updated_at=? WHERE id=?",
+                     (new_state, _now(), ann_id))
+        return bool(new_state)
+
+
+def delete_announcement(ann_id: int) -> None:
+    init_db()
+    with _connect() as conn:
+        conn.execute("DELETE FROM announcements WHERE id=?", (ann_id,))
 
 
 # ── VOC 게시판 ──────────────────────────────────────────────────────────────
