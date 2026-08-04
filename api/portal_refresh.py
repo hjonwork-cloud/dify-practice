@@ -11,7 +11,7 @@
   h_hmfo_fsi_dm.gd_rst_ing.portal_brand_customer_stats   (가맹점별 범용비중)
 """
 from __future__ import annotations
-import logging, time
+import logging, time, re
 logger = logging.getLogger(__name__)
 
 T_DASH          = "h_hmfo_fsi_dm.gd_rst_ing.portal_emp_dashboard"
@@ -1002,57 +1002,102 @@ def run_action_results_refresh() -> dict:
     except Exception as e:
         return {"status": "error", "reason": str(e), "step": "read_logs"}
 
-    # 판가설정 또는 DM 발송 로그 → (emp, customer, brand) 기준으로 가장 이른 action_ym 추출
+    # ── 1st pass: price 로그에서 (emp, customer) → brand_code 매핑 구축
+    _brand_lookup: dict = {}  # (emp_code, customer_code) → brand_code
+    for log in logs:
+        bc = str(log.get("brand_code") or "").strip()
+        pj = log.get("price_items_json") or ""
+        if bc and pj and pj not in ("[]", "null"):
+            k = (str(log.get("emp_code") or ""), str(log.get("customer_code") or ""))
+            if k not in _brand_lookup:
+                _brand_lookup[k] = bc
+            # brand_name도 저장
+            bn = str(log.get("brand_name") or "").strip()
+            if bn:
+                _brand_lookup[k + ("name",)] = bn  # type: ignore
+
+    # ── 2nd pass: (emp, customer, brand) 단위 집계
+    # key → {action_ym, dm_count, price_count, dm_matnr_set, item_count, ...}
     agg: dict = {}
     for log in logs:
         pj = log.get("price_items_json") or ""
         action_type = str(log.get("action_type") or "")
         product_names = str(log.get("product_names") or "")
 
+        # brand_code 보완: dm_only 빈값이면 price 로그에서 채움
+        brand_code = str(log.get("brand_code") or "").strip()
+        brand_name = str(log.get("brand_name") or "").strip()
+        emp_code   = str(log.get("emp_code") or "")
+        cust_code  = str(log.get("customer_code") or "")
+        if not brand_code:
+            lk = (emp_code, cust_code)
+            brand_code = _brand_lookup.get(lk, "")
+            brand_name = _brand_lookup.get(lk + ("name",), brand_name)  # type: ignore
+        if not brand_code:
+            continue  # brand 특정 불가 → 스킵
+
         # action_ym 결정
         action_ym = ""
+        items_parsed = []
         if pj and pj not in ("[]", "null"):
             try:
-                items = _json.loads(pj)
-                if items:
-                    dates = [str(it.get("date_from") or "")[:6] for it in items if it.get("date_from")]
-                    action_ym = min((d for d in dates if len(d) == 6), default="")
+                items_parsed = _json.loads(pj) or []
+                dates = [str(it.get("date_from") or "")[:6] for it in items_parsed if it.get("date_from")]
+                action_ym = min((d for d in dates if len(d) == 6), default="")
             except Exception:
                 pass
-        # dm_only_sent: price_items 없음 → created_at 기반 fallback
         if not action_ym:
             action_ym = str(log.get("created_at") or "")[:7].replace("-", "")
         if len(action_ym) != 6 or not action_ym.isdigit():
             continue
 
-        # dm_matnr_csv: price_items matnr 우선, 없으면 product_names 사용
-        dm_matnr_csv = ""
-        if pj and pj not in ("[]", "null"):
-            try:
-                items = _json.loads(pj)
-                dm_matnr_csv = ",".join(str(it.get("matnr") or "") for it in items if it.get("matnr"))
-            except Exception:
-                pass
-        if not dm_matnr_csv and product_names:
-            dm_matnr_csv = product_names.replace(", ", ",").replace(" ", ",")
+        # dm_matnr 수집 (SET으로 중복 제거, 이후 csv 변환)
+        matnr_set: set = set()
+        if items_parsed:
+            for it in items_parsed:
+                m = str(it.get("matnr") or "").strip()
+                if m:
+                    matnr_set.add(m)
+        if not matnr_set and product_names:
+            for m in re.split(r'[,\s]+', product_names):
+                m = m.strip()
+                if m:
+                    matnr_set.add(m)
 
-        key = (
-            str(log.get("emp_code") or ""),
-            str(log.get("customer_code") or ""),
-            str(log.get("brand_code") or ""),
-        )
-        entry = {
-            "emp_code":      key[0],
-            "customer_code": key[1],
-            "customer_name": str(log.get("customer_name") or "").replace("'", "''"),
-            "brand_code":    key[2],
-            "brand_name":    str(log.get("brand_name") or "").replace("'", "''"),
-            "action_ym":     action_ym,
-            "item_count":    len(_json.loads(pj)) if (pj and pj not in ("[]", "null")) else 0,
-            "dm_matnr_csv":  dm_matnr_csv.replace("'", ""),
-        }
-        if key not in agg or action_ym < agg[key]["action_ym"]:
-            agg[key] = entry
+        is_price = action_type in ("price_only", "price_and_dm")
+        is_dm    = action_type in ("dm_only", "price_and_dm")
+
+        key = (emp_code, cust_code, brand_code)
+        if key not in agg:
+            agg[key] = {
+                "emp_code":      emp_code,
+                "customer_code": cust_code,
+                "customer_name": str(log.get("customer_name") or "").replace("'", "''"),
+                "brand_code":    brand_code,
+                "brand_name":    brand_name.replace("'", "''"),
+                "action_ym":     action_ym,
+                "item_count":    len(items_parsed),
+                "dm_matnr_set":  matnr_set,
+                "dm_count":      1 if is_dm else 0,
+                "price_count":   1 if is_price else 0,
+            }
+        else:
+            # 가장 이른 action_ym 유지
+            if action_ym < agg[key]["action_ym"]:
+                agg[key]["action_ym"] = action_ym
+                agg[key]["item_count"] = len(items_parsed)
+            # 횟수 누적
+            if is_dm:
+                agg[key]["dm_count"] += 1
+            if is_price:
+                agg[key]["price_count"] += 1
+            # 추천 상품 누적
+            agg[key]["dm_matnr_set"] |= matnr_set
+
+    # set → csv 변환
+    for v in agg.values():
+        v["dm_matnr_csv"] = ",".join(sorted(v.pop("dm_matnr_set")))
+
 
     import main
     if not agg:
@@ -1062,6 +1107,7 @@ def run_action_results_refresh() -> dict:
         SELECT '' AS emp_code, '' AS customer_code, '' AS customer_name,
                '' AS brand_code, '' AS brand_name, '' AS action_ym,
                0 AS action_item_count, '' AS dm_matnr_csv,
+               CAST(0 AS BIGINT) AS dm_count, CAST(0 AS BIGINT) AS price_count,
                CAST(0 AS BIGINT) AS sales_after_m, CAST(0 AS BIGINT) AS gp_after_m,
                CAST(0.0 AS DOUBLE) AS gp_rate_after, CAST(0 AS BIGINT) AS generic_sales_after_m,
                CAST(0 AS BIGINT) AS sample_qty, CAST(0 AS BIGINT) AS sample_count,
@@ -1078,7 +1124,8 @@ def run_action_results_refresh() -> dict:
     rows = list(agg.values())
     values_parts = ", ".join(
         f"('{r['emp_code']}', '{r['customer_code']}', '{r['customer_name']}', "
-        f"'{r['brand_code']}', '{r['brand_name']}', '{r['action_ym']}', {r['item_count']}, '{r['dm_matnr_csv']}')"
+        f"'{r['brand_code']}', '{r['brand_name']}', '{r['action_ym']}', {r['item_count']}, "
+        f"'{r['dm_matnr_csv']}', {r['dm_count']}, {r['price_count']})"
         for r in rows
     )
 
@@ -1088,12 +1135,13 @@ def run_action_results_refresh() -> dict:
       SELECT col1 AS emp_code, col2 AS customer_code, col3 AS customer_name,
              col4 AS brand_code, col5 AS brand_name,
              col6 AS action_ym,  col7 AS action_item_count,
-             col8 AS dm_matnr_csv
+             col8 AS dm_matnr_csv, col9 AS dm_count, col10 AS price_count
       FROM VALUES {values_parts}
     )
     SELECT
       a.emp_code, a.customer_code, a.customer_name,
-      a.brand_code, a.brand_name, a.action_ym, a.action_item_count, a.dm_matnr_csv,
+      a.brand_code, a.brand_name, a.action_ym, a.action_item_count,
+      a.dm_matnr_csv, a.dm_count, a.price_count,
       ROUND(SUM(COALESCE(m.`매출액`, 0)) / 10000)    AS sales_after_m,
       ROUND((SUM(COALESCE(m.`매출액`, 0)) - SUM(COALESCE(m.`매출원가`, 0))) / 10000) AS gp_after_m,
       CASE WHEN SUM(COALESCE(m.`매출액`, 0)) = 0 THEN 0.0
@@ -1121,7 +1169,8 @@ def run_action_results_refresh() -> dict:
           AND m.`ZC본부`  = a.brand_code
           AND m.`년월`    >= a.action_ym
     GROUP BY a.emp_code, a.customer_code, a.customer_name,
-             a.brand_code, a.brand_name, a.action_ym, a.action_item_count, a.dm_matnr_csv
+             a.brand_code, a.brand_name, a.action_ym, a.action_item_count,
+             a.dm_matnr_csv, a.dm_count, a.price_count
     """
     try:
         main.run_query(sql, raw=True)
@@ -1169,6 +1218,9 @@ def read_action_results(emp_code: str, brand_code: str = "", action_ym: str = ""
                 "brand_name":            str(r.get("brand_name") or ""),
                 "action_ym":             str(r.get("action_ym") or ""),
                 "action_item_count":     int(r.get("action_item_count") or 0),
+                "dm_count":              int(r.get("dm_count") or 0),
+                "price_count":           int(r.get("price_count") or 0),
+                "dm_matnr_csv":          str(r.get("dm_matnr_csv") or ""),
                 "sales_after_m":         int(r.get("sales_after_m") or 0),
                 "gp_after_m":            int(r.get("gp_after_m") or 0),
                 "gp_rate_after":         float(r.get("gp_rate_after") or 0),

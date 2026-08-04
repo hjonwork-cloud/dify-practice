@@ -45,6 +45,16 @@
 
 .empty-state{text-align:center;padding:3rem;color:#9ca3af;font-size:.9rem;}
 .empty-state b{display:block;font-size:1.1rem;color:#6b7280;margin-bottom:.5rem;}
+/* 펼침 세부 행 */
+.detail-row td{background:#f8fafc;padding:.6rem 1rem .6rem 2.5rem;border-bottom:1px solid #e5e7eb;}
+.detail-row{display:none;}
+.detail-row.open{display:table-row;}
+.matnr-pills{display:flex;flex-wrap:wrap;gap:.35rem;}
+.matnr-pill{display:inline-block;padding:.15rem .5rem;border-radius:.3rem;background:#dbeafe;
+  color:#1d4ed8;font-size:.72rem;font-weight:600;font-family:monospace;}
+.expand-btn{background:none;border:1px solid #d1d5db;border-radius:.3rem;cursor:pointer;
+  font-size:.72rem;padding:.15rem .45rem;color:#6b7280;line-height:1;}
+.expand-btn:hover{background:#f3f4f6;}
 </style>
 
 <div class="portal-heading">
@@ -95,22 +105,41 @@
           <th onclick="sortTable(2)">브랜드</th>
           <th onclick="sortTable(3)">액션월</th>
           <th onclick="sortTable(4)" style="text-align:center;">설정품목</th>
-          <th onclick="sortTable(5)" style="text-align:right;">이후누적매출(백만)</th>
-          <th onclick="sortTable(6)" style="text-align:right;">이후GP(백만)</th>
-          <th onclick="sortTable(7)" style="text-align:right;">GP율(%)</th>
-          <th onclick="sortTable(8)" style="text-align:right;">범용추가매출(백만)</th>
-          <th onclick="sortTable(9)" style="text-align:center;">샘플출고</th>
-          <th onclick="sortTable(10)" style="text-align:center;">DM전환(개)</th>
+          <th onclick="sortTable(5)" style="text-align:center;">DM발송</th>
+          <th onclick="sortTable(6)" style="text-align:center;">판가설정</th>
+          <th style="text-align:center;">DM발송품목</th>
+          <th onclick="sortTable(8)" style="text-align:right;">이후누적매출(백만)</th>
+          <th onclick="sortTable(9)" style="text-align:right;">이후GP(백만)</th>
+          <th onclick="sortTable(10)" style="text-align:right;">GP율(%)</th>
+          <th onclick="sortTable(11)" style="text-align:right;">범용추가(백만)</th>
+          <th onclick="sortTable(12)" style="text-align:center;">샘플출고</th>
+          <th onclick="sortTable(13)" style="text-align:center;">DM전환(개)</th>
         </tr>
       </thead>
-      <tbody>
+      <tbody id="resultsTbody">
         {% for r in rows %}
-        <tr>
+        {% set rid = loop.index %}
+        <tr class="result-row" onclick="toggleDetail({{ rid }})" style="cursor:pointer;">
           <td><b>{{ r.customer_name }}</b></td>
           <td style="color:#9ca3af;font-size:.75rem;">{{ r.customer_code }}</td>
           <td style="font-size:.78rem;">{{ r.brand_name }}</td>
           <td>{{ r.action_ym }}</td>
           <td style="text-align:center;">{{ r.action_item_count }}품목</td>
+          <td style="text-align:center;">
+            {% if r.dm_count is defined and r.dm_count > 0 %}
+              <span style="color:#7c3aed;font-weight:600;">{{ r.dm_count }}회</span>
+            {% else %}<span style="color:#e5e7eb;">-</span>{% endif %}
+          </td>
+          <td style="text-align:center;">
+            {% if r.price_count is defined and r.price_count > 0 %}
+              <span style="color:#0369a1;font-weight:600;">{{ r.price_count }}회</span>
+            {% else %}<span style="color:#e5e7eb;">-</span>{% endif %}
+          </td>
+          <td style="text-align:center;">
+            {% if r.dm_matnr_csv is defined and r.dm_matnr_csv %}
+              <button class="expand-btn" onclick="event.stopPropagation();toggleDetail({{ rid }})" title="발송 품목 보기">📌 상세</button>
+            {% else %}<span style="color:#e5e7eb;">-</span>{% endif %}
+          </td>
           <td style="text-align:right;">{{ '{:,}'.format(r.sales_after_m) }}</td>
           <td style="text-align:right;">{{ '{:,}'.format(r.gp_after_m) }}</td>
           <td style="text-align:right;">
@@ -127,6 +156,30 @@
             {% if r.dm_product_qty is defined and r.dm_product_qty > 0 %}
               <span style="color:#2563eb;font-weight:600;">{{ r.dm_product_qty }}개</span>
             {% else %}<span style="color:#e5e7eb;">-</span>{% endif %}
+          </td>
+        </tr>
+        <!-- 펼침 세부 행 -->
+        <tr class="detail-row" id="detail-{{ rid }}">
+          <td colspan="14">
+            <div style="font-size:.78rem;color:#374151;">
+              <b style="color:#1e293b;">📦 DM 발송 품목</b>
+              {% if r.dm_matnr_csv is defined and r.dm_matnr_csv %}
+              <div class="matnr-pills" style="margin-top:.4rem;">
+                {% for matnr in r.dm_matnr_csv.split(',') %}
+                  {% if matnr.strip() %}
+                  <span class="matnr-pill">{{ matnr.strip() }}</span>
+                  {% endif %}
+                {% endfor %}
+              </div>
+              {% else %}
+              <span style="color:#9ca3af;">상품코드 정보 없음</span>
+              {% endif %}
+              <div style="margin-top:.5rem;color:#6b7280;font-size:.72rem;">
+                DM발송 {{ r.dm_count if r.dm_count is defined else 0 }}회 ·
+                판가설정 {{ r.price_count if r.price_count is defined else 0 }}회 ·
+                액션시작월 {{ r.action_ym }}
+              </div>
+            </div>
           </td>
         </tr>
         {% endfor %}
@@ -197,8 +250,14 @@
     });
     rows.forEach(function(r) { tbody.appendChild(r); });
   };
-  // 기본 정렬: 이후누적매출 내림차순
-  window.sortTable(5);
+  // 기본 정렬: 이후누적매출 내림차순 (col index 8로 변경)
+  window.sortTable(8);
+
+  // 펼침/접기 토글
+  window.toggleDetail = function(rid) {
+    const el = document.getElementById('detail-' + rid);
+    if (el) el.classList.toggle('open');
+  };
 
   // 실적 리프레시
   window.doRefresh = async function(btn) {
