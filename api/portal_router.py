@@ -752,8 +752,7 @@ def _recommend_products(brand_name: str, customer_code: str, months: list[str], 
         WITH target_products AS (
             SELECT DISTINCT `자재`
             FROM {main.T_MAIN}
-            WHERE `영업사원` = {_sql(emp_code)}
-              AND `ZC본부명` = {_sql(brand_name)}
+            WHERE `ZC본부명` = {_sql(brand_name)}
               AND `거래처` = {_sql(customer_code)}
               AND `년월` IN ({_in_months(months)})
               AND `자재그룹명` IS NOT NULL
@@ -1963,24 +1962,49 @@ async def action_matnr_sales(
               AND `대금청구일` >= '{action_date}'
               AND TRIM(`자재`) IN ({matnr_in})
             GROUP BY TRIM(`자재`)
-            HAVING sales_m > 0 OR sample_qty > 0
+        """, raw=True) or []
+        # 자재명·평균단가 fallback: 거래처/기간 무관하게 브랜드 전체에서 조회
+        name_rows = main._safe_query(f"""
+            SELECT TRIM(`자재`) AS matnr,
+                   MAX(`자재명`) AS matnr_name,
+                   ROUND(
+                     CASE WHEN SUM(CASE WHEN `매출액`>0 THEN CAST(`매출수량` AS DOUBLE) ELSE 0 END) > 0
+                          THEN SUM(CASE WHEN `매출액`>0 THEN `매출액` ELSE 0 END)
+                               / SUM(CASE WHEN `매출액`>0 THEN CAST(`매출수량` AS DOUBLE) ELSE 0 END) * 100
+                          ELSE 0 END, 0) AS avg_unit_price
+            FROM {main.T_MAIN}
+            WHERE TRIM(`자재`) IN ({matnr_in})
+            GROUP BY TRIM(`자재`)
         """, raw=True) or []
     except Exception as e:
         return JSONResponse({"rows": [], "error": str(e)})
     result_map = {str(r.get("matnr") or ""): r for r in db_rows}
+    name_map   = {str(r.get("matnr") or ""): r for r in name_rows}
     out = []
     for matnr in matnrs:
         r = result_map.get(matnr, {})
+        nr = name_map.get(matnr, {})
         sales_m   = float(r.get("sales_m") or 0)
         gp_m      = float(r.get("gp_m") or 0)
         sales_qty = int(r.get("sales_qty") or 0)
         sample_qty= int(r.get("sample_qty") or 0)
-        net_qty   = sales_qty  # 매출액>0인 행만 이미 필터됨
+        net_qty   = sales_qty
         gp_rate   = round(gp_m / sales_m * 100, 1) if sales_m > 0 else 0.0
+        # 자재명: 실적 쿼리 우선, 없으면 전체 name_map fallback
+        matnr_name = str(r.get("matnr_name") or nr.get("matnr_name") or "-")
+        # 설정판가: SQLite 판가 우선, 없으면 T_MAIN 평균단가 fallback
+        _set_price = price_map.get(matnr)
+        _price_is_avg = False
+        if _set_price is None:
+            avg_p = int(nr.get("avg_unit_price") or 0)
+            if avg_p > 0:
+                _set_price = avg_p
+                _price_is_avg = True
         out.append({
             "matnr":        matnr,
-            "matnr_name":   str(r.get("matnr_name") or "-"),
-            "set_price":    price_map.get(matnr),
+            "matnr_name":   matnr_name,
+            "set_price":    _set_price,
+            "set_price_is_avg": _price_is_avg,  # True면 SAP판가 아닌 평균단가
             "sales_after_m": sales_m,
             "gp_after_m":   gp_m,
             "gp_rate":      gp_rate,

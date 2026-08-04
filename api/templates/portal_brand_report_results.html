@@ -120,7 +120,7 @@
           <th onclick="sortTable(10)" style="text-align:right;">GP율(%)</th>
           <th onclick="sortTable(11)" style="text-align:right;">범용추가(백만)</th>
           <th onclick="sortTable(12)" style="text-align:center;">샘플출고</th>
-          <th onclick="sortTable(13)" style="text-align:center;">DM전환(개)</th>
+          <th onclick="sortTable(13)" style="text-align:center;">DM전환(건)</th>
         </tr>
       </thead>
       <tbody id="resultsTbody">
@@ -166,7 +166,7 @@
           </td>
           <td style="text-align:center;">
             {% if (r.dm_product_qty | default(0)) > 0 %}
-              <span style="color:#2563eb;font-weight:600;">{{ r.dm_product_qty }}개</span>
+              <span style="color:#2563eb;font-weight:600;">{{ r.dm_product_qty }}건</span>
             {% else %}<span style="color:#e5e7eb;">-</span>{% endif %}
           </td>
         </tr>
@@ -335,7 +335,11 @@
       var hasSample = r.sample_qty > 0;
       var rowStyle  = (!hasSales && !hasSample) ? ' style="opacity:.45;"' : '';
       var gpCls = r.gp_rate >= 20 ? 'up' : r.gp_rate >= 10 ? 'mid' : 'down';
-      var setPriceStr = r.set_price != null ? '&#8361;' + r.set_price.toLocaleString() : '-';
+      var setPriceStr = r.set_price != null
+        ? (r.set_price_is_avg
+            ? '<span title="\ud3c9\uade0\ub2e8\uac00(\uc2e4\uc801\uae30\uc900)" style="color:#9ca3af;">~&#8361;' + r.set_price.toLocaleString() + '</span>'
+            : '&#8361;' + r.set_price.toLocaleString())
+        : '-';
       // 전환 컨력: 매출수량>0 → ✅ / 샘플만 → 공비칸 / 둘다 0 → -
       var converted = hasSales ? '✅' : '<span style="color:#e5e7eb;">-</span>';
       var salesMStr = hasSales ? r.sales_after_m.toFixed(2) + '백만' : '<span style="color:#e5e7eb;">-</span>';

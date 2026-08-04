@@ -1182,11 +1182,11 @@ def run_action_results_refresh() -> dict:
                              AND COALESCE(m.`매출액`, 0) = 0
                              AND COALESCE(m.`매출수량`, 0) > 0
                         THEN 1 ELSE 0 END), 0) AS sample_count,
-      -- DM 추천 상품 실제 구매 수량 (매출액>0)
-      COALESCE(SUM(CASE WHEN a.dm_matnr_csv <> ''
-                             AND ARRAY_CONTAINS(SPLIT(a.dm_matnr_csv, ','), TRIM(m.`자재`))
-                             AND COALESCE(m.`매출액`, 0) > 0
-                        THEN CAST(m.`매출수량` AS BIGINT) ELSE 0 END), 0) AS dm_product_qty,
+      -- DM 추천 상품 실제 구매 건수 (자재 단위, 매출액>0)
+      COUNT(DISTINCT CASE WHEN a.dm_matnr_csv <> ''
+                               AND ARRAY_CONTAINS(SPLIT(a.dm_matnr_csv, ','), TRIM(m.`자재`))
+                               AND COALESCE(m.`매출액`, 0) > 0
+                          THEN TRIM(m.`자재`) END) AS dm_product_qty,
       CURRENT_TIMESTAMP() AS updated_at
     FROM actions a
     LEFT JOIN {main.T_MAIN} m
