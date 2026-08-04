@@ -828,7 +828,13 @@
 <section class="portal-panel" style="margin-top:1.25rem;" id="actionResultsSection">
   <div class="portal-panel-head" style="padding-bottom:.25rem;">
     <div><p class="eyebrow">ACTION RESULTS</p><h2>📊 액션 실적 &amp; 이력</h2></div>
-    <div id="actionResultsSummary" style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;font-size:.82rem;"></div>
+    <div style="display:flex;gap:.75rem;align-items:center;flex-wrap:wrap;">
+      <div id="actionResultsSummary" style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;font-size:.82rem;"></div>
+      <button onclick="arRefreshResults(this)"
+              style="font-size:.75rem;padding:.3rem .7rem;border-radius:.4rem;border:1px solid #d1d5db;
+                     background:#f9fafb;color:#374151;cursor:pointer;white-space:nowrap;flex-shrink:0;"
+              title="T_ACTION_RESULTS 재집계 실행">🔄 실적 리프레시</button>
+    </div>
   </div>
   <!-- 탭 버튼 -->
   <div class="ar-tabs" style="padding:0 1.25rem;">
@@ -886,18 +892,35 @@
         `<span class="ar-badge blue">범용 추가 <b>${(sum.total_generic_after_m||0).toLocaleString()}</b>백만</span>`,
       ].join('');
       if (!rows.length) {
-        body.innerHTML = '<div style="color:#9ca3af;font-size:.85rem;padding:.5rem 0;">아직 판가설정 액션 실적이 없습니다. (판가 등록 후 다음 달 매출 집계 시 표시)</div>'; return;
+        body.innerHTML = '<div style="color:#9ca3af;font-size:.85rem;padding:.5rem 0;">아직 액션 실적이 없습니다. (DM 발송·판가 등록 후 리프레시하면 표시)</div>'; return;
       }
+      const totalSample = rows.reduce((s,r)=>(s + (r.sample_count||0)), 0);
+      const totalDmQty  = rows.reduce((s,r)=>(s + (r.dm_product_qty||0)), 0);
+      summary.innerHTML = [
+        `<span class="ar-badge gray">총 액션 <b>${sum.count||0}</b>건</span>`,
+        `<span class="ar-badge">누적 매출 <b>${(sum.total_sales_after_m||0).toLocaleString()}</b>백만</span>`,
+        `<span class="ar-badge">누적 GP <b>${(sum.total_gp_after_m||0).toLocaleString()}</b>백만</span>`,
+        `<span class="ar-badge blue">범용 추가 <b>${(sum.total_generic_after_m||0).toLocaleString()}</b>백만</span>`,
+        totalSample ? `<span class="ar-badge" style="background:#f0fdf4;color:#16a34a;">샘플출고 <b>${totalSample}</b>건</span>` : '',
+        totalDmQty  ? `<span class="ar-badge" style="background:#eff6ff;color:#2563eb;">DM전환 <b>${totalDmQty}</b>개</span>` : '',
+      ].filter(Boolean).join('');
       const tbl = document.createElement('table');
       tbl.className = 'ar-table';
       tbl.innerHTML = `<thead><tr>
         <th>가맹점명</th><th>코드</th><th>액션월</th><th>설정품목</th>
         <th>이후누적매출(백만)</th><th>이후GP(백만)</th><th>GP율</th><th>범용추가(백만)</th>
+        <th>샘플출고</th><th>DM전환(개)</th>
       </tr></thead>`;
       const tbody = document.createElement('tbody');
       rows.forEach(r => {
         const tr = document.createElement('tr');
         const gpC = r.gp_rate_after >= 20 ? 'up' : r.gp_rate_after >= 10 ? 'neutral' : 'down';
+        const sampleCell = (r.sample_count||0) > 0
+          ? `<span title="수량 ${r.sample_qty||0}개" style="color:#16a34a;font-weight:600;">✅ ${r.sample_count}건</span>`
+          : `<span style="color:#d1d5db;">-</span>`;
+        const dmQtyCell = (r.dm_product_qty||0) > 0
+          ? `<span style="color:#2563eb;font-weight:600;">${r.dm_product_qty}개</span>`
+          : `<span style="color:#d1d5db;">-</span>`;
         tr.innerHTML = `
           <td><b>${r.customer_name||''}</b></td>
           <td style="color:#9ca3af;font-size:.72rem;">${r.customer_code||''}</td>
@@ -906,12 +929,45 @@
           <td>${(r.sales_after_m||0).toLocaleString()}</td>
           <td>${(r.gp_after_m||0).toLocaleString()}</td>
           <td><span class="gp-chip ${gpC}">${r.gp_rate_after||0}%</span></td>
-          <td>${(r.generic_sales_after_m||0).toLocaleString()}</td>`;
+          <td>${(r.generic_sales_after_m||0).toLocaleString()}</td>
+          <td>${sampleCell}</td>
+          <td>${dmQtyCell}</td>`;
         tbody.appendChild(tr);
       });
       tbl.appendChild(tbody); body.innerHTML = ''; body.appendChild(tbl);
     })
     .catch(() => { document.getElementById('actionResultsBody').innerHTML = '<div style="color:#ef4444;font-size:.82rem;">실적 데이터 로드 실패</div>'; });
+
+  // ─── 실적 리프레시 버튼 ──────────────────────────────
+  window.arRefreshResults = async function(btn) {
+    const orig = btn.textContent;
+    btn.disabled = true; btn.textContent = '⏳ 집계 중...';
+    try {
+      const res = await fetch('/admin/api/run-action-results-refresh', { method: 'POST' });
+      if (res.status === 401 || res.status === 403) {
+        // 어드민 권한 없음 → 포털용 경량 refresh 엔드포인트 사용
+        const res2 = await fetch('/portal/refresh-action-results', { method: 'POST' });
+        if (!res2.ok) throw new Error('refresh 실패');
+        const d2 = await res2.json();
+        alert(`✅ 집계 완료: ${d2.action_rows||0}건 처리됨`);
+      } else {
+        if (!res.ok) throw new Error('refresh 실패');
+        const d = await res.json();
+        if (d.status === 'ok') alert(`✅ 집계 완료: ${d.action_rows||0}건 처리됨`);
+        else alert(`⚠️ ${d.reason||d.message||JSON.stringify(d)}`);
+      }
+      // 테이블 재로드
+      document.getElementById('actionResultsBody').innerHTML = '<div style="color:#9ca3af;font-size:.82rem;">로딩 중...</div>';
+      document.getElementById('actionResultsSummary').innerHTML = '';
+      window._arHistLoaded = false;
+      // 페이지 새로고침으로 최신 데이터 표시
+      setTimeout(() => location.reload(), 500);
+    } catch(e) {
+      alert('오류: ' + e.message);
+    } finally {
+      btn.disabled = false; btn.textContent = orig;
+    }
+  };
 
   // ─── 발송 이력 탭 ────────────────────────────────────
   let _histAllRows = [];

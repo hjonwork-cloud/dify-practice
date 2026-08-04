@@ -1885,6 +1885,27 @@ async def action_results(
     }))
 
 
+@router.post("/refresh-action-results")
+async def portal_refresh_action_results(request: Request):
+    """포털 사용자용 T_ACTION_RESULTS 수동 리프레시 (로그인 필요)."""
+    _require_user(request)
+    result_holder: dict = {}
+
+    def _do():
+        try:
+            from portal_refresh import run_action_results_refresh
+            result_holder.update(run_action_results_refresh())
+        except Exception as e:
+            result_holder.update({"status": "error", "reason": str(e)})
+
+    t = threading.Thread(target=_do, daemon=False)
+    t.start()
+    t.join(timeout=120)
+    if not result_holder:
+        return JSONResponse({"status": "timeout", "action_rows": 0})
+    return JSONResponse(result_holder)
+
+
 @router.post("/dm-log")
 async def dm_log(request: Request):
     user = _require_user(request)

@@ -806,6 +806,31 @@ async def api_stats(request: Request):
     return admin_db.dashboard_metrics()
 
 
+@router.post("/api/run-action-results-refresh")
+async def run_action_results_refresh_api(request: Request):
+    """T_ACTION_RESULTS 수동 갱신 (어드민 전용).
+    POST /admin/api/run-action-results-refresh
+    """
+    _require_admin(request)
+    import threading
+    result_holder = {}
+
+    def _do():
+        try:
+            from portal_refresh import run_action_results_refresh
+            result_holder.update(run_action_results_refresh())
+        except Exception as e:
+            result_holder.update({"status": "error", "reason": str(e)})
+
+    t = threading.Thread(target=_do, daemon=False)
+    t.start()
+    t.join(timeout=120)   # 최대 2분 대기
+
+    if not result_holder:
+        return {"status": "timeout", "message": "2분 내 완료되지 않음. 백그라운드 계속 실행 중"}
+    return result_holder
+
+
 @router.get("/api/verify-dm-conversion")
 async def verify_dm_conversion(request: Request, cust_code: str = "0000193241",
                                 matnr: str = "100914", dm_ym: str = "202607"):
