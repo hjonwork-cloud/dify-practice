@@ -1051,6 +1051,11 @@ def run_action_results_refresh() -> dict:
         if len(action_ym) != 6 or not action_ym.isdigit():
             continue
 
+        # action_date: DM 발송일 (YYYYMMDD) — 대금청구일 비교용
+        action_date = str(log.get("created_at") or "")[:10].replace("-", "")  # "20260801"
+        if len(action_date) != 8 or not action_date.isdigit():
+            action_date = action_ym + "01"
+
         # dm_matnr 수집 (SET으로 중복 제거, 이후 csv 변환)
         matnr_set: set = set()
         if items_parsed:
@@ -1076,16 +1081,19 @@ def run_action_results_refresh() -> dict:
                 "brand_code":    brand_code,
                 "brand_name":    brand_name.replace("'", "''"),
                 "action_ym":     action_ym,
+                "action_date":   action_date,
                 "item_count":    len(items_parsed),
                 "dm_matnr_set":  matnr_set,
                 "dm_count":      1 if is_dm else 0,
                 "price_count":   1 if is_price else 0,
             }
         else:
-            # 가장 이른 action_ym 유지
+            # 가장 이른 action_ym / action_date 유지
             if action_ym < agg[key]["action_ym"]:
                 agg[key]["action_ym"] = action_ym
                 agg[key]["item_count"] = len(items_parsed)
+            if action_date < agg[key]["action_date"]:
+                agg[key]["action_date"] = action_date
             # 횟수 누적
             if is_dm:
                 agg[key]["dm_count"] += 1
@@ -1105,7 +1113,7 @@ def run_action_results_refresh() -> dict:
         empty_sql = f"""
         CREATE OR REPLACE TABLE {T_ACTION_RESULTS} AS
         SELECT '' AS emp_code, '' AS customer_code, '' AS customer_name,
-               '' AS brand_code, '' AS brand_name, '' AS action_ym,
+               '' AS brand_code, '' AS brand_name, '' AS action_ym, '' AS action_date,
                0 AS action_item_count, '' AS dm_matnr_csv,
                CAST(0 AS BIGINT) AS dm_count, CAST(0 AS BIGINT) AS price_count,
                CAST(0 AS BIGINT) AS sales_after_m, CAST(0 AS BIGINT) AS gp_after_m,
@@ -1124,7 +1132,7 @@ def run_action_results_refresh() -> dict:
     rows = list(agg.values())
     values_parts = ", ".join(
         f"('{r['emp_code']}', '{r['customer_code']}', '{r['customer_name']}', "
-        f"'{r['brand_code']}', '{r['brand_name']}', '{r['action_ym']}', {r['item_count']}, "
+        f"'{r['brand_code']}', '{r['brand_name']}', '{r['action_ym']}', '{r['action_date']}', {r['item_count']}, "
         f"'{r['dm_matnr_csv']}', {r['dm_count']}, {r['price_count']})"
         for r in rows
     )
@@ -1134,42 +1142,63 @@ def run_action_results_refresh() -> dict:
     WITH actions AS (
       SELECT col1 AS emp_code, col2 AS customer_code, col3 AS customer_name,
              col4 AS brand_code, col5 AS brand_name,
-             col6 AS action_ym,  col7 AS action_item_count,
-             col8 AS dm_matnr_csv, col9 AS dm_count, col10 AS price_count
+             col6 AS action_ym,  col7 AS action_date, col8 AS action_item_count,
+             col9 AS dm_matnr_csv, col10 AS dm_count, col11 AS price_count
       FROM VALUES {values_parts}
     )
     SELECT
       a.emp_code, a.customer_code, a.customer_name,
-      a.brand_code, a.brand_name, a.action_ym, a.action_item_count,
+      a.brand_code, a.brand_name, a.action_ym, a.action_date, a.action_item_count,
       a.dm_matnr_csv, a.dm_count, a.price_count,
-      ROUND(SUM(COALESCE(m.`매출액`, 0)) / 10000)    AS sales_after_m,
-      ROUND((SUM(COALESCE(m.`매출액`, 0)) - SUM(COALESCE(m.`매출원가`, 0))) / 10000) AS gp_after_m,
-      CASE WHEN SUM(COALESCE(m.`매출액`, 0)) = 0 THEN 0.0
-           ELSE ROUND((SUM(COALESCE(m.`매출액`, 0)) - SUM(COALESCE(m.`매출원가`, 0)))
-                      / SUM(COALESCE(m.`매출액`, 0)) * 100, 1)
+      -- 제안 품목(자재코드 일치) + 발송일 이후 매출만 집계
+      ROUND(SUM(CASE WHEN a.dm_matnr_csv <> ''
+                          AND ARRAY_CONTAINS(SPLIT(a.dm_matnr_csv, ','), TRIM(m.`자재`))
+                     THEN COALESCE(m.`매출액`, 0) ELSE 0 END) / 10000) AS sales_after_m,
+      ROUND((SUM(CASE WHEN a.dm_matnr_csv <> ''
+                           AND ARRAY_CONTAINS(SPLIT(a.dm_matnr_csv, ','), TRIM(m.`자재`))
+                      THEN COALESCE(m.`매출액`, 0) ELSE 0 END)
+           - SUM(CASE WHEN a.dm_matnr_csv <> ''
+                           AND ARRAY_CONTAINS(SPLIT(a.dm_matnr_csv, ','), TRIM(m.`자재`))
+                      THEN COALESCE(m.`매출원가`, 0) ELSE 0 END)) / 10000) AS gp_after_m,
+      CASE WHEN SUM(CASE WHEN a.dm_matnr_csv <> ''
+                              AND ARRAY_CONTAINS(SPLIT(a.dm_matnr_csv, ','), TRIM(m.`자재`))
+                         THEN COALESCE(m.`매출액`, 0) ELSE 0 END) = 0 THEN 0.0
+           ELSE ROUND(
+             (SUM(CASE WHEN a.dm_matnr_csv <> '' AND ARRAY_CONTAINS(SPLIT(a.dm_matnr_csv, ','), TRIM(m.`자재`))
+                       THEN COALESCE(m.`매출액`, 0) ELSE 0 END)
+            - SUM(CASE WHEN a.dm_matnr_csv <> '' AND ARRAY_CONTAINS(SPLIT(a.dm_matnr_csv, ','), TRIM(m.`자재`))
+                       THEN COALESCE(m.`매출원가`, 0) ELSE 0 END))
+            / SUM(CASE WHEN a.dm_matnr_csv <> '' AND ARRAY_CONTAINS(SPLIT(a.dm_matnr_csv, ','), TRIM(m.`자재`))
+                       THEN COALESCE(m.`매출액`, 0) ELSE 0 END) * 100, 1)
       END AS gp_rate_after,
-      ROUND(SUM(CASE WHEN m.`자재그룹명` IS NOT NULL
-                     AND COALESCE(m.`자재그룹명`, '') <> 'FC전용상품'
+      ROUND(SUM(CASE WHEN a.dm_matnr_csv <> ''
+                          AND ARRAY_CONTAINS(SPLIT(a.dm_matnr_csv, ','), TRIM(m.`자재`))
+                          AND COALESCE(m.`자재그룹명`, '') <> 'FC전용상품'
                      THEN COALESCE(m.`매출액`, 0) ELSE 0 END) / 10000) AS generic_sales_after_m,
-      -- 샘플출고: 매출액=0 이고 수량>0 인 행 (추천 상품 샘플 출고 확인)
-      COALESCE(SUM(CASE WHEN COALESCE(m.`매출액`, 0) = 0
+      -- 샘플출고: 제안 품목 중 매출액=0, 수량>0
+      COALESCE(SUM(CASE WHEN a.dm_matnr_csv <> ''
+                             AND ARRAY_CONTAINS(SPLIT(a.dm_matnr_csv, ','), TRIM(m.`자재`))
+                             AND COALESCE(m.`매출액`, 0) = 0
                              AND COALESCE(m.`매출수량`, 0) > 0
                         THEN CAST(m.`매출수량` AS BIGINT) ELSE 0 END), 0) AS sample_qty,
-      COALESCE(SUM(CASE WHEN COALESCE(m.`매출액`, 0) = 0
+      COALESCE(SUM(CASE WHEN a.dm_matnr_csv <> ''
+                             AND ARRAY_CONTAINS(SPLIT(a.dm_matnr_csv, ','), TRIM(m.`자재`))
+                             AND COALESCE(m.`매출액`, 0) = 0
                              AND COALESCE(m.`매출수량`, 0) > 0
                         THEN 1 ELSE 0 END), 0) AS sample_count,
-      -- DM 추천 상품 구매 수량 (자재코드가 dm_matnr_csv 내에 있는 경우)
+      -- DM 추천 상품 실제 구매 수량 (매출액>0)
       COALESCE(SUM(CASE WHEN a.dm_matnr_csv <> ''
-                             AND ARRAY_CONTAINS(SPLIT(a.dm_matnr_csv, ','), m.`자재`)
+                             AND ARRAY_CONTAINS(SPLIT(a.dm_matnr_csv, ','), TRIM(m.`자재`))
+                             AND COALESCE(m.`매출액`, 0) > 0
                         THEN CAST(m.`매출수량` AS BIGINT) ELSE 0 END), 0) AS dm_product_qty,
       CURRENT_TIMESTAMP() AS updated_at
     FROM actions a
     LEFT JOIN {main.T_MAIN} m
-           ON m.`거래처`  = a.customer_code
-          AND m.`ZC본부`  = a.brand_code
-          AND m.`년월`    >= a.action_ym
+           ON m.`거래처`      = a.customer_code
+          AND m.`ZC본부`      = a.brand_code
+          AND m.`대금청구일`  >= a.action_date
     GROUP BY a.emp_code, a.customer_code, a.customer_name,
-             a.brand_code, a.brand_name, a.action_ym, a.action_item_count,
+             a.brand_code, a.brand_name, a.action_ym, a.action_date, a.action_item_count,
              a.dm_matnr_csv, a.dm_count, a.price_count
     """
     try:

@@ -305,37 +305,12 @@
 
     body.innerHTML = '';
 
-    // ── 라디오 선택 ────────────────────────────────────
-    const radioGroup = document.createElement('div');
-    radioGroup.className = 'action-radio-group';
+    // ── 판가설정 패널 (단일 모드) ─────────────────────
     const uid = custCode;
-    radioGroup.innerHTML = `
-      <label><input type="radio" name="act_${uid}" value="dm_only" checked> 💬 단순 DM 발송</label>
-      <label><input type="radio" name="act_${uid}" value="price_dm"> 💰 고객별판가 설정 후 DM 발송</label>
-    `;
-    body.appendChild(radioGroup);
-
-    // ── 단순 DM 패널 ───────────────────────────────────
-    const dmPanel = document.createElement('div');
-    dmPanel.className = 'action-section';
-    dmPanel.id = `dmPanel_${uid}`;
-    dmPanel.innerHTML = `
-      <div class="action-section-title">DM 메시지</div>
-      <textarea class="dm-preview-area" id="dmText_${uid}" rows="7">${dmMsg}</textarea>
-      <div style="margin-top:.5rem;display:flex;gap:.5rem;align-items:center;">
-        <button class="action-send-btn" onclick="sendDmOnly('${custCode}','${custName.replace(/'/g,"\\'")}','${brandCode}','${brandName.replace(/'/g,"\\'")}',this)">
-          💬 DM 발송
-        </button>
-        <span id="dmResult_${uid}" class="send-result" style="display:none;"></span>
-      </div>
-    `;
-    body.appendChild(dmPanel);
-
-    // ── 판가설정 패널 ──────────────────────────────────
+    _confirmed[uid] = false;   // 카드 오픈 시 미확정 상태
     const pricePanel = document.createElement('div');
     pricePanel.className = 'action-section';
     pricePanel.id = `pricePanel_${uid}`;
-    pricePanel.style.display = 'none';
 
     // 날짜 행
     const dateRow = document.createElement('div');
@@ -417,9 +392,14 @@
       const tr = btn.closest('tr');
       if (!tr) return;
       tr.remove();
-      // DM 자동 반영 제거 → '품목 확정·DM 반영' 버튼 수동 클릭 방식으로 변경
+      _confirmed[uid] = false;
+      checkPricePanelBtns(uid);
     };
-    window[`_confirmDm_${uid}`] = _rebuildDmMsg;
+    window[`_confirmDm_${uid}`] = function() {
+      _rebuildDmMsg();
+      _confirmed[uid] = true;
+      checkPricePanelBtns(uid);
+    };
 
     // 처음 5개 렌더링
     function appendMoreRows(count) {
@@ -429,6 +409,7 @@
         tbody.appendChild(buildProductRow(_allProducts[uid][i], i));
       }
       _shownCount[uid] = end;
+      if (end > start) { _confirmed[uid] = false; checkPricePanelBtns(uid); }
       // 더 보기 버튼 표시/숨김
       const moreBtn = document.getElementById(`moreBtn_${uid}`);
       if (moreBtn) {
@@ -473,15 +454,15 @@
       <textarea class="dm-preview-area" id="priceDmText_${uid}" rows="4">${dmMsg}</textarea>
       <div class="price-btn-row">
         <button class="action-send-btn price-only" type="button"
-            onclick="window.sendPriceOnly('${uid}','${custCode}','${custName.replace(/'/g,"\\'")}','${brandCode}','${brandName.replace(/'/g,"\\'")}','${plantCode}',this)">
+            onclick="window._doSendPriceOnly_${uid}(this)">
           📋 판가만 SAP 등록
         </button>
         <button class="action-send-btn dm-only-btn" type="button"
-            onclick="window.sendDmFromPricePanel('${uid}','${custCode}','${custName.replace(/'/g,"\\'")}','${brandCode}','${brandName.replace(/'/g,"\\'")}',this)">
+            onclick="window._doSendDmOnly_${uid}(this)">
           💬 DM만 발송
         </button>
         <button class="action-send-btn price-send" type="button"
-            onclick="window.sendPriceDm('${uid}','${custCode}','${custName.replace(/'/g,"\\'")}','${brandCode}','${brandName.replace(/'/g,"\\'")}','${plantCode}',this)">
+            onclick="window._doSendPriceDm_${uid}(this)">
           💰 판가 등록 + DM 발송
         </button>
       </div>
@@ -489,22 +470,57 @@
     `;
     pricePanel.appendChild(actionFooter);
 
-    body.appendChild(pricePanel);
+    // ── 발송 버튼 wrapper: guardConfirmed + confirm 팝업 ─────────
+    window[`_doSendPriceOnly_${uid}`] = function(btn) {
+      if (!guardConfirmed(uid)) return;
+      if (!confirm('판가를 SAP에 등록합니다.\n계속하시겠습니까?')) return;
+      window.sendPriceOnly(uid, custCode, custName, brandCode, brandName, plantCode, btn);
+    };
+    window[`_doSendDmOnly_${uid}`] = function(btn) {
+      if (!guardConfirmed(uid)) return;
+      if (!confirm(`[${custName}]에게 DM을 발송합니다.\n계속하시겠습니까?`)) return;
+      window.sendDmFromPricePanel(uid, custCode, custName, brandCode, brandName, btn);
+    };
+    window[`_doSendPriceDm_${uid}`] = function(btn) {
+      if (!guardConfirmed(uid)) return;
+      if (!confirm(`판가 SAP 등록 후 [${custName}]에게 DM을 발송합니다.\n계속하시겠습니까?`)) return;
+      window.sendPriceDm(uid, custCode, custName, brandCode, brandName, plantCode, btn);
+    };
+    tbody.addEventListener('input', () => { _confirmed[uid] = false; checkPricePanelBtns(uid); });
 
-    // 라디오 토글
-    radioGroup.querySelectorAll('input[type=radio]').forEach(radio => {
-      radio.addEventListener('change', () => {
-        const isDm = radio.value === 'dm_only';
-        dmPanel.style.display    = isDm ? '' : 'none';
-        pricePanel.style.display = isDm ? 'none' : '';
-      });
-    });
+    body.appendChild(pricePanel);
+    checkPricePanelBtns(uid);
   }
 
   // uid별 전체 상품 목록 / 표시 카운트 / 수기 행 인덱스 (모듈 스코프)
   const _allProducts = {};
   const _shownCount  = {};
   const _manualIdx   = {};
+  const _confirmed   = {};  // uid → true(확정) | false(미확정)
+
+  // 발송 버튼 활성화 상태 갱신 (자재코드 없으면 disabled)
+  function checkPricePanelBtns(uid) {
+    const panel = document.getElementById(`pricePanel_${uid}`);
+    if (!panel) return;
+    const rows = panel.querySelectorAll('tbody tr');
+    const hasMatnr = [...rows].some(tr => tr.querySelector('[data-matnr]')?.dataset.matnr?.trim());
+    ['price-only','dm-only-btn','price-send'].forEach(cls => {
+      const btn = panel.querySelector(`.${cls}`);
+      if (!btn) return;
+      btn.disabled = !hasMatnr;
+      btn.title = hasMatnr ? '' : '상품코드가 없어 실행할 수 없습니다';
+      btn.style.opacity = hasMatnr ? '1' : '0.4';
+    });
+  }
+
+  // 미확정 시 발송 차단
+  function guardConfirmed(uid) {
+    if (_confirmed[uid] === false) {
+      alert('수정사항이 반영되지 않았습니다.\n[✅ 품목 확정 · DM 반영] 버튼을 먼저 눈러주세요.');
+      return false;
+    }
+    return true;
+  }
 
   // ─── 상호계산 (판가 ↔ GP%, 원가 기준) ──────────────
   window.recalcFromPrice = function(pid) {
