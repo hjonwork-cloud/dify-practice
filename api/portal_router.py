@@ -2476,7 +2476,7 @@ async def board_notice_edit_page(request: Request, post_id: int):
     post = portal_db.get_notice_post(post_id)
     if not post:
         return RedirectResponse("/portal/board/notice", status_code=303)
-    return _render(request, "portal_board_notice_write.html", post=post, user=user)
+    return _render(request, "portal_board_notice_write.html", post=post, user=user, edit_mode=True)
 
 
 @router.post("/board/notice/admin/create")
