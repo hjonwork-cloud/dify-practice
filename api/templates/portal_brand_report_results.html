@@ -302,6 +302,18 @@
         tableEl.dataset.loaded = '1';
         if (data.rows && data.rows.length > 0) {
           renderMatnrTable(tableEl, data.rows);
+          // DM전환 셀 실시간 업데이트: 매출 발생 자재 종류 수 카운트
+          var convertedCount = data.rows.filter(function(x){ return x.sales_qty > 0; }).length;
+          var mainRow = document.querySelector('[data-rid="' + rid + '"]');
+          if (mainRow) {
+            var tds = mainRow.querySelectorAll('td');
+            var convertedTd = tds[tds.length - 1];  // 마지막 td = DM전환
+            if (convertedTd) {
+              convertedTd.innerHTML = convertedCount > 0
+                ? '<span style="color:#2563eb;font-weight:600;">' + convertedCount + '건</span>'
+                : '<span style="color:#e5e7eb;">-</span>';
+            }
+          }
         } else {
           // 실적 없음 — 자재코드만 pill로 표시
           var pills = matnrCsv.split(',').filter(m => m.trim())
@@ -337,8 +349,8 @@
       var gpCls = r.gp_rate >= 20 ? 'up' : r.gp_rate >= 10 ? 'mid' : 'down';
       var setPriceStr = r.set_price != null
         ? (r.set_price_is_avg
-            ? '<span title="\ud3c9\uade0\ub2e8\uac00(\uc2e4\uc801\uae30\uc900)" style="color:#9ca3af;">~&#8361;' + r.set_price.toLocaleString() + '</span>'
-            : '&#8361;' + r.set_price.toLocaleString())
+            ? '<span title="\ud3c9\uade0\ub2e8\uac00(\uc2e4\uc801\uae30\uc900)" style="color:#6b7280;font-size:.72rem;margin-right:2px;">기존</span>&#8361;' + r.set_price.toLocaleString()
+            : '<span style="color:#2563eb;font-size:.72rem;margin-right:2px;">예판</span>&#8361;' + r.set_price.toLocaleString())
         : '-';
       // 전환 컨력: 매출수량>0 → ✅ / 샘플만 → 공비칸 / 둘다 0 → -
       var converted = hasSales ? '✅' : '<span style="color:#e5e7eb;">-</span>';
