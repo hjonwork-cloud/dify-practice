@@ -67,6 +67,11 @@
   </label>
   <button type="submit">조회</button>
   <a href="/portal/brand-report/results" style="font-size:.82rem;color:#6b7280;text-decoration:none;">초기화</a>
+  <button type="button" id="refreshBtn" onclick="doRefresh(this)"
+          style="margin-left:auto;font-size:.82rem;padding:.3rem .8rem;border:1px solid #2563eb;
+                 border-radius:.35rem;background:#eff6ff;color:#2563eb;cursor:pointer;white-space:nowrap;">
+    🔄 실적 리프레시
+  </button>
 </form>
 
 <!-- 요약 배지 -->
@@ -94,6 +99,8 @@
           <th onclick="sortTable(6)" style="text-align:right;">이후GP(백만)</th>
           <th onclick="sortTable(7)" style="text-align:right;">GP율(%)</th>
           <th onclick="sortTable(8)" style="text-align:right;">범용추가매출(백만)</th>
+          <th onclick="sortTable(9)" style="text-align:center;">샘플출고</th>
+          <th onclick="sortTable(10)" style="text-align:center;">DM전환(개)</th>
         </tr>
       </thead>
       <tbody>
@@ -111,6 +118,16 @@
             <span class="gp-chip {% if gp >= 20 %}up{% elif gp >= 10 %}mid{% else %}down{% endif %}">{{ gp }}%</span>
           </td>
           <td style="text-align:right;">{{ '{:,}'.format(r.generic_sales_after_m) }}</td>
+          <td style="text-align:center;">
+            {% if r.sample_count is defined and r.sample_count > 0 %}
+              <span title="수량 {{ r.sample_qty }}개" style="color:#16a34a;font-weight:600;">✅ {{ r.sample_count }}건</span>
+            {% else %}<span style="color:#e5e7eb;">-</span>{% endif %}
+          </td>
+          <td style="text-align:center;">
+            {% if r.dm_product_qty is defined and r.dm_product_qty > 0 %}
+              <span style="color:#2563eb;font-weight:600;">{{ r.dm_product_qty }}개</span>
+            {% else %}<span style="color:#e5e7eb;">-</span>{% endif %}
+          </td>
         </tr>
         {% endfor %}
       </tbody>
@@ -182,6 +199,26 @@
   };
   // 기본 정렬: 이후누적매출 내림차순
   window.sortTable(5);
+
+  // 실적 리프레시
+  window.doRefresh = async function(btn) {
+    const orig = btn.textContent;
+    btn.disabled = true; btn.textContent = '⏳ 집계 중...';
+    try {
+      const res = await fetch('/portal/refresh-action-results', { method: 'POST' });
+      const d = await res.json();
+      if (d.status === 'ok' || d.action_rows !== undefined) {
+        alert(`✅ 집계 완료: ${d.action_rows || 0}건 처리됨\n페이지를 새로고침합니다.`);
+        location.reload();
+      } else {
+        alert('⚠️ ' + (d.reason || d.message || JSON.stringify(d)));
+      }
+    } catch(e) {
+      alert('오류: ' + e.message);
+    } finally {
+      btn.disabled = false; btn.textContent = orig;
+    }
+  };
 })();
 </script>
 
