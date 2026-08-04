@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import sys
 import secrets
 import sqlite3
 from pathlib import Path
@@ -12,8 +13,24 @@ try:
 except ImportError:
     from backports.zoneinfo import ZoneInfo  # type: ignore
 
-DATA_DIR = Path(os.getenv("CHATBOT_DATA_DIR", os.getenv("DATA_DIR", r"E:\data\chatbot")))
-DATA_DIR.mkdir(parents=True, exist_ok=True)
+def _default_data_dir() -> str:
+    """환경변수 없을 때 OS별 기본 경로 반환. Azure App Service는 /home 이 영구 스토리지."""
+    if os.getenv("CHATBOT_DATA_DIR"):
+        return os.getenv("CHATBOT_DATA_DIR")
+    if os.getenv("DATA_DIR"):
+        return os.getenv("DATA_DIR")
+    # Azure App Service (Linux) 판별: /home 존재 여부
+    if sys.platform != "win32" and Path("/home").exists():
+        return "/home/data/chatbot"
+    return r"E:\data\chatbot"
+
+DATA_DIR = Path(_default_data_dir())
+try:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+except Exception:
+    # 쓰기 불가 시 /tmp fallback
+    DATA_DIR = Path("/tmp/chatbot")
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = DATA_DIR / "portal_activity.db"
 
 _KST = ZoneInfo("Asia/Seoul")
