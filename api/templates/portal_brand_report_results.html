@@ -294,7 +294,8 @@
     tableEl.innerHTML = '<span style="color:#9ca3af;">⏳ 조회 중...</span>';
     fetch('/portal/action-matnr-sales?customer_code=' + encodeURIComponent(customerCode) +
           '&brand_code='    + encodeURIComponent(brandCode) +
-          '&action_date='   + encodeURIComponent(actionDate),
+          '&action_date='   + encodeURIComponent(actionDate) +
+          '&matnr_csv='     + encodeURIComponent(matnrCsv),
           {credentials: 'same-origin'})
       .then(r => r.json())
       .then(data => {

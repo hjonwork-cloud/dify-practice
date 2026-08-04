@@ -1900,6 +1900,7 @@ async def action_matnr_sales(
     customer_code: str = "",
     brand_code: str = "",
     action_date: str = "",
+    matnr_csv: str = "",
 ):
     """자재별 상세 실적 조회: dm_send_logs 판가 + T_MAIN 집계."""
     user = _require_user(request)
@@ -1934,6 +1935,12 @@ async def action_matnr_sales(
                 m = m.strip()
                 if m:
                     price_map.setdefault(m, None)
+    # price_map 이 비어있으면 matnr_csv(HTML data 속성) 로 fallback
+    if not price_map and matnr_csv:
+        for m in matnr_csv.split(","):
+            m = m.strip()
+            if m:
+                price_map.setdefault(m, None)
     if not price_map:
         return JSONResponse({"rows": [], "no_price_map": True})
     # 2) T_MAIN 에서 자재별 집계
