@@ -193,7 +193,7 @@
     {% if r.brand_name not in brand_totals %}
       {% set _ = brand_totals.update({r.brand_name: {'sales': 0, 'gp': 0}}) %}
     {% endif %}
-    {% set _ = brand_totals[r.brand_name].update({'sales': brand_totals[r.brand_name]['sales'] + r.sales_after_m, 'gp': brand_totals[r.brand_name]['gp'] + r.gp_after_m}) %}
+    {% set _ = brand_totals[r.brand_name].update({'sales': brand_totals[r.brand_name]['sales'] + (r.sales_after_m | default(0)), 'gp': brand_totals[r.brand_name]['gp'] + (r.gp_after_m | default(0))}) %}
   {% endfor %}
   {% set max_sales = brand_totals.values() | map(attribute='sales') | max | default(1) %}
   {% if brand_totals | length > 1 %}
@@ -231,16 +231,17 @@
     var table = document.getElementById('resultsTable');
     if (!table) return;
     var tbody = table.querySelector('tbody');
-    var rows  = Array.from(tbody.querySelectorAll('tr'));
-    var ths   = table.querySelectorAll('th');
-    var dir   = sortDir[colIdx] === 'asc' ? 'desc' : 'asc';
+    // data 행만 정렬 (.result-row), detail 행(.detail-row)은 data 행 뒤에 붙임
+    var dataRows = Array.from(tbody.querySelectorAll('tr.result-row'));
+    var ths      = table.querySelectorAll('th');
+    var dir      = sortDir[colIdx] === 'asc' ? 'desc' : 'asc';
     sortDir = {};
     sortDir[colIdx] = dir;
     ths.forEach(function(th, i) {
       th.classList.remove('sorted-asc', 'sorted-desc');
       if (i === colIdx) th.classList.add('sorted-' + dir);
     });
-    rows.sort(function(a, b) {
+    dataRows.sort(function(a, b) {
       var av = a.cells[colIdx]?.textContent?.trim() || '';
       var bv = b.cells[colIdx]?.textContent?.trim() || '';
       var an = parseFloat(av.replace(/,/g, ''));
@@ -248,7 +249,12 @@
       var cmp = (!isNaN(an) && !isNaN(bn)) ? an - bn : av.localeCompare(bv, 'ko');
       return dir === 'desc' ? -cmp : cmp;
     });
-    rows.forEach(function(r) { tbody.appendChild(r); });
+    // data 행 + 바로 뒤 detail 행을 쌍으로 재삽입
+    dataRows.forEach(function(dr) {
+      tbody.appendChild(dr);
+      var detail = dr.nextElementSibling;
+      if (detail && detail.classList.contains('detail-row')) tbody.appendChild(detail);
+    });
   };
   // 기본 정렬: 이후누적매출 내림차순 (col index 8로 변경)
   window.sortTable(8);
