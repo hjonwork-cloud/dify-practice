@@ -1206,12 +1206,19 @@ def run_action_results_refresh() -> dict:
         return {"status": "error", "reason": str(e), "step": "create_table"}
 
 
-def read_action_results(emp_code: str, brand_code: str = "", action_ym: str = "") -> list[dict]:
-    """T_ACTION_RESULTS에서 액션 실적 조회."""
+def read_action_results(emp_code: str, brand_code: str = "", action_ym: str = "",
+                        scope_where: str = "") -> list[dict]:
+    """T_ACTION_RESULTS에서 액션 실적 조회.
+    scope_where: 비어있으면 개인(emp_code) 필터, 값이 있으면 해당 WHERE 조건 적용.
+    """
     import main
     _emp = str(emp_code or "").strip()
-    # emp_code 필터: SQLite 저장값과 세션값 불일치 대비 → LIKE 병행
-    conds = [f"(emp_code = '{_emp}' OR emp_code LIKE '%{_emp}%' OR '{_emp}' LIKE CONCAT('%', emp_code, '%'))"]
+    # scope_where가 주어지면 외부에서 철저히 수립된 scope를 사용
+    if scope_where:
+        conds = [scope_where]
+    else:
+        # 기본: 정확한 개인 필터만 (백도어 fallback 없음)
+        conds = [f"emp_code = '{_emp}'"]
     if brand_code:
         conds.append(f"brand_code = '{brand_code}'")
     if action_ym:
@@ -1219,22 +1226,9 @@ def read_action_results(emp_code: str, brand_code: str = "", action_ym: str = ""
     where = " AND ".join(conds)
     try:
         rows = main._safe_query(
-            f"SELECT * FROM {T_ACTION_RESULTS} WHERE {where} ORDER BY action_ym DESC LIMIT 200",
+            f"SELECT * FROM {T_ACTION_RESULTS} WHERE {where} ORDER BY action_ym DESC LIMIT 500",
             raw=True,
         ) or []
-        # emp_code 필터 결과 없으면 전체 조회로 fallback (첫 사용자 등)
-        if not rows:
-            logger.info(f"[read_action_results] emp_code={_emp} 필터 결과 없음, 전체 조회 fallback")
-            fb_conds = []
-            if brand_code:
-                fb_conds.append(f"brand_code = '{brand_code}'")
-            if action_ym:
-                fb_conds.append(f"action_ym >= '{action_ym}'")
-            fb_where = " AND ".join(fb_conds) if fb_conds else "1=1"
-            rows = main._safe_query(
-                f"SELECT * FROM {T_ACTION_RESULTS} WHERE {fb_where} ORDER BY action_ym DESC LIMIT 200",
-                raw=True,
-            ) or []
         return [
             {
                 "customer_code":         str(r.get("customer_code") or ""),

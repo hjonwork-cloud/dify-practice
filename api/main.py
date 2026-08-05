@@ -6449,6 +6449,171 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
         return
 
     # 브랜드명 ZC본부명 직접 조회 (Dify 바이패스) ─────────────────────
+    # ── 특정 날짜/날짜 범위 브랜드 매출 (대금청구일 기준) ────────────
+    # 예: "8/3 기준 차백도 매출액", "8월 3일 샐러디 매출"
+    # 예: "8/1~8/2 샐러디 매출액", "8월1일~2일 위드저니 실적"
+    if '매출' in query or '실적' in query:
+        import datetime as _dt_d
+        _today_d = _dt_d.date.today()
+        _cur_year = _today_d.year
+
+        # 패턴 1: 범위 기간 — "8/1~8/2", "8월1일에서2일", "8/1-8/2"
+        _range_m = re.search(
+            r'(\d{1,2})[/월](\d{1,2})\s*일?\s*[~\-~에서]+\s*(\d{1,2})[/월]?(\d{1,2})\s*일?',
+            query
+        )
+        # 패턴 2: 단일 날짜 기준 — "8/3 기준", "8월 3일 기준"
+        _single_m = re.search(
+            r'(\d{1,2})[/월](\d{1,2})\s*일?\s*기준',
+            query
+        )
+
+        if _range_m:
+            try:
+                _m1, _d1 = int(_range_m.group(1)), int(_range_m.group(2))
+                _m2, _d2 = int(_range_m.group(3)), int(_range_m.group(4))
+                _from = _dt_d.date(_cur_year, _m1, _d1)
+                _to   = _dt_d.date(_cur_year, _m2, _d2)
+                _from_s = _from.strftime('%Y%m%d')
+                _to_s   = _to.strftime('%Y%m%d')
+                # 브랜드명 추출: 범위 표현 제거 후 키워드 추출
+                _q_strip = re.sub(r'\d{1,2}[/월]\d{1,2}\s*일?\s*[~\-~에서]+\s*\d{1,2}[/월]?\d{1,2}\s*일?', '', query).strip()
+                _bkw_m = re.search(
+                    r'([\uac00-\ud7a3A-Za-z0-9]+(?:\([\uac00-\ud7a3A-Za-z0-9]+\))?)'
+                    r'(?:는|은|의|이|가)?\s*(?:매출|실적)',
+                    _q_strip
+                )
+                _bkw = _bkw_m.group(1).strip() if _bkw_m else ""
+                _bkw = re.sub(r'[는은의이가을를로에서만]$', '', _bkw).strip()
+                _RANGE_BL = {'오늘', '어제', '브랜드', '사업부', '매출', '실적', '팀', '우리팀'}
+                if _bkw and _bkw not in _RANGE_BL:
+                    logger.info(f"[콜백] 날짜범위매출: brand={_bkw}, {_from_s}~{_to_s}")
+                    try:
+                        _days_cnt = (_to - _from).days + 1
+                        _like_cond = (
+                            f"`거래처명` LIKE '%{_bkw}%'"
+                            f" OR `ZC본부명` LIKE '%{_bkw}%'"
+                            f" OR `ZA본사명` LIKE '%{_bkw}%'"
+                        )
+                        # 합계 쿼리
+                        _rng_tot_r = _safe_query(
+                            f"SELECT `ZC본부명` AS name,"
+                            f" ROUND(COALESCE(SUM(`매출액`),0)/1000000,4) AS sales"
+                            f" FROM {T_MAIN}"
+                            f" WHERE `대금청구일` BETWEEN '{_from_s}' AND '{_to_s}'"
+                            f" AND ({_like_cond})"
+                            f" GROUP BY `ZC본부명` ORDER BY SUM(`매출액`) DESC",
+                            raw=True,
+                        ) or []
+                        _rng_tot_r = [r for r in _rng_tot_r if float(r.get("sales",0)) > 0]
+                        if _rng_tot_r:
+                            _rng_total = sum(float(r["sales"]) for r in _rng_tot_r)
+                            _rng_name  = _rng_tot_r[0]["name"] if len(_rng_tot_r) == 1 else _bkw
+                            _label_from = f"{_m1}/{_d1}"
+                            _label_to   = f"{_m2}/{_d2}"
+                            # 일별 내역 (7일 이하만)
+                            _daily_lines = []
+                            if _days_cnt <= 7:
+                                _daily_r = _safe_query(
+                                    f"SELECT `대금청구일` AS dt,"
+                                    f" ROUND(COALESCE(SUM(`매출액`),0)/1000000,4) AS sales"
+                                    f" FROM {T_MAIN}"
+                                    f" WHERE `대금청구일` BETWEEN '{_from_s}' AND '{_to_s}'"
+                                    f" AND ({_like_cond})"
+                                    f" GROUP BY `대금청구일` ORDER BY `대금청구일`",
+                                    raw=True,
+                                ) or []
+                                for _dr in _daily_r:
+                                    _ds = str(_dr.get("dt") or "")
+                                    _ds_fmt = f"{int(_ds[4:6])}/{int(_ds[6:8])}" if len(_ds)==8 else _ds
+                                    _dv = float(_dr.get("sales",0))
+                                    if _dv > 0:
+                                        _daily_lines.append(f"  {_ds_fmt}   {_format_value(_dv)}백만")
+                            _rng_card = (
+                                f"📊 {_rng_name}\n"
+                                f"{_label_from} ~ {_label_to} 매출 현황\n\n"
+                                f"▶ 기간 합계   {_format_value(_rng_total)}백만원\n"
+                                f"▶ 일평균     {_format_value(round(_rng_total/_days_cnt,4))}백만원 ({_days_cnt}일)"
+                            )
+                            if _daily_lines:
+                                _rng_card += "\n\n── 일별 내역 ──\n" + "\n".join(_daily_lines)
+                            _rng_card += "\n※ SAP 익일 반영 기준"
+                            _send_kakao_callback_qr(callback_url, _rng_card, _SALES_FOLLOW_QR, "브랜드매출")
+                        else:
+                            _send_kakao_callback_qr(callback_url,
+                                f"'{_bkw}' {_m1}/{_d1}~{_m2}/{_d2} 매출 데이터가 없습니다.\n(당일 데이터는 익일 반영 기준)",
+                                _SALES_FOLLOW_QR, "브랜드매출")
+                    except Exception as _e_rng:
+                        logger.error(f"[콜백] 날짜범위매출 오류: {_e_rng}")
+                        _send_kakao_callback(callback_url, "⚠️ 매출 조회 중 오류가 발생했습니다.", "브랜드매출")
+                    return
+
+        elif _single_m:
+            try:
+                _sm, _sd = int(_single_m.group(1)), int(_single_m.group(2))
+                _s_date   = _dt_d.date(_cur_year, _sm, _sd)
+                _s_date_s = _s_date.strftime('%Y%m%d')
+                _s_from_s = f"{_cur_year}{_sm:02d}01"
+                # 브랜드명 추출
+                _q_strip2 = re.sub(r'\d{1,2}[/월]\d{1,2}\s*일?\s*기준', '', query).strip()
+                _bkw2_m = re.search(
+                    r'([\uac00-\ud7a3A-Za-z0-9]+(?:\([\uac00-\ud7a3A-Za-z0-9]+\))?)'
+                    r'(?:는|은|의|이|가)?\s*(?:매출|실적)',
+                    _q_strip2
+                )
+                _bkw2 = _bkw2_m.group(1).strip() if _bkw2_m else ""
+                _bkw2 = re.sub(r'[는은의이가을를로에서만]$', '', _bkw2).strip()
+                _SINGLE_BL = {'오늘', '어제', '브랜드', '사업부', '매출', '실적', '팀', '우리팀'}
+                if _bkw2 and _bkw2 not in _SINGLE_BL:
+                    logger.info(f"[콜백] 단일날짜+누계매출: brand={_bkw2}, date={_s_date_s}")
+                    try:
+                        _day_res = _fetch_brand_daily_sales(_bkw2, _s_date_s)
+                        _like_cond2 = (
+                            f"`거래처명` LIKE '%{_bkw2}%'"
+                            f" OR `ZC본부명` LIKE '%{_bkw2}%'"
+                            f" OR `ZA본사명` LIKE '%{_bkw2}%'"
+                        )
+                        _acc_r = _safe_query(
+                            f"SELECT ROUND(COALESCE(SUM(`매출액`),0)/1000000,4) AS sales"
+                            f" FROM {T_MAIN}"
+                            f" WHERE `대금청구일` BETWEEN '{_s_from_s}' AND '{_s_date_s}'"
+                            f" AND ({_like_cond2})",
+                            raw=True,
+                        )
+                        _acc_val = float(_acc_r[0]["sales"]) if _acc_r else 0.0
+                        _label_d  = f"{_sm}/{_sd}"
+                        _label_mo = f"{_sm}월 누계(1일~{_sd}일)"
+
+                        if isinstance(_day_res, tuple):
+                            _d_name, _d_val, _d_lvl = _day_res
+                            _s_card = (
+                                f"📊 {_d_name}\n"
+                                f"{_label_d} 기준 매출 현황\n\n"
+                                f"▶ 당일({_label_d})   {_format_value(_d_val)}백만원   [{_d_lvl}]\n"
+                                f"▶ {_label_mo}   {_format_value(_acc_val)}백만원\n"
+                                f"※ SAP 익일 반영 기준"
+                            )
+                        elif isinstance(_day_res, list):
+                            options = "\n".join(f"  {i+1}. {n}" for i, n in enumerate(_day_res))
+                            _s_card = f"'{_bkw2}'와(과) 유사한 브랜드가 여러 개 있습니다.\n{options}\n\n정확한 브랜드명을 입력해주세요."
+                        else:
+                            # 당일 데이터 없어도 누계는 표시
+                            if _acc_val > 0:
+                                _s_card = (
+                                    f"📊 {_bkw2}\n"
+                                    f"{_label_d} 기준 매출 현황\n\n"
+                                    f"▶ 당일({_label_d})   데이터 없음 (익일 반영)\n"
+                                    f"▶ {_label_mo}   {_format_value(_acc_val)}백만원\n"
+                                    f"※ SAP 익일 반영 기준"
+                                )
+                            else:
+                                _s_card = f"'{_bkw2}' {_label_d} 매출 데이터가 없습니다.\n(당일 데이터는 익일 반영 기준)"
+                        _send_kakao_callback_qr(callback_url, _s_card, _SALES_FOLLOW_QR, "브랜드매출")
+                    except Exception as _e_sngl:
+                        logger.error(f"[콜백] 단일날짜매출 오류: {_e_sngl}")
+                        _send_kakao_callback(callback_url, "⚠️ 매출 조회 중 오류가 발생했습니다.", "브랜드매출")
+                    return
+
     # 오늘/어제 일별 브랜드 매출 (대금청구일 기준)
     if '매출' in query or '실적' in query:
         import datetime as _dt_br

@@ -1854,7 +1854,23 @@ async def brand_report_results_page(
     user = _require_user(request)
     try:
         from portal_refresh import read_action_results
-        rows = read_action_results(user["emp_code"], brand_code=brand_code, action_ym=action_ym)
+        emp_code = user["emp_code"]
+        is_admin_u = user.get("is_admin", False)
+        # 스코프 단계: 관리자/readonly_all → 전체, 팀장 → 팀 전체, 일반 → 세시 본인만
+        if is_admin_u or _is_readonly_all(emp_code):
+            scope_where = "1=1"
+        elif emp_code in _TEAM_LEADERS:
+            team_kw = _TEAM_LEADERS[emp_code]
+            import main as _main_m
+            scope_where = (
+                f"emp_code IN (SELECT DISTINCT `영업사원`"
+                f" FROM {_main_m.T_MAIN}"
+                f" WHERE `지점명` LIKE '%{team_kw}%')"
+            )
+        else:
+            scope_where = f"emp_code = '{emp_code}'"
+        rows = read_action_results(emp_code, brand_code=brand_code, action_ym=action_ym,
+                                   scope_where=scope_where)
     except Exception:
         rows = []
     try:
@@ -1893,9 +1909,24 @@ async def action_results(
 ):
     """판가설정 액션 이후 실적 조회 (T_ACTION_RESULTS)."""
     user = _require_user(request)
+    emp_code = user["emp_code"]
+    is_admin_u = user.get("is_admin", False)
+    if is_admin_u or _is_readonly_all(emp_code):
+        scope_where = "1=1"
+    elif emp_code in _TEAM_LEADERS:
+        team_kw = _TEAM_LEADERS[emp_code]
+        import main as _main_m2
+        scope_where = (
+            f"emp_code IN (SELECT DISTINCT `영업사원`"
+            f" FROM {_main_m2.T_MAIN}"
+            f" WHERE `지점명` LIKE '%{team_kw}%')"
+        )
+    else:
+        scope_where = f"emp_code = '{emp_code}'"
     try:
         from portal_refresh import read_action_results
-        rows = read_action_results(user["emp_code"], brand_code=brand_code, action_ym=action_ym)
+        rows = read_action_results(emp_code, brand_code=brand_code, action_ym=action_ym,
+                                   scope_where=scope_where)
     except Exception as e:
         rows = []
     total_sales = sum(r.get("sales_after_m", 0) for r in rows)
