@@ -1335,6 +1335,8 @@ async def admin_refresh_dashboard(request: Request):
     try:
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(None, lambda: portal_refresh.run_refresh(force=True))
+        # 인메모리 캐시 전체 무효화 (stale 12215 같은 캐시 방지)
+        _cache.clear()
         return JSONResponse(content=result)
     except Exception as e:
         import traceback

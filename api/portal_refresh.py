@@ -741,7 +741,10 @@ def read_dashboard_from_table(emp_code: str) -> dict | None:
             f"SELECT * FROM {T_BRANDS} WHERE emp_code = '{emp_code}' ORDER BY sales_m DESC LIMIT 200",
             raw=True) or []
 
-        from portal_router import _is_team_leader
+        try:
+            from portal_router import _is_team_leader
+        except Exception:
+            def _is_team_leader(c): return False  # type: ignore
         brands = [{
             "brand_code":       str(b.get("brand_code") or ""),
             "brand_name":       str(b.get("brand_name") or ""),
