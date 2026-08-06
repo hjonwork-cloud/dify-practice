@@ -42,7 +42,16 @@
     <h1 id="dash-title">내 담당 영업 현황</h1>
     <p id="dash-subtitle"><span class="skel skel-text" style="width:320px"></span></p>
   </div>
-  <a class="btn portal-primary" href="/portal/brand-report" id="brandReportBtn">범용상품 제안 솔루션 보기</a>
+  <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;">
+    {% if user and user.is_admin %}
+    <button id="dashRefreshBtn" type="button" onclick="runDashRefresh()" title="대시보드 데이터 재계산"
+      style="padding:.45rem .9rem;font-size:.8rem;border:1px solid #d1d5db;border-radius:.5rem;
+             background:#fff;color:#374151;cursor:pointer;display:flex;align-items:center;gap:.35rem;">
+      🔄 <span id="dashRefreshLabel">데이터 재계산</span>
+    </button>
+    {% endif %}
+    <a class="btn portal-primary" href="/portal/brand-report" id="brandReportBtn">범용상품 제안 솔루션 보기</a>
+  </div>
 </div>
 
 <section class="portal-metric-grid">
@@ -116,6 +125,21 @@
 </div>
 
 <script>
+function runDashRefresh(){
+  var btn=document.getElementById('dashRefreshBtn'),lbl=document.getElementById('dashRefreshLabel');
+  if(!btn||btn.disabled)return;
+  btn.disabled=true;lbl.textContent='재계산 중…';
+  fetch('/portal/admin/refresh-dashboard',{method:'POST',headers:{'Content-Type':'application/json'}})
+    .then(function(r){return r.json();})
+    .then(function(){
+      lbl.textContent='✅ 완료';
+      setTimeout(function(){lbl.textContent='데이터 재계산';btn.disabled=false;location.reload();},1800);
+    })
+    .catch(function(){
+      lbl.textContent='⚠️ 실패';
+      setTimeout(function(){lbl.textContent='데이터 재계산';btn.disabled=false;},2500);
+    });
+}
 (function(){
   var _allBrands = [];
   var _curSort   = 'sales_desc';

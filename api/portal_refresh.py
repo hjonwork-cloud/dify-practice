@@ -131,6 +131,14 @@ def run_refresh(force: bool = False) -> dict:
         SELECT `영업사원` AS emp_code, MAX(`대금청구일`) AS latest_bill_date
         FROM {T_MAIN} WHERE `년월` = '{latest_ym}' AND `대금청구일` IS NOT NULL
         GROUP BY `영업사원`
+        UNION ALL
+        SELECT '{_admin_code}' AS emp_code, MAX(`대금청구일`) AS latest_bill_date
+        FROM {T_MAIN} WHERE `년월` = '{latest_ym}' AND `사업부명` = '{_auth_dept}' AND `대금청구일` IS NOT NULL
+        UNION ALL
+        SELECT lm.emp_code, MAX(m.`대금청구일`) AS latest_bill_date
+        FROM {T_MAIN} m JOIN leader_map lm ON m.`지점명` LIKE CONCAT('%', lm.team_name, '%')
+        WHERE m.`년월` = '{latest_ym}' AND m.`대금청구일` IS NOT NULL
+        GROUP BY lm.emp_code
     ),
     {cm_cte}
     ar_emp AS (
