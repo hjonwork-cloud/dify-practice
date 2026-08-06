@@ -6567,14 +6567,18 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
                 try:
                     _day_res = _fetch_brand_daily_sales(_bkw2, _s_date_s)
                     _like_cond2 = (
-                        f"`거래처명` LIKE '%{_bkw2}%'"
-                        f" OR `ZC본부명` LIKE '%{_bkw2}%'"
-                        f" OR `ZA본사명` LIKE '%{_bkw2}%'"
+                        f"`ZC본부명` LIKE '%{_bkw2}%'"
+                        f" OR `거래처명` LIKE '%{_bkw2}%'"
                     )
+                    # _day_res가 정확한 브랜드명으로 resolved 됐으면 그걸로 누계 검색
+                    if isinstance(_day_res, tuple):
+                        _d_name_exact = _day_res[0]
+                        _like_cond2 = f"`ZC본부명` = '{_d_name_exact}'"
                     _acc_r = _safe_query(
                         f"SELECT ROUND(COALESCE(SUM(`매출액`),0)/1000000,4) AS sales"
                         f" FROM {T_MAIN}"
-                        f" WHERE `대금청구일` BETWEEN '{_s_from_s}' AND '{_s_date_s}'"
+                        f" WHERE `사업부명` = '외식식재사업부'"
+                        f" AND `대금청구일` BETWEEN '{_s_from_s}' AND '{_s_date_s}'"
                         f" AND ({_like_cond2})",
                         raw=True,
                     )
