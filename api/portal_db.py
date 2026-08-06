@@ -324,13 +324,27 @@ def list_action_logs(limit: int = 200) -> list[dict]:
 
 
 def delete_dm_logs_by_action(emp_code: str, customer_code: str, brand_code: str, action_ym: str) -> int:
-    """액션 단위(emp+customer+brand+ym) DM 발송이력 일괄 삭제. 삭제된 행 수 반환."""
+    """액션 단위(customer+brand+ym) DM 발송이력 일괄 삭제. emp_code 빈 문자열이면 조건 제외. 삭제된 행 수 반환."""
     init_db()
     with _connect() as conn:
-        cur = conn.execute(
-            "DELETE FROM dm_send_logs WHERE emp_code=? AND customer_code=? AND brand_code=? AND action_ym=?",
-            (emp_code, customer_code, brand_code, action_ym),
-        )
+        if emp_code:
+            cur = conn.execute(
+                "DELETE FROM dm_send_logs WHERE emp_code=? AND customer_code=? AND brand_code=? AND action_ym=?",
+                (emp_code, customer_code, brand_code, action_ym),
+            )
+        else:
+            cur = conn.execute(
+                "DELETE FROM dm_send_logs WHERE customer_code=? AND brand_code=? AND action_ym=?",
+                (customer_code, brand_code, action_ym),
+            )
+        return cur.rowcount
+
+
+def delete_dm_log_by_id(log_id: int) -> int:
+    """id 기반 DM 발송이력 단건 삭제. 삭제된 행 수 반환."""
+    init_db()
+    with _connect() as conn:
+        cur = conn.execute("DELETE FROM dm_send_logs WHERE id=?", (log_id,))
         return cur.rowcount
 
 

@@ -319,7 +319,7 @@
           var mainRow = document.querySelector('[data-rid="' + rid + '"]');
           if (mainRow) {
             var tds = mainRow.querySelectorAll('td');
-            var convertedTd = tds[tds.length - 1];  // 마지막 td = DM전환
+            var convertedTd = tds[13];  // index 13 = DM전환(건) — 관리자 삭제 td(14)와 혼동 방지
             if (convertedTd) {
               convertedTd.innerHTML = convertedCount > 0
                 ? '<span style="color:#2563eb;font-weight:600;">' + convertedCount + '건</span>'
@@ -407,9 +407,19 @@
     }
   };
 
-  // DM 발송이력 삭제 (관리자 전용)
+  // 공통 토스트
+  function showToast(msg) {
+    const t = document.createElement('div');
+    t.textContent = msg;
+    t.style.cssText = 'position:fixed;bottom:1.5rem;right:1.5rem;background:#1e293b;color:#fff;padding:.6rem 1.1rem;border-radius:.5rem;font-size:.82rem;z-index:9999;';
+    document.body.appendChild(t);
+    setTimeout(function(){ t.remove(); }, 3500);
+  }
+
+  // 상단 액션 단위 전체 삭제 (관리자 전용)
   window.deleteDmAction = async function(btn, empCode, customerCode, brandCode, actionYm) {
-    if (!confirm(`[${actionYm}] ${customerCode} 가맹점의 DM 발송이력을 삭제하시겠습니까?\n\n삭제 후 액션실적이 재집계됩니다. (약 1분 소요)`)) return;
+    if (!confirm(`[${actionYm}] ${customerCode} 가맹점의 DM 발송이력 전체를 삭제하시겠습니까?\n\n삭제 후 액션실적이 재집계됩니다. (약 1분 소요)`)) return;
+    const orig = btn.textContent;
     btn.disabled = true; btn.textContent = '삭제 중…';
     try {
       const res = await fetch('/portal/admin/dm-log', {
@@ -420,22 +430,52 @@
       });
       const d = await res.json();
       if (d.status === 'ok') {
-        const tr = btn.closest('tr');
+        // 상단 result-row + detail-row 제거
+        const tr = btn.closest('tr.result-row');
         const rid = tr ? tr.dataset.rid : null;
         if (tr) tr.remove();
         if (rid) { const det = document.getElementById('detail-' + rid); if (det) det.remove(); }
-        const toast = document.createElement('div');
-        toast.textContent = `✅ 삭제 완료 (${d.deleted}건). 실적은 잠시 후 재집계됩니다.`;
-        toast.style.cssText = 'position:fixed;bottom:1.5rem;right:1.5rem;background:#1e293b;color:#fff;padding:.6rem 1.1rem;border-radius:.5rem;font-size:.82rem;z-index:9999;';
-        document.body.appendChild(toast);
-        setTimeout(function(){ toast.remove(); }, 3500);
+        // 하단 DM 발송이력 테이블에서 동일 customer+brand+ym 행 제거
+        document.querySelectorAll('#dmLogsTbody tr[data-customer][data-brand][data-ym]').forEach(function(row) {
+          if (row.dataset.customer === customerCode && row.dataset.brand === brandCode && row.dataset.ym === actionYm) {
+            row.remove();
+          }
+        });
+        showToast(`✅ 삭제 완료 (${d.deleted}건). 실적은 잠시 후 재집계됩니다.`);
       } else {
         alert('오류: ' + (d.detail || JSON.stringify(d)));
-        btn.disabled = false; btn.textContent = '🗑 삭제';
+        btn.disabled = false; btn.textContent = orig;
       }
     } catch(e) {
       alert('오류: ' + e.message);
-      btn.disabled = false; btn.textContent = '🗑 삭제';
+      btn.disabled = false; btn.textContent = orig;
+    }
+  };
+
+  // 하단 DM 발송이력 단건 삭제 (관리자 전용)
+  window.deleteDmLogById = async function(btn, logId) {
+    if (!confirm(`이 DM 발송이력 1건을 삭제하시겠습니까?`)) return;
+    const orig = btn.textContent;
+    btn.disabled = true; btn.textContent = '…';
+    try {
+      const res = await fetch('/portal/admin/dm-log', {
+        method: 'DELETE',
+        headers: {'Content-Type': 'application/json'},
+        credentials: 'same-origin',
+        body: JSON.stringify({id: logId}),
+      });
+      const d = await res.json();
+      if (d.status === 'ok') {
+        const tr = btn.closest('tr');
+        if (tr) tr.remove();
+        showToast('✅ 1건 삭제 완료.');
+      } else {
+        alert('오류: ' + (d.detail || JSON.stringify(d)));
+        btn.disabled = false; btn.textContent = orig;
+      }
+    } catch(e) {
+      alert('오류: ' + e.message);
+      btn.disabled = false; btn.textContent = orig;
     }
   };
 })();
@@ -455,17 +495,28 @@
           <th>브랜드</th>
           <th>액션월</th>
           <th>DM 메시지</th>
+          {% if user and user.is_admin %}<th style="text-align:center;width:48px;">삭제</th>{% endif %}
         </tr>
       </thead>
-      <tbody>
+      <tbody id="dmLogsTbody">
         {% for d in dm_logs %}
-        <tr>
+        <tr data-log-id="{{ d.id }}"
+            data-customer="{{ d.customer_code | e }}"
+            data-brand="{{ d.brand_code | default('') | e }}"
+            data-ym="{{ d.action_ym or '' }}">
           <td style="font-size:.75rem;white-space:nowrap;">{{ d.created_at }}</td>
           <td><b>{{ d.customer_name }}</b></td>
           <td style="color:#9ca3af;font-size:.75rem;">{{ d.customer_code }}</td>
           <td style="font-size:.78rem;">{{ d.brand_name }}</td>
           <td>{{ d.action_ym or '-' }}</td>
           <td style="max-width:280px;font-size:.75rem;white-space:pre-wrap;color:#374151;">{{ d.message }}</td>
+          {% if user and user.is_admin %}
+          <td style="text-align:center;" onclick="event.stopPropagation()">
+            <button onclick="deleteDmLogById(this, {{ d.id }})"
+              style="font-size:.7rem;padding:.15rem .4rem;border:1px solid #fca5a5;border-radius:.3rem;
+                     background:#fff5f5;color:#dc2626;cursor:pointer;">🗑</button>
+          </td>
+          {% endif %}
         </tr>
         {% endfor %}
       </tbody>

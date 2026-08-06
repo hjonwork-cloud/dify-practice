@@ -2070,7 +2070,10 @@ async def action_matnr_sales(
 
 @router.delete("/admin/dm-log")
 async def admin_delete_dm_log(request: Request):
-    """관리자 전용: 액션 단위 DM 발송이력 삭제 + T_ACTION_RESULTS 재생성."""
+    """관리자 전용: DM 발송이력 삭제 + T_ACTION_RESULTS 재생성.
+    - id 있으면 단건 삭제
+    - id 없으면 customer_code+brand_code+action_ym 기준 전체 삭제 (emp_code 선택)
+    """
     user = _require_user(request)
     if not user.get("is_admin"):
         raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
@@ -2078,13 +2081,21 @@ async def admin_delete_dm_log(request: Request):
         body = await request.json()
     except Exception:
         raise HTTPException(status_code=400, detail="JSON body 필요")
+    log_id        = body.get("id")  # 단건 삭제용
     emp_code      = str(body.get("emp_code", "")).strip()
     customer_code = str(body.get("customer_code", "")).strip()
     brand_code    = str(body.get("brand_code", "")).strip()
     action_ym     = str(body.get("action_ym", "")).strip()
-    if not all([emp_code, customer_code, brand_code, action_ym]):
-        raise HTTPException(status_code=400, detail="필수 파라미터 누락")
-    deleted = portal_db.delete_dm_logs_by_action(emp_code, customer_code, brand_code, action_ym)
+
+    if log_id is not None:
+        # 단건 삭제
+        deleted = portal_db.delete_dm_log_by_id(int(log_id))
+    else:
+        # 전체 액션 삭제 — customer+brand+ym 필수, emp_code 선택
+        if not all([customer_code, brand_code, action_ym]):
+            raise HTTPException(status_code=400, detail="필수 파라미터 누락 (customer_code, brand_code, action_ym)")
+        deleted = portal_db.delete_dm_logs_by_action(emp_code, customer_code, brand_code, action_ym)
+
     _cache.clear()
     def _do_refresh():
         try:
