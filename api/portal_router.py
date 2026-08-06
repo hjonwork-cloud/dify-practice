@@ -2068,6 +2068,35 @@ async def action_matnr_sales(
     return JSONResponse({"rows": out})
 
 
+@router.delete("/admin/dm-log")
+async def admin_delete_dm_log(request: Request):
+    """관리자 전용: 액션 단위 DM 발송이력 삭제 + T_ACTION_RESULTS 재생성."""
+    user = _require_user(request)
+    if not user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="JSON body 필요")
+    emp_code      = str(body.get("emp_code", "")).strip()
+    customer_code = str(body.get("customer_code", "")).strip()
+    brand_code    = str(body.get("brand_code", "")).strip()
+    action_ym     = str(body.get("action_ym", "")).strip()
+    if not all([emp_code, customer_code, brand_code, action_ym]):
+        raise HTTPException(status_code=400, detail="필수 파라미터 누락")
+    deleted = portal_db.delete_dm_logs_by_action(emp_code, customer_code, brand_code, action_ym)
+    _cache.clear()
+    def _do_refresh():
+        try:
+            from portal_refresh import run_action_results_refresh
+            run_action_results_refresh()
+            logger.info("[admin-delete-dm] action_results 재생성 완료")
+        except Exception as _e_del:
+            logger.warning(f"[admin-delete-dm] action_results refresh 실패: {_e_del}")
+    threading.Thread(target=_do_refresh, daemon=True, name="dm-delete-refresh").start()
+    return JSONResponse({"status": "ok", "deleted": deleted})
+
+
 @router.post("/refresh-action-results")
 async def portal_refresh_action_results(request: Request):
     """포털 사용자용 T_ACTION_RESULTS 수동 리프레시 (로그인 필요)."""

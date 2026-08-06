@@ -323,6 +323,17 @@ def list_action_logs(limit: int = 200) -> list[dict]:
         return [dict(row) for row in rows]
 
 
+def delete_dm_logs_by_action(emp_code: str, customer_code: str, brand_code: str, action_ym: str) -> int:
+    """액션 단위(emp+customer+brand+ym) DM 발송이력 일괄 삭제. 삭제된 행 수 반환."""
+    init_db()
+    with _connect() as conn:
+        cur = conn.execute(
+            "DELETE FROM dm_send_logs WHERE emp_code=? AND customer_code=? AND brand_code=? AND action_ym=?",
+            (emp_code, customer_code, brand_code, action_ym),
+        )
+        return cur.rowcount
+
+
 # ── 비밀번호 관리 ──────────────────────────────────────────────────────
 
 _HASH_ITER = 260_000

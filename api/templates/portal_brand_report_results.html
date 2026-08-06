@@ -121,6 +121,7 @@
           <th onclick="sortTable(11)" style="text-align:right;">범용추가(백만)</th>
           <th onclick="sortTable(12)" style="text-align:center;">샘플출고</th>
           <th onclick="sortTable(13)" style="text-align:center;">DM전환(건)</th>
+          {% if user and user.is_admin %}<th style="text-align:center;width:52px;">삭제</th>{% endif %}
         </tr>
       </thead>
       <tbody id="resultsTbody">
@@ -128,8 +129,10 @@
         {% set rid = loop.index %}
         <tr class="result-row" onclick="toggleDetail({{ rid }})" style="cursor:pointer;"
             data-rid="{{ rid }}"
+            data-emp="{{ r.emp_code | default('') | e }}"
             data-customer="{{ r.customer_code }}"
             data-brand="{{ r.brand_code }}"
+            data-action-ym="{{ r.action_ym }}"
             data-action-date="{{ r.action_date | default('') }}"
             data-matnr-csv="{{ r.dm_matnr_csv | default('') | e }}">
           <td><b>{{ r.customer_name }}</b></td>
@@ -169,10 +172,19 @@
               <span style="color:#2563eb;font-weight:600;">{{ r.dm_product_qty }}건</span>
             {% else %}<span style="color:#e5e7eb;">-</span>{% endif %}
           </td>
+          {% if user and user.is_admin %}
+          <td style="text-align:center;" onclick="event.stopPropagation()">
+            <button onclick="deleteDmAction(this,'{{ r.emp_code | default('') | e }}','{{ r.customer_code | e }}','{{ r.brand_code | e }}','{{ r.action_ym }}')"
+              style="font-size:.72rem;padding:.2rem .5rem;border:1px solid #fca5a5;border-radius:.3rem;
+                     background:#fff5f5;color:#dc2626;cursor:pointer;white-space:nowrap;">
+              🗑 삭제
+            </button>
+          </td>
+          {% endif %}
         </tr>
         <!-- 펼침 세부 행 -->
         <tr class="detail-row" id="detail-{{ rid }}">
-          <td colspan="14">
+          <td colspan="{% if user and user.is_admin %}15{% else %}14{% endif %}">
             <div style="font-size:.78rem;color:#374151;">
               <b style="color:#1e293b;">📦 DM 발송 품목 상세</b>
               <div id="detail-table-{{ rid }}" style="margin-top:.4rem;">
@@ -392,6 +404,38 @@
       alert('오류: ' + e.message);
     } finally {
       btn.disabled = false; btn.textContent = orig;
+    }
+  };
+
+  // DM 발송이력 삭제 (관리자 전용)
+  window.deleteDmAction = async function(btn, empCode, customerCode, brandCode, actionYm) {
+    if (!confirm(`[${actionYm}] ${customerCode} 가맹점의 DM 발송이력을 삭제하시겠습니까?\n\n삭제 후 액션실적이 재집계됩니다. (약 1분 소요)`)) return;
+    btn.disabled = true; btn.textContent = '삭제 중…';
+    try {
+      const res = await fetch('/portal/admin/dm-log', {
+        method: 'DELETE',
+        headers: {'Content-Type': 'application/json'},
+        credentials: 'same-origin',
+        body: JSON.stringify({emp_code: empCode, customer_code: customerCode, brand_code: brandCode, action_ym: actionYm}),
+      });
+      const d = await res.json();
+      if (d.status === 'ok') {
+        const tr = btn.closest('tr');
+        const rid = tr ? tr.dataset.rid : null;
+        if (tr) tr.remove();
+        if (rid) { const det = document.getElementById('detail-' + rid); if (det) det.remove(); }
+        const toast = document.createElement('div');
+        toast.textContent = `✅ 삭제 완료 (${d.deleted}건). 실적은 잠시 후 재집계됩니다.`;
+        toast.style.cssText = 'position:fixed;bottom:1.5rem;right:1.5rem;background:#1e293b;color:#fff;padding:.6rem 1.1rem;border-radius:.5rem;font-size:.82rem;z-index:9999;';
+        document.body.appendChild(toast);
+        setTimeout(function(){ toast.remove(); }, 3500);
+      } else {
+        alert('오류: ' + (d.detail || JSON.stringify(d)));
+        btn.disabled = false; btn.textContent = '🗑 삭제';
+      }
+    } catch(e) {
+      alert('오류: ' + e.message);
+      btn.disabled = false; btn.textContent = '🗑 삭제';
     }
   };
 })();
