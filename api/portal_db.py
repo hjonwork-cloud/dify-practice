@@ -500,15 +500,17 @@ def get_notice_post(post_id: int) -> dict | None:
 
 
 def list_notice_active_for_popup() -> list[dict]:
-    """팝업 기간 + is_active 조건 공지 목록."""
+    """팝업 기간이 명시적으로 설정된 공지 중 현재 날짜가 기간 내인 목록."""
     init_db()
     today = _now()[:10]
     with _connect() as conn:
         rows = conn.execute(
             """SELECT * FROM notice_posts
                WHERE is_active = 1
-                 AND (popup_start IS NULL OR popup_start <= ?)
-                 AND (popup_end   IS NULL OR popup_end   >= ?)
+                 AND popup_start IS NOT NULL AND popup_start != ''
+                 AND popup_end   IS NOT NULL AND popup_end   != ''
+                 AND popup_start <= ?
+                 AND popup_end   >= ?
                ORDER BY pinned DESC, created_at DESC""",
             (today, today),
         ).fetchall()

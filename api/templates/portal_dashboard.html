@@ -334,6 +334,7 @@ function runDashRefresh(){
       '<a href="'+noticeUrl+'" style="text-decoration:none;color:inherit;display:block;">'
       + '<b style="font-size:.875rem;color:#111;">' + a.title + '</b>'
       + (a.content ? '<p style="margin:.35rem 0 0;font-size:.82rem;color:#374151;white-space:pre-wrap;line-height:1.6;">' + a.content + '</p>' : '')
+      + (a.image_data && a.image_mime ? '<div style="margin-top:.6rem;text-align:center;"><img src="data:'+a.image_mime+';base64,'+a.image_data+'" style="max-width:100%;max-height:160px;border-radius:.4rem;border:1px solid #e5e7eb;object-fit:contain;"></div>' : '')
       + '<div style="margin-top:.4rem;font-size:.72rem;color:#9ca3af;">' + a.created_at + '</div>'
       + '</a>';
     if(_anns.length > 1){
@@ -368,13 +369,14 @@ function runDashRefresh(){
       _anns = data;
       renderCard();
 
-      // 팝업: 이번 세션에 안 본 + dismiss 안 한 공지만
+      // 팝업: 이번 세션에 안 본 ID만 표시
       var dismissed = getDismissed();
-      var seenKey   = 'ann_seen_session';
-      var seen      = sessionStorage.getItem(seenKey) === '1';
-      var newAnns   = data.filter(function(a){ return a.popup_ok && dismissed.indexOf(a.id) < 0; });
-      if(newAnns.length && !seen){
-        sessionStorage.setItem(seenKey, '1');
+      var seenIdsKey = 'ann_seen_popup_ids';
+      var seenIds = JSON.parse(sessionStorage.getItem(seenIdsKey) || '[]');
+      var newAnns   = data.filter(function(a){ return a.popup_ok && dismissed.indexOf(a.id) < 0 && seenIds.indexOf(a.id) < 0; });
+      if(newAnns.length){
+        newAnns.forEach(function(a){ seenIds.push(a.id); });
+        sessionStorage.setItem(seenIdsKey, JSON.stringify(seenIds));
         var modalBody = document.getElementById('ann-modal-body');
         if(modalBody){
           modalBody.innerHTML = newAnns.map(function(a){
@@ -386,6 +388,7 @@ function runDashRefresh(){
               + '</div>'
               + '<b style="font-size:.875rem;color:#111;">'+a.title+'</b>'
               + (a.content ? '<p style="margin:.35rem 0 0;font-size:.8rem;color:#374151;white-space:pre-wrap;line-height:1.6;">'+a.content+'</p>' : '')
+              + (a.image_data && a.image_mime ? '<div style="margin-top:.75rem;text-align:center;"><img src="data:'+a.image_mime+';base64,'+a.image_data+'" style="max-width:100%;max-height:200px;border-radius:.45rem;border:1px solid #e5e7eb;object-fit:contain;"></div>' : '')
               + '</div>';
           }).join('');
         }

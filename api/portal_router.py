@@ -2439,6 +2439,8 @@ async def announcements_data(request: Request):
         {"id": r["id"], "badge": r["badge"], "title": r["title"],
          "content": r["content"] or "", "pinned": bool(r["pinned"]),
          "has_image": bool(r.get("image_data")),
+         "image_data": (r.get("image_data") or "")[:65536],  # 최대 64KB thumb
+         "image_mime": r.get("image_mime") or "",
          "popup_ok": r["id"] in popup_ids,
          "created_at": r["created_at"][:10],
          "url": f"/portal/board/notice/{r['id']}"}
@@ -2550,8 +2552,9 @@ async def board_notice_update(request: Request, post_id: int):
     pinned      = form.get("pinned") == "1"
     image_data  = (form.get("image_data") or "").strip()
     image_mime  = (form.get("image_mime") or "").strip()
-    # 이미지 미변경 시 기존값 유지
-    if not image_data:
+    image_cleared = form.get("image_cleared", "0").strip()
+    # 이미지 미변경 시 기존값 유지 (단, 명시적 삭제 시 빈값으로)
+    if not image_data and image_cleared != "1":
         existing = portal_db.get_notice_post(post_id)
         if existing:
             image_data = existing.get("image_data") or ""
