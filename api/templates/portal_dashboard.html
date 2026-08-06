@@ -29,11 +29,11 @@
     <b style="font-size:.85rem;color:#1e293b;">공지사항</b>
     <div id="ann-card-badge" style="margin-left:.1rem;"></div>
     <span id="ann-card-collapsed-title" style="display:none;font-size:.82rem;color:#374151;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:240px;margin-left:.25rem;"></span>
-    <div id="ann-card-nav" style="margin-left:auto;display:flex;align-items:center;gap:.35rem;font-size:.75rem;color:#9ca3af;"></div>
-    <span id="ann-card-chevron" style="font-size:.72rem;color:#6b7280;margin-left:.6rem;
-          transition:transform .2s;display:inline-flex;align-items:center;gap:.2rem;
+    <div id="ann-card-nav" style="display:flex;align-items:center;gap:.35rem;font-size:.75rem;color:#9ca3af;"></div>
+    <span id="ann-card-chevron" style="font-size:.72rem;color:#6b7280;margin-left:auto;flex-shrink:0;
+          display:inline-flex;align-items:center;gap:.2rem;
           background:#f3f4f6;border-radius:.35rem;padding:.15rem .5rem;
-          border:1px solid #e5e7eb;">▼ <span id="ann-card-chevron-label">접기</span></span>
+          border:1px solid #e5e7eb;"><span id="ann-card-chevron-label">접기</span></span>
   </div>
   <!-- 본문: 접기/펼치기 -->
   <div id="ann-card-body" style="padding:0 1.25rem .85rem;"></div>
@@ -311,12 +311,11 @@ function runDashRefresh(){
 
   function annCardSetCollapsed(collapsed) {
     var body     = document.getElementById('ann-card-body');
-    var chevron  = document.getElementById('ann-card-chevron');
     var chevLbl  = document.getElementById('ann-card-chevron-label');
     var nav      = document.getElementById('ann-card-nav');
     var colTitle = document.getElementById('ann-card-collapsed-title');
     if (body)    body.style.display    = collapsed ? 'none' : 'block';
-    if (chevron) chevron.style.transform = collapsed ? 'rotate(-90deg)' : 'rotate(0deg)';
+
     if (chevLbl) chevLbl.textContent   = collapsed ? '펼기' : '접기';
     if (nav)     nav.style.display     = collapsed ? 'none' : 'flex';
     if (colTitle) colTitle.style.display = collapsed ? 'inline' : 'none';
