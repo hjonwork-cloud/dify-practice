@@ -28,9 +28,12 @@
     <span style="font-size:.95rem;">📢</span>
     <b style="font-size:.85rem;color:#1e293b;">공지사항</b>
     <div id="ann-card-badge" style="margin-left:.1rem;"></div>
+    <span id="ann-card-collapsed-title" style="display:none;font-size:.82rem;color:#374151;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:240px;margin-left:.25rem;"></span>
     <div id="ann-card-nav" style="margin-left:auto;display:flex;align-items:center;gap:.35rem;font-size:.75rem;color:#9ca3af;"></div>
-    <span id="ann-card-chevron" style="font-size:.72rem;color:#9ca3af;margin-left:.4rem;
-          transition:transform .2s;display:inline-block;">▼</span>
+    <span id="ann-card-chevron" style="font-size:.72rem;color:#6b7280;margin-left:.6rem;
+          transition:transform .2s;display:inline-flex;align-items:center;gap:.2rem;
+          background:#f3f4f6;border-radius:.35rem;padding:.15rem .5rem;
+          border:1px solid #e5e7eb;">▼ <span id="ann-card-chevron-label">접기</span></span>
   </div>
   <!-- 본문: 접기/펼치기 -->
   <div id="ann-card-body" style="padding:0 1.25rem .85rem;"></div>
@@ -309,10 +312,14 @@ function runDashRefresh(){
   function annCardSetCollapsed(collapsed) {
     var body     = document.getElementById('ann-card-body');
     var chevron  = document.getElementById('ann-card-chevron');
+    var chevLbl  = document.getElementById('ann-card-chevron-label');
     var nav      = document.getElementById('ann-card-nav');
+    var colTitle = document.getElementById('ann-card-collapsed-title');
     if (body)    body.style.display    = collapsed ? 'none' : 'block';
     if (chevron) chevron.style.transform = collapsed ? 'rotate(-90deg)' : 'rotate(0deg)';
+    if (chevLbl) chevLbl.textContent   = collapsed ? '펼기' : '접기';
     if (nav)     nav.style.display     = collapsed ? 'none' : 'flex';
+    if (colTitle) colTitle.style.display = collapsed ? 'inline' : 'none';
     localStorage.setItem(ANN_COLLAPSE_KEY, collapsed ? '1' : '0');
   }
 
@@ -329,12 +336,14 @@ function runDashRefresh(){
     var cardBadge = document.getElementById('ann-card-badge');
     if(!cardBody) return;
     if(cardBadge) cardBadge.innerHTML = badgeHtml(a.badge) + (a.pinned ? ' <span style="font-size:.7rem;color:#d97706;font-weight:700;">📌</span>' : '');
+    var colTitle = document.getElementById('ann-card-collapsed-title');
+    if(colTitle) colTitle.textContent = a.title;
     var noticeUrl = '/portal/board/notice/' + a.id;
     cardBody.innerHTML =
       '<a href="'+noticeUrl+'" style="text-decoration:none;color:inherit;display:block;">'
       + '<b style="font-size:.875rem;color:#111;">' + a.title + '</b>'
       + (a.content ? '<p style="margin:.35rem 0 0;font-size:.82rem;color:#374151;white-space:pre-wrap;line-height:1.6;">' + a.content + '</p>' : '')
-      + (a.image_data && a.image_mime ? '<div style="margin-top:.6rem;text-align:center;"><img src="data:'+a.image_mime+';base64,'+a.image_data+'" style="max-width:100%;max-height:160px;border-radius:.4rem;border:1px solid #e5e7eb;object-fit:contain;"></div>' : '')
+      + (a.image_data && a.image_mime ? '<div style="margin-top:.6rem;text-align:left;"><img src="data:'+a.image_mime+';base64,'+a.image_data+'" style="max-width:100%;max-height:160px;border-radius:.4rem;border:1px solid #e5e7eb;object-fit:contain;display:block;"></div>' : '')
       + '<div style="margin-top:.4rem;font-size:.72rem;color:#9ca3af;">' + a.created_at + '</div>'
       + '</a>';
     if(_anns.length > 1){
