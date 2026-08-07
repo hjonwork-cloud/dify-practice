@@ -1335,8 +1335,9 @@ async def admin_refresh_dashboard(request: Request):
     try:
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(None, lambda: portal_refresh.run_refresh(force=True))
-        # 인메모리 캐시 전체 무효화 (stale 12215 같은 캐시 방지)
-        _cache.clear()
+        # 대시보드/집계 관련 캐시만 선택적 무효화 (employee_whitelist·brands 는 유지)
+        _cache_clear_pattern("dashboard:", "latest:", "billdate:", "profit_latest:",
+                             "division_latest", "division_bill:", "brand_cm:")
         return JSONResponse(content=result)
     except Exception as e:
         import traceback
@@ -2096,7 +2097,8 @@ async def admin_delete_dm_log(request: Request):
             raise HTTPException(status_code=400, detail="필수 파라미터 누락 (customer_code, brand_code, action_ym)")
         deleted = portal_db.delete_dm_logs_by_action(emp_code, customer_code, brand_code, action_ym)
 
-    _cache.clear()
+    # DM 로그 삭제는 캐시와 무관 (액션결과는 T_ACTION_RESULTS에서 직접 조회)
+    # _cache.clear() 전체 무효화 제거 → 다른 사용자 캐시 보호
     def _do_refresh():
         try:
             from portal_refresh import run_action_results_refresh
@@ -2411,7 +2413,7 @@ def _warmup_cache():
 def _databricks_keepalive():
     import logging
     _log = logging.getLogger("portal_keepalive")
-    interval_sec = int(os.getenv("DBX_KEEPALIVE_SEC", "300"))  # 기본 5분
+    interval_sec = int(os.getenv("DBX_KEEPALIVE_SEC", "480"))  # 기본 8분 (Warehouse idle 10분 이전 유지)
     # T_BRANDS bulk cache 재갱신 주기 (기본 30분) — 6h TTL 만료 전에 계속 채워둠
     bulk_refresh_sec = int(os.getenv("BULK_WARM_SEC", "1800"))
     _last_bulk = time.time()  # warmup 에서 이미 채웠으므로 지금 시각으로 시작
