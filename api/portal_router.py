@@ -80,6 +80,46 @@ def _scope_cond(emp_code: str) -> str:
 _cache: dict[str, tuple[float, object]] = {}
 _CACHE_TTL = 21600  # 6시간 캐시 (로그인 속도 개선)
 
+# ── 액션결과 재집계 Debounce + Mutex ──────────────────────────────────
+# 삭제마다 즉시 heavy 쿼리 대신: 60초 대기 후 1회만 실행
+# 동시 실행 중이면 pending 플래그로 1회 추가 실행 보장
+_action_refresh_lock   = threading.Lock()
+_action_refresh_pending = threading.Event()
+_action_refresh_timer: list = [None]  # list로 감싸서 클로저에서 수정 가능
+
+
+def _schedule_action_refresh(delay: int = 60):
+    """delay초 후 T_ACTION_RESULTS 재집계 예약. 중복 예약 시 타이머 리셋."""
+    if _action_refresh_timer[0] is not None:
+        try:
+            _action_refresh_timer[0].cancel()
+        except Exception:
+            pass
+
+    def _guarded_refresh():
+        if not _action_refresh_lock.acquire(blocking=False):
+            # 이미 실행 중 → pending 세팅 후 종료 (실행 완료 후 1회 더 돌림)
+            _action_refresh_pending.set()
+            return
+        try:
+            from portal_refresh import run_action_results_refresh
+            run_action_results_refresh()
+            logger.info("[action-refresh] debounce 재집계 완료")
+            # 실행 도중 pending이 세팅됐으면 즉시 1회 더 실행
+            if _action_refresh_pending.is_set():
+                _action_refresh_pending.clear()
+                run_action_results_refresh()
+                logger.info("[action-refresh] pending 재집계 완료")
+        except Exception as _e:
+            logger.warning(f"[action-refresh] 재집계 실패: {_e}")
+        finally:
+            _action_refresh_lock.release()
+
+    t = threading.Timer(delay, _guarded_refresh)
+    t.daemon = True
+    t.start()
+    _action_refresh_timer[0] = t
+
 
 def _asset_version() -> str:
     try:
@@ -2097,17 +2137,10 @@ async def admin_delete_dm_log(request: Request):
             raise HTTPException(status_code=400, detail="필수 파라미터 누락 (customer_code, brand_code, action_ym)")
         deleted = portal_db.delete_dm_logs_by_action(emp_code, customer_code, brand_code, action_ym)
 
-    # DM 로그 삭제는 캐시와 무관 (액션결과는 T_ACTION_RESULTS에서 직접 조회)
-    # _cache.clear() 전체 무효화 제거 → 다른 사용자 캐시 보호
-    def _do_refresh():
-        try:
-            from portal_refresh import run_action_results_refresh
-            run_action_results_refresh()
-            logger.info("[admin-delete-dm] action_results 재생성 완료")
-        except Exception as _e_del:
-            logger.warning(f"[admin-delete-dm] action_results refresh 실패: {_e_del}")
-    threading.Thread(target=_do_refresh, daemon=True, name="dm-delete-refresh").start()
-    return JSONResponse({"status": "ok", "deleted": deleted})
+    # 자동 즉시 refresh 제거 → 60초 debounce 예약
+    # 연속 삭제 시 타이머 리셋되어 마지막 삭제 후 60초 뒤 1회만 실행
+    _schedule_action_refresh(delay=60)
+    return JSONResponse({"status": "ok", "deleted": deleted, "refresh": "scheduled"})
 
 
 @router.post("/refresh-action-results")

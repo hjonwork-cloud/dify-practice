@@ -416,6 +416,39 @@
     setTimeout(function(){ t.remove(); }, 3500);
   }
 
+  // 삭제 완료 토스트 + 재집계 버튼
+  function showDeleteToast(deletedCount) {
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'position:fixed;bottom:1.5rem;right:1.5rem;background:#1e293b;color:#fff;' +
+      'padding:.65rem 1.1rem;border-radius:.5rem;font-size:.82rem;z-index:9999;display:flex;align-items:center;gap:.7rem;';
+    const msg = document.createElement('span');
+    msg.textContent = `✅ ${deletedCount}건 삭제됨. 실적은 시간이 좌르면 자동 반영됩니다.`;
+    const btn = document.createElement('button');
+    btn.textContent = '🔄 지금 재집계';
+    btn.style.cssText = 'font-size:.78rem;padding:.2rem .55rem;border:1px solid #94a3b8;border-radius:.3rem;' +
+      'background:#334155;color:#e2e8f0;cursor:pointer;white-space:nowrap;flex-shrink:0;';
+    btn.onclick = function() {
+      btn.disabled = true; btn.textContent = '⏳ 집계 중…';
+      fetch('/portal/refresh-action-results', {method:'POST', credentials:'same-origin'})
+        .then(r => r.json())
+        .then(d => {
+          if (d.status === 'ok' || d.action_rows !== undefined) {
+            wrap.remove();
+            showToast(`✅ 집계 완료: ${d.action_rows || 0}건. 페이지를 새로고침합니다.`);
+            setTimeout(function(){ location.reload(); }, 1500);
+          } else {
+            showToast('⚠️ ' + (d.reason || '집계 실패'));
+            btn.disabled = false; btn.textContent = '🔄 지금 재집계';
+          }
+        })
+        .catch(e => { showToast('오류: ' + e.message); btn.disabled = false; btn.textContent = '🔄 지금 재집계'; });
+    };
+    wrap.appendChild(msg);
+    wrap.appendChild(btn);
+    document.body.appendChild(wrap);
+    setTimeout(function(){ if (wrap.parentNode) wrap.remove(); }, 12000);
+  }
+
   // 상단 액션 단위 전체 삭제 (관리자 전용)
   window.deleteDmAction = async function(btn, empCode, customerCode, brandCode, actionYm) {
     if (!confirm(`[${actionYm}] ${customerCode} 가맹점의 DM 발송이력 전체를 삭제하시겠습니까?\n\n삭제 후 액션실적이 재집계됩니다. (약 1분 소요)`)) return;
@@ -441,7 +474,7 @@
             row.remove();
           }
         });
-        showToast(`✅ 삭제 완료 (${d.deleted}건). 실적은 잠시 후 재집계됩니다.`);
+        showDeleteToast(d.deleted);
       } else {
         alert('오류: ' + (d.detail || JSON.stringify(d)));
         btn.disabled = false; btn.textContent = orig;
@@ -468,7 +501,7 @@
       if (d.status === 'ok') {
         const tr = btn.closest('tr');
         if (tr) tr.remove();
-        showToast('✅ 1건 삭제 완료.');
+        showDeleteToast(d.deleted);
       } else {
         alert('오류: ' + (d.detail || JSON.stringify(d)));
         btn.disabled = false; btn.textContent = orig;
