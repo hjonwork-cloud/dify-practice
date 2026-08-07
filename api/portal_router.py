@@ -2222,6 +2222,18 @@ async def dm_send_with_price(request: Request, body: _DmSendPayload):
         _product_names = ", ".join(_re_dm.findall(r'\[(\d{5,10})\]', body.dm_message))
 
     # ── DM 로그 저장 ──────────────────────────────────
+    # action_ym: price_items의 date_from 최솟값(YYYYMM), 없으면 오늘 달
+    _pj = body.price_items
+    _action_ym = ""
+    if _pj:
+        _dates = [str(it.get("date_from") or "")[:6] for it in _pj if it.get("date_from")]
+        _valid = [d for d in _dates if len(d) == 6 and d.isdigit()]
+        if _valid:
+            _action_ym = min(_valid)
+    if not _action_ym:
+        import datetime as _dt
+        _action_ym = _dt.datetime.now().strftime("%Y%m")
+
     from portal_db import record_dm_log_v2
     record_dm_log_v2(
         emp_code=emp,
@@ -2237,20 +2249,15 @@ async def dm_send_with_price(request: Request, body: _DmSendPayload):
         price_items_json=_json.dumps(body.price_items, ensure_ascii=False),
         sap_saved_count=saved_count,
         sap_result_json=_json.dumps(sap_result, ensure_ascii=False),
+        action_ym=_action_ym,
         status=("price_applied_dm_sent" if body.action_type == "price_and_dm"
             else "price_only" if body.action_type == "price_only"
             else "dm_only_sent"),
     )
 
-    # ── 판가설정 또는 DM 발송 액션 시 실적 테이블 백그라운드 갱신 ──────────
+    # ── 판가설정 또는 DM 발송 액션 시 실적 테이블 debounce 갱신 ──────────
     if body.action_type in ("price_and_dm", "price_only", "dm_only"):
-        def _refresh_action_results():
-            try:
-                from portal_refresh import run_action_results_refresh
-                run_action_results_refresh()
-            except Exception as e:
-                logger.warning(f"[dm-send] action_results 백그라운드 갱신 실패: {e}")
-        threading.Thread(target=_refresh_action_results, daemon=True, name="action-results-refresh").start()
+        _schedule_action_refresh(delay=60)
 
     return JSONResponse({
         "success": True,

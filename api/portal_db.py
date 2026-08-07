@@ -258,6 +258,7 @@ def record_dm_log_v2(
     price_items_json: str = "",
     sap_saved_count: int = 0,
     sap_result_json: str = "",
+    action_ym: str = "",
     status: str = "dm_only_sent",
 ) -> None:
     """판가 설정 정보 포함 DM 로그 저장 (v2)."""
@@ -268,12 +269,12 @@ def record_dm_log_v2(
             (emp_code, emp_name, team, brand_code, brand_name, customer_code, customer_name,
              action_type, product_names, message,
              price_items_json, sap_saved_count, sap_result_json,
-             status, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+             action_ym, status, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (emp_code, emp_name, team, brand_code, brand_name, customer_code, customer_name,
              action_type, product_names, message,
              price_items_json, sap_saved_count, sap_result_json,
-             status, _now()),
+             action_ym or None, status, _now()),
         )
         conn.execute(
             """INSERT INTO promotion_action_logs
@@ -324,17 +325,21 @@ def list_action_logs(limit: int = 200) -> list[dict]:
 
 
 def delete_dm_logs_by_action(emp_code: str, customer_code: str, brand_code: str, action_ym: str) -> int:
-    """액션 단위(customer+brand+ym) DM 발송이력 일괄 삭제. emp_code 빈 문자열이면 조건 제외. 삭제된 행 수 반환."""
+    """액션 단위(customer+brand) DM 발송이력 일괄 삭제.
+    action_ym이 NULL인 레거시 레코드도 함께 삭제하기 위해
+    `action_ym IS NULL OR action_ym = ?` 조건 사용. 삭제된 행 수 반환."""
     init_db()
     with _connect() as conn:
         if emp_code:
             cur = conn.execute(
-                "DELETE FROM dm_send_logs WHERE emp_code=? AND customer_code=? AND brand_code=? AND action_ym=?",
+                "DELETE FROM dm_send_logs WHERE emp_code=? AND customer_code=? AND brand_code=?"
+                " AND (action_ym IS NULL OR action_ym=?)",
                 (emp_code, customer_code, brand_code, action_ym),
             )
         else:
             cur = conn.execute(
-                "DELETE FROM dm_send_logs WHERE customer_code=? AND brand_code=? AND action_ym=?",
+                "DELETE FROM dm_send_logs WHERE customer_code=? AND brand_code=?"
+                " AND (action_ym IS NULL OR action_ym=?)",
                 (customer_code, brand_code, action_ym),
             )
         return cur.rowcount
