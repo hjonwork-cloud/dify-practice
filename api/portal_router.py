@@ -2203,6 +2203,9 @@ class _DmSendPayload(BaseModel):
 async def dm_send_with_price(request: Request, body: _DmSendPayload):
     import json as _json
     user = _require_user(request)
+    # readonly_all(신규개발파트 등) 조회 전용 계정은 DM/판가 불가
+    if user.get("role") == "readonly_all":
+        raise HTTPException(status_code=403, detail="조회 전용 계정은 DM 발송 및 판가 설정이 불가합니다.")
     emp = user["emp_code"]
     emp_name = user.get("emp_name") or ""
     team = user.get("team") or ""

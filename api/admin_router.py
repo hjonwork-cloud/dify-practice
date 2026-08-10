@@ -760,6 +760,17 @@ async def users_set_team(request: Request):
         if changed:
             main._save_users(users_all)
     admin_db.record_audit(admin["admin_id"], "user_team_changed", "chatbot_user", emp, {"team": before}, {"team": team})
+    # 포털 캐시 직접 무효화 — 소속 변경이 즉시 반영되도록
+    try:
+        from portal_router import _cache_clear_pattern
+        _cache_clear_pattern(
+            f"dashboard:{emp}", f"brands:{emp}",
+            f"latest:{emp}", f"billdate:{emp}",
+            f"profit_latest:{emp}", f"brand_cm:{emp}",
+            "employee_whitelist",  # 화이트리스트 소속 캐시도 초기화
+        )
+    except Exception:
+        pass
     return JSONResponse({"ok": True, "emp_code": emp, "team": team})
 
 

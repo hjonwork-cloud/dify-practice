@@ -1,4 +1,5 @@
 {% extends 'portal_base.html' %}{% block title %}상세·액션 — {{ report.brand.brand_name if report.brand else '브랜드 없음' }}{% endblock %}{% block content %}
+<script>const PORTAL_READONLY = {{ 'true' if user and user.role == 'readonly_all' else 'false' }};</script>
 <style>
 /* ── 컴팩트 헤더 ── */
 .action-page-header{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;padding:.75rem 0 .5rem;border-bottom:1px solid #e5e7eb;margin-bottom:.75rem;}
@@ -450,7 +451,15 @@
 
     // DM 메시지 + 버튼 3개
     const actionFooter = document.createElement('div');
-    actionFooter.innerHTML = `
+    if (PORTAL_READONLY) {
+      // 조회 전용 계정: 안내 메시지만 표시, 발송 버튼 없음
+      actionFooter.innerHTML = `
+        <div style="margin-top:.6rem;padding:.55rem .85rem;background:#f0fdf4;border:1px solid #bbf7d0;
+                    border-radius:.45rem;font-size:.82rem;color:#166534;">
+          ℹ️ <b>조회 전용 계정</b>입니다. DM 발송 및 판가 설정 기능은 사용할 수 없습니다.
+        </div>`;
+    } else {
+      actionFooter.innerHTML = `
       <div class="action-section-title" style="margin-top:.6rem;">DM 메시지</div>
       <textarea class="dm-preview-area" id="priceDmText_${uid}" rows="4">${dmMsg}</textarea>
       <div class="price-btn-row">
@@ -469,6 +478,7 @@
       </div>
       <div id="priceResult_${uid}" class="send-result" style="display:none;"></div>
     `;
+    }
     pricePanel.appendChild(actionFooter);
 
     // ── 발송 버튼 wrapper: guardConfirmed + confirm 팝업 ─────────
@@ -501,6 +511,7 @@
 
   // 발송 버튼 활성화 상태 갱신 (자재코드 없으면 disabled)
   function checkPricePanelBtns(uid) {
+    if (PORTAL_READONLY) return;  // 조회 전용: 버튼 없으므로 스킵
     const panel = document.getElementById(`pricePanel_${uid}`);
     if (!panel) return;
     const rows = panel.querySelectorAll('tbody tr');
