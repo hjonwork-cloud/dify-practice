@@ -154,7 +154,7 @@ def _fetch_org_members() -> list[dict]:
     import datetime as _dt
     import main
     # 최근 3개월 년월(yyyyMM) 목록 (당월 포함 직전 3개월)
-    _today = _dt.date.today()
+    _today = (_dt.datetime.utcnow() + _dt.timedelta(hours=9)).date()  # KST
     _months = []
     _y, _m = _today.year, _today.month
     for _ in range(3):
@@ -210,7 +210,7 @@ def _build_user_team_map() -> dict:
 def _resolve_usage_range(range_type: str, year: str, month: str, date_from: str, date_to: str) -> tuple[str, str]:
     """필터 파라미터 → (시작일, 종료일) 문자열(YYYY-MM-DD). ('' 이면 미제한)."""
     import datetime as _dt
-    today = _dt.date.today()
+    today = (_dt.datetime.utcnow() + _dt.timedelta(hours=9)).date()  # KST
 
     def _fmt(d: _dt.date) -> str:
         return d.strftime("%Y-%m-%d")
