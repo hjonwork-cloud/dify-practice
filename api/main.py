@@ -4082,9 +4082,10 @@ def _set_user_role(user_id: str, role: str) -> bool:
 def _log_query_call(user_id: str, utterance: str):
     """모든 인증된 쿼리 호출을 기록 (토큰 0으로 초기화, Dify 완료 시 업데이트)"""
     user_name = _get_registered_name(user_id) or user_id
+    _now_kst = _dt_mod.datetime.utcnow() + _dt_mod.timedelta(hours=9)
     entry = {
-        "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "date": time.strftime("%Y-%m-%d"),
+        "ts": _now_kst.strftime("%Y-%m-%d %H:%M:%S"),
+        "date": _now_kst.strftime("%Y-%m-%d"),
         "user_id": user_id,
         "user_name": user_name,
         "utterance": utterance[:60],
