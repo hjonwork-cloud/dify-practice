@@ -123,18 +123,18 @@
   async function resetPw(empCode, name) {
     if (!confirm(`${name}(${empCode})의 비밀번호를 초기화하시겠습니까?\n임시 비밀번호: 사번 뒤 4자리`)) return;
     const fd = new FormData(); fd.append('emp_code', empCode);
-    const res = await fetch('/portal/admin/reset-password', {method:'POST', body:fd});
+    const res = await fetch('/portal/admin/reset-password', {method:'POST', body:fd, credentials:'same-origin'});
     const d = await res.json();
     if (d.ok) { showToast(`✅ ${name} 임시 비밀번호: ${d.temp_pw} (로그인 시 변경 필요)`); }
-    else { showToast('❌ 오류 발생'); }
+    else { showToast('❌ 오류: ' + (d.detail || '초기화 실패')); }
   }
   async function unlockAcc(empCode, name) {
     if (!confirm(`${name}(${empCode}) 계정 잠금을 해제하시겠습니까?`)) return;
     const fd = new FormData(); fd.append('emp_code', empCode);
-    const res = await fetch('/portal/admin/unlock-account', {method:'POST', body:fd});
+    const res = await fetch('/portal/admin/unlock-account', {method:'POST', body:fd, credentials:'same-origin'});
     const d = await res.json();
     if (d.ok) { showToast(`✅ ${name} 잠금 해제 완료`); location.reload(); }
-    else { showToast('❌ 오류 발생'); }
+    else { showToast('❌ 오류: ' + (d.detail || '잠금 해제 실패')); }
   }
   </script>
 </body>

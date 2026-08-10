@@ -534,8 +534,12 @@ def _brand_rows(emp_code: str = _DEFAULT_EMP_CODE) -> list[dict]:
     try:
         import main as _main
         import portal_refresh as _pr
+        # readonly_all 사용자는 T_BRANDS에 개인 행 없음 → 관리자 코드로 조회
+        _lookup = emp_code
+        if _is_readonly_all(emp_code) and not access_control.is_admin_emp(emp_code):
+            _lookup = access_control.ADMIN_EMP_CODE
         rows_pre = _main._safe_query(
-            f"SELECT * FROM {_pr.T_BRANDS} WHERE emp_code = '{emp_code}' ORDER BY sales_m DESC LIMIT 200",
+            f"SELECT * FROM {_pr.T_BRANDS} WHERE emp_code = '{_lookup}' ORDER BY sales_m DESC LIMIT 200",
             raw=True,
         ) or []
         if rows_pre:
@@ -1349,7 +1353,11 @@ async def dashboard_data_api(request: Request):
     # ── 1순위: 사전 계산 테이블 (T_DASH) — 팀리더 포함 모두 활용 ────────────
     try:
         import portal_refresh
-        precomputed = portal_refresh.read_dashboard_from_table(emp_code)
+        # readonly_all(신규개발파트 등)은 T_DASH에 개인 행 없음 → 전사뷰인 관리자 emp_code로 대체 조회
+    _dash_lookup = emp_code
+    if _is_readonly_all(emp_code) and not access_control.is_admin_emp(emp_code):
+        _dash_lookup = access_control.ADMIN_EMP_CODE
+    precomputed = portal_refresh.read_dashboard_from_table(_dash_lookup)
         if precomputed:
             return JSONResponse(content=precomputed)
     except Exception as _e:
