@@ -214,15 +214,20 @@ def _employee_whitelist() -> dict[str, dict]:
         """)
     except Exception:
         rows = []
+    try:
+        _team_overrides = main._load_team_overrides()
+    except Exception:
+        _team_overrides = {}
     out: dict[str, dict] = {}
     for r in rows:
         code = str(r.get("emp_code") or "").strip()
         if not code:
             continue
+        _base_team = str(r.get("dept_name") or r.get("branch_name") or "").strip()
         out[code] = {
             "emp_code": code,
             "name": str(r.get("emp_name") or code).strip(),
-            "team": str(r.get("dept_name") or r.get("branch_name") or "").strip(),
+            "team": _team_overrides.get(code) or _base_team,
             "customer_count": int(r.get("customer_count") or 0),
             "role": "user",
         }
@@ -273,6 +278,13 @@ def _portal_user(emp_code: str) -> dict | None:
             binfo = beta_testers[code]
             name = binfo.get("name", code)
             team = binfo.get("team", "") or _leader_team(code)
+            # 관리자가 변경한 소속이 있으면 override 적용
+            try:
+                _ov = main._load_team_overrides().get(code)
+                if _ov:
+                    team = _ov
+            except Exception:
+                pass
             role_raw = binfo.get("role", "user")
         else:
             name = access_control.ADMIN_EMP_NAME if is_admin else code

@@ -76,8 +76,13 @@ def load_beta_testers() -> dict[str, dict]:
         data.setdefault(code, {"name": "", "team": "", "role": "beta", "added_at": "env"})
     data.setdefault(ADMIN_EMP_CODE, {"name": ADMIN_EMP_NAME, "team": ADMIN_TEAM, "role": "admin", "added_at": "seed"})
     # 항상 seed 항목이 누락 없이 유지되도록 보장
+    # team이 비어있는 경우에만 seed team 적용 (관리자가 변경한 팀은 유지)
     for _emp, _info in _SEED_BETA_TESTERS.items():
-        data.setdefault(_emp, {**_info, "added_at": "seed"})
+        if _emp in data:
+            if not data[_emp].get("team"):  # team이 비어있을 때만 seed 값으로 채움
+                data[_emp]["team"] = _info["team"]
+        else:
+            data[_emp] = {**_info, "added_at": "seed"}
     return data
 
 
