@@ -52,13 +52,21 @@ def _leader_team(emp_code: str) -> str:
     return _TEAM_LEADERS.get(emp_code, "")
 
 def _is_readonly_all(emp_code: str) -> bool:
-    """FULL_SCOPE_TEAMS 소속 여부 확인 (베타테스터 + 화이트리스트 모두 체크)."""
+    """FULL_SCOPE_TEAMS 소속 여부 확인 — override > beta > whitelist 순서로 확인."""
     code = str(emp_code or "").strip()
-    # 베타테스터에서 team 확인
+    # 1순위: 관리자 override (가장 신뢰할 수 있는 출처)
+    try:
+        import main as _m
+        ov_team = _m._load_team_overrides().get(code)
+        if ov_team:
+            return ov_team in access_control.FULL_SCOPE_TEAMS
+    except Exception:
+        pass
+    # 2순위: 베타테스터 파일
     beta = access_control.load_beta_testers()
     if code in beta:
         return beta[code].get("team", "") in access_control.FULL_SCOPE_TEAMS
-    # 화이트리스트에서 확인
+    # 3순위: whitelist (T_MAIN 부서명 + override 이미 적용됨)
     wl = _employee_whitelist()
     if code in wl:
         return (wl[code].get("team") or "") in access_control.FULL_SCOPE_TEAMS
