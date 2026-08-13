@@ -3911,7 +3911,7 @@ _users_lock = threading.Lock()
 _usage_lock = threading.Lock()
 
 # 관리자가 조직원 소속을 지정할 때 선택 가능한 소속(팀) 목록
-TEAM_OPTIONS = ["외식1팀", "외식2팀", "외식3팀", "신규개발파트", "영남지점"]
+TEAM_OPTIONS = ["외식1팀", "외식2팀", "외식3팀", "신규개발파트", "영남지점", "외식식재사업부"]
 
 # 초기 seed 데이터 — 최초 1회 JSON(_WHITELIST_FILE/_BLACKLIST_FILE)로 이관된 뒤
 # 카톡·웹 관리자 콘솔 모두 JSON을 단일 소스로 사용한다. (이후 수정은 웹/카톡에서)
