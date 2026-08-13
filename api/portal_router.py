@@ -1914,7 +1914,12 @@ async def brand_report_action_page(
     target_page: int = 1,
 ):
     user = _require_user(request)
-    report = brand_report(brand or None, emp_code=user["emp_code"],
+    emp_code = user["emp_code"]
+    # readonly_all(신규개발파트, 외식식재사업부 관리직 등)은 T_BRANDS에 개인 행 없음 → 관리자 코드로 대체
+    _action_emp = emp_code
+    if _is_readonly_all(emp_code) and not access_control.is_admin_emp(emp_code):
+        _action_emp = access_control.ADMIN_EMP_CODE
+    report = brand_report(brand or None, emp_code=_action_emp,
                           threshold_pct=threshold, customer_page=customer_page, target_page=target_page)
     return _render(request, "portal_brand_report_action.html", report=report)
 

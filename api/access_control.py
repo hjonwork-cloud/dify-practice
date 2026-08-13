@@ -14,7 +14,8 @@ ADMIN_EMP_NAME = "최희조"
 ADMIN_TEAM = AUTH_DEPT
 
 # 이 팀/파트 소속 사원은 전체 사업부 조회 가능 (readonly_all 롤)
-FULL_SCOPE_TEAMS: set[str] = {"신규개발파트"}
+# 신규개발파트: 개발/기획 담당자, 외식식재사업부(팀명 그대로): 사업부 관리직
+FULL_SCOPE_TEAMS: set[str] = {"신규개발파트", "외식식재사업부"}
 
 DATA_DIR = Path(os.getenv("CHATBOT_DATA_DIR", os.getenv("DATA_DIR", r"E:\data\chatbot")))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
