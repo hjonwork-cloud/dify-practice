@@ -288,7 +288,8 @@ def _portal_user(emp_code: str) -> dict | None:
             team = binfo.get("team", "") or _leader_team(code)
             # 관리자가 변경한 소속이 있으면 override 적용
             try:
-                _ov = main._load_team_overrides().get(code)
+                import main as _main_portal
+                _ov = _main_portal._load_team_overrides().get(code)
                 if _ov:
                     team = _ov
             except Exception:
@@ -1787,6 +1788,10 @@ async def brand_report_data_api(
     """brand-report 데이터 JSON 반환 (AJAX 전용)."""
     user = _require_user(request)
     emp_code = user["emp_code"]
+    # readonly_all(신규개발파트 등)은 T_BRANDS/T_BRAND_SUMMARY에 개인 행 없음 → 관리자 코드로 대체
+    _brand_emp = emp_code
+    if _is_readonly_all(emp_code) and not access_control.is_admin_emp(emp_code):
+        _brand_emp = access_control.ADMIN_EMP_CODE
     ym_mode = (ym or "prev").lower()
     if ym_mode not in ("prev", "current"):
         ym_mode = "prev"
@@ -1794,7 +1799,7 @@ async def brand_report_data_api(
     try:
         # ── 1단계: _pick_brand (브랜드 목록 조회) ───────────────────
         t1 = time.time()
-        picked = _pick_brand(brand or None, emp_code)
+        picked = _pick_brand(brand or None, _brand_emp)
         t2 = time.time()
         logger.info(f"[brand-data] {emp_code} _pick_brand={t2-t1:.2f}s picked={picked.get('brand_name') if picked else None} ym_mode={ym_mode}")
 
@@ -1834,7 +1839,7 @@ async def brand_report_data_api(
         # ── 3단계: fallback 실시간 쿼리 ──────────────────────────────
         logger.warning(f"[brand-data] {emp_code} fallback to live query brand={picked.get('brand_name')} ym_mode={ym_mode}")
         data = brand_report(
-            str(picked.get("brand_name") or ""), emp_code=emp_code,
+            str(picked.get("brand_name") or ""), emp_code=_brand_emp,
             threshold_pct=threshold,
             customer_page=customer_page, target_page=target_page,
             ym_mode=ym_mode,
