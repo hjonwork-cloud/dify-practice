@@ -1740,12 +1740,24 @@ async def admin_users_page(request: Request):
         _bt = access_control.load_beta_testers()
     except Exception:
         _bt = {}
+    # override JSON 직접 로드 (캐시 우회 — 관리자 설정값 즉시 반영)
+    try:
+        import main as _main_au
+        _overrides: dict = _main_au._load_team_overrides()
+    except Exception:
+        _overrides = {}
     for u in users:
         code = u.get("emp_code", "")
-        # team 최신화: override > whitelist > beta_testers > 기존 값
         _wl_entry = _wl.get(code, {})
         _bt_entry = _bt.get(code, {})
-        current_team = _wl_entry.get("team") or _bt_entry.get("team") or u.get("team") or ""
+        # 우선순위: 관리자 override JSON > whitelist(T_MAIN기반) > beta_testers > 로그 저장값
+        current_team = (
+            _overrides.get(code)
+            or _wl_entry.get("team")
+            or _bt_entry.get("team")
+            or u.get("team")
+            or ""
+        )
         u["team"] = current_team
         # name 최신화: emp_name이 사번과 같거나 비어있으면 whitelist/beta에서 보정
         stored_name = u.get("emp_name") or ""
