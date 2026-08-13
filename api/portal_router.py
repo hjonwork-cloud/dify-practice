@@ -1731,6 +1731,26 @@ def _require_admin(request: Request) -> dict:
 async def admin_users_page(request: Request):
     _require_admin(request)
     users = portal_db.list_login_users()
+    # 현재 whitelist/beta_testers 기준으로 team·name 최신화 (로그인 로그의 구버전 값 보정)
+    try:
+        _wl = _employee_whitelist()
+    except Exception:
+        _wl = {}
+    try:
+        _bt = access_control.load_beta_testers()
+    except Exception:
+        _bt = {}
+    for u in users:
+        code = u.get("emp_code", "")
+        # team 최신화: override > whitelist > beta_testers > 기존 값
+        _wl_entry = _wl.get(code, {})
+        _bt_entry = _bt.get(code, {})
+        current_team = _wl_entry.get("team") or _bt_entry.get("team") or u.get("team") or ""
+        u["team"] = current_team
+        # name 최신화: emp_name이 사번과 같거나 비어있으면 whitelist/beta에서 보정
+        stored_name = u.get("emp_name") or ""
+        if not stored_name or stored_name == code:
+            u["emp_name"] = _wl_entry.get("name") or _bt_entry.get("name") or stored_name or code
     pw_status = portal_db.list_password_status([u["emp_code"] for u in users])
     login_logs = portal_db.list_login_logs(limit=100)
     return _render(request, "portal_admin_users.html",
