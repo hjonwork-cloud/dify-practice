@@ -136,17 +136,18 @@ def _get_our_products(plant: str, active_only: bool = True) -> list[dict]:
         rows = _q(f"""
             SELECT
                 z.`상품코드`        AS product_code,
-                COALESCE(m.`자재그룹명`, m.`자재유형명`, z.`상품코드`) AS product_name,
-                m.`자재유형`        AS brand,
-                m.`자재그룹`        AS product_group,
+                m.`상품명`          AS product_name,
+                m.`자재유형명`      AS brand,
+                m.`단위`            AS unit,
+                m.`자재그룹명`      AS product_group,
                 z.`플랜트`          AS plant,
                 COALESCE(z.`사용보류`, '') AS use_hold,
-                COALESCE(z.`주문상태`, '') AS order_status
+                COALESCE(z.`상품코드`, '') AS order_status
             FROM {T_ZSDR} z
             LEFT JOIN {T_ZMM60} m ON z.`상품코드` = m.`상품코드`
             WHERE z.`플랜트` = '{plant}'
               {active_filter}
-            ORDER BY z.`상품코드`
+            ORDER BY m.`상품명`
             LIMIT 2000
         """)
         _product_cache[cache_key] = (time.time(), rows)
@@ -445,17 +446,18 @@ async def api_our_products(request: Request, plant: str = "4120", keyword: str =
         rows = _q(f"""
             SELECT
                 z.`상품코드`        AS product_code,
-                COALESCE(m.`자재그룹명`, m.`자재유형명`, z.`상품코드`) AS product_name,
-                m.`자재유형`        AS brand,
-                m.`자재그룹`        AS product_group,
+                m.`상품명`          AS product_name,
+                m.`자재유형명`      AS brand,
+                m.`단위`            AS unit,
+                m.`자재그룹명`      AS product_group,
                 z.`플랜트`          AS plant,
                 COALESCE(z.`사용보류`, '') AS use_hold,
-                COALESCE(z.`주문상태`, '') AS order_status
+                COALESCE(z.`상품코드`, '') AS order_status
             FROM {T_ZSDR} z
             LEFT JOIN {T_ZMM60} m ON z.`상품코드` = m.`상품코드`
             WHERE z.`플랜트` = '{plant}'
               {active_filter}
-            ORDER BY m.`자재내역`
+            ORDER BY m.`상품명`
             LIMIT 2000
         """)
         products = rows or []
