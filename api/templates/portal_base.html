@@ -97,7 +97,7 @@
         </a>
       </div>
       {% if user and user.is_admin %}
-      {% set admin_active = '/portal/admin' in request.url.path %}
+      {% set admin_active = '/portal/admin' in request.url.path or '/portal/price-monitor' in request.url.path %}
       <div class="nav-parent {% if admin_active %}active open{% endif %}"
            id="navAdminParent" onclick="sbSubToggle('navAdminSub','navAdminParent')">
         <span class="nav-icon">⚙️</span>
@@ -107,6 +107,9 @@
       <div class="nav-sub {% if not admin_active %}closed{% endif %}" id="navAdminSub">
         <a class="{% if '/portal/admin/users' in request.url.path %}active{% endif %}" href="/portal/admin/users">
           <span class="nav-icon">👥</span><span class="nav-label">사용자 관리</span>
+        </a>
+        <a class="{% if '/portal/price-monitor' in request.url.path %}active{% endif %}" href="/portal/price-monitor/">
+          <span class="nav-icon">📊</span><span class="nav-label">가격 모니터링</span>
         </a>
       </div>
       {% endif %}
