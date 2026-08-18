@@ -344,19 +344,91 @@ async def pm_mapping_page(request: Request, plant: str = "4120"):
     return _render(request, "pm_mapping.html", plant=plant, plants=PLANTS)
 
 
+# ── API: 진단 (데이터소스 연결 확인) ─────────────────────────────────────
+
+@router.get("/api/debug")
+async def api_debug(request: Request):
+    _require_pm_access(request)
+    result = {}
+
+    # 1. 우리 상품 테이블
+    try:
+        rows = _q(f"SELECT COUNT(*) AS cnt FROM {T_ZSDR} WHERE `플랜트`='4120' LIMIT 1")
+        result["zsdr_count"] = rows[0]["cnt"] if rows else 0
+        result["zsdr_ok"] = True
+    except Exception as e:
+        result["zsdr_ok"] = False
+        result["zsdr_error"] = str(e)
+
+    # 2. 자재마스터 테이블
+    try:
+        rows = _q(f"SELECT COUNT(*) AS cnt FROM {T_ZMM60} LIMIT 1")
+        result["zmm60_count"] = rows[0]["cnt"] if rows else 0
+        result["zmm60_ok"] = True
+    except Exception as e:
+        result["zmm60_ok"] = False
+        result["zmm60_error"] = str(e)
+
+    # 3. 플랫폼 상품 테이블 (크롤링 결과)
+    try:
+        rows = _q(f"SELECT MAX(crawl_date) AS max_date, COUNT(*) AS cnt FROM {T_SILVER}")
+        result["silver_count"] = rows[0]["cnt"] if rows else 0
+        result["silver_max_date"] = str(rows[0]["max_date"]) if rows else None
+        result["silver_ok"] = True
+    except Exception as e:
+        result["silver_ok"] = False
+        result["silver_error"] = str(e)
+
+    # 4. compat 테이블 (기준가)
+    try:
+        import main as _main
+        rows = _q(f"SELECT MAX(`년월`) AS max_ym FROM {_main.T_MAIN} WHERE `사업장`='4120' LIMIT 1")
+        result["compat_max_ym"] = rows[0]["max_ym"] if rows else None
+        result["compat_ok"] = True
+    except Exception as e:
+        result["compat_ok"] = False
+        result["compat_error"] = str(e)
+
+    return JSONResponse(result)
+
+
 # ── API: 우리 상품 검색 (AJAX) ────────────────────────────────────────────
 
 @router.get("/api/our-products")
 async def api_our_products(request: Request, plant: str = "4120", keyword: str = ""):
     _require_pm_access(request)
-    products = _get_our_products(plant, active_only=True)
+    error_msg = None
+    products = []
+    try:
+        active_filter = "AND (z.`사용보류` IS NULL OR z.`사용보류` != 'X')"
+        rows = _q(f"""
+            SELECT
+                z.`상품코드`        AS product_code,
+                m.`자재내역`        AS product_name,
+                m.`자재유형`        AS brand,
+                m.`기본단위`        AS unit,
+                m.`자재그룹`        AS product_group,
+                z.`플랜트`          AS plant,
+                COALESCE(z.`사용보류`, '') AS use_hold,
+                COALESCE(z.`주문상태`, '') AS order_status
+            FROM {T_ZSDR} z
+            LEFT JOIN {T_ZMM60} m ON z.`상품코드` = m.`자재번호`
+            WHERE z.`플랜트` = '{plant}'
+              {active_filter}
+            ORDER BY m.`자재내역`
+            LIMIT 2000
+        """)
+        products = rows or []
+    except Exception as e:
+        error_msg = str(e)
+        logger.warning(f"[price_monitor] our_products 조회 실패 ({plant}): {e}")
     kw = keyword.lower()
-    if kw:
+    if kw and products:
         products = [
             p for p in products
             if kw in (p.get("product_name") or "").lower() or kw in (p.get("product_code") or "")
         ]
-    return JSONResponse(products[:100])
+    return JSONResponse({"data": products[:100], "error": error_msg, "total_before_filter": len(products)})
 
 
 # ── API: 플랫폼 상품 검색 (AJAX) ─────────────────────────────────────────
@@ -369,11 +441,25 @@ async def api_platform_products(
 ):
     _require_pm_access(request)
     if not keyword:
-        return JSONResponse([])
-    rows = _get_platform_latest(keyword=keyword)
-    if platform:
+        return JSONResponse({"data": [], "error": None, "hint": "keyword 파라미터 필요"})
+    error_msg = None
+    rows = []
+    try:
+        safe_kw = keyword.replace("'", "''")
+        rows = _q(f"""
+            SELECT p.*
+            FROM {T_SILVER} p
+            CROSS JOIN (SELECT MAX(crawl_date) AS max_date FROM {T_SILVER}) latest
+            WHERE p.product_name LIKE '%{safe_kw}%' AND p.crawl_date = latest.max_date
+            ORDER BY platform, platform_seller_name, price_sale
+            LIMIT 500
+        """) or []
+    except Exception as e:
+        error_msg = str(e)
+        logger.warning(f"[price_monitor] platform_products 조회 실패: {e}")
+    if platform and rows:
         rows = [r for r in rows if r.get("platform") == platform]
-    return JSONResponse(rows[:200])
+    return JSONResponse({"data": rows[:200], "error": error_msg, "total": len(rows)})
 
 
 # ── API: 매핑 추가 (즉시 반영, 승인 불필요) ──────────────────────────────

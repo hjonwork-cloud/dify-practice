@@ -88,9 +88,17 @@ async function searchOur(kw){
   if(!kw){document.getElementById('ourResults').innerHTML='<div style="text-align:center;padding:2rem;color:#94a3b8;font-size:.84rem;">상품명을 입력하세요</div>';return;}
   clearTimeout(ourTimer);
   ourTimer=setTimeout(async()=>{
-    const res=await fetch(`/portal/price-monitor/api/our-products?plant=${PLANT}&keyword=${encodeURIComponent(kw)}`);
-    const data=await res.json();
-    renderOurResults(data);
+    try{
+      const res=await fetch(`/portal/price-monitor/api/our-products?plant=${PLANT}&keyword=${encodeURIComponent(kw)}`);
+      const json=await res.json();
+      if(json.error){
+        document.getElementById('ourResults').innerHTML=`<div style="padding:1rem;color:#ef4444;font-size:.8rem;">⚠ 조회 오류: ${json.error}</div>`;
+      } else {
+        renderOurResults(json.data||[]);
+      }
+    }catch(e){
+      document.getElementById('ourResults').innerHTML=`<div style="padding:1rem;color:#ef4444;font-size:.8rem;">⚠ 네트워크 오류: ${e}</div>`;
+    }
   },350);
 }
 
@@ -123,10 +131,18 @@ async function searchPlat(kw){
   if(!kw){document.getElementById('platResults').innerHTML='<div style="text-align:center;padding:2rem;color:#94a3b8;font-size:.84rem;">상품명을 입력하세요</div>';return;}
   clearTimeout(platTimer);
   platTimer=setTimeout(async()=>{
-    const pf=document.getElementById('platformFilter').value;
-    const res=await fetch(`/portal/price-monitor/api/platform-products?keyword=${encodeURIComponent(kw)}&platform=${pf}`);
-    const data=await res.json();
-    renderPlatResults(data);
+    try{
+      const pf=document.getElementById('platformFilter').value;
+      const res=await fetch(`/portal/price-monitor/api/platform-products?keyword=${encodeURIComponent(kw)}&platform=${pf}`);
+      const json=await res.json();
+      if(json.error){
+        document.getElementById('platResults').innerHTML=`<div style="padding:1rem;color:#ef4444;font-size:.8rem;">⚠ 조회 오류: ${json.error}<br><small>크롤링이 아직 실행되지 않았을 수 있습니다.</small></div>`;
+      } else {
+        renderPlatResults(json.data||[]);
+      }
+    }catch(e){
+      document.getElementById('platResults').innerHTML=`<div style="padding:1rem;color:#ef4444;font-size:.8rem;">⚠ 네트워크 오류: ${e}</div>`;
+    }
   },350);
 }
 
