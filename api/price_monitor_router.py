@@ -136,9 +136,8 @@ def _get_our_products(plant: str, active_only: bool = True) -> list[dict]:
         rows = _q(f"""
             SELECT
                 z.`상품코드`        AS product_code,
-                m.`자재내역`        AS product_name,
+                COALESCE(m.`자재그룹명`, m.`자재유형명`, z.`상품코드`) AS product_name,
                 m.`자재유형`        AS brand,
-                m.`기본단위`        AS unit,
                 m.`자재그룹`        AS product_group,
                 z.`플랜트`          AS plant,
                 COALESCE(z.`사용보류`, '') AS use_hold,
@@ -147,7 +146,7 @@ def _get_our_products(plant: str, active_only: bool = True) -> list[dict]:
             LEFT JOIN {T_ZMM60} m ON z.`상품코드` = m.`상품코드`
             WHERE z.`플랜트` = '{plant}'
               {active_filter}
-            ORDER BY m.`자재내역`
+            ORDER BY z.`상품코드`
             LIMIT 2000
         """)
         _product_cache[cache_key] = (time.time(), rows)
@@ -344,6 +343,25 @@ async def pm_mapping_page(request: Request, plant: str = "4120"):
     return _render(request, "pm_mapping.html", plant=plant, plants=PLANTS)
 
 
+# ── API: 진단 공개용 (인증 없음, 임시) ────────────────────────────────────
+
+@router.get("/api/debug-pub")
+async def api_debug_pub(request: Request):
+    """인증 없이 테이블 컬럼 확인용 임시 엔드포인트"""
+    result = {}
+    try:
+        rows = _q(f"SELECT * FROM {T_ZSDR} WHERE `플랜트`='4120' LIMIT 1")
+        result["zsdr_columns"] = list(rows[0].keys()) if rows else []
+    except Exception as e:
+        result["zsdr_error"] = str(e)
+    try:
+        rows = _q(f"SELECT * FROM {T_ZMM60} LIMIT 1")
+        result["zmm60_columns"] = list(rows[0].keys()) if rows else []
+    except Exception as e:
+        result["zmm60_error"] = str(e)
+    return JSONResponse(result)
+
+
 # ── API: 진단 (데이터소스 연결 확인) ─────────────────────────────────────
 
 @router.get("/api/debug")
@@ -427,9 +445,8 @@ async def api_our_products(request: Request, plant: str = "4120", keyword: str =
         rows = _q(f"""
             SELECT
                 z.`상품코드`        AS product_code,
-                m.`자재내역`        AS product_name,
+                COALESCE(m.`자재그룹명`, m.`자재유형명`, z.`상품코드`) AS product_name,
                 m.`자재유형`        AS brand,
-                m.`기본단위`        AS unit,
                 m.`자재그룹`        AS product_group,
                 z.`플랜트`          AS plant,
                 COALESCE(z.`사용보류`, '') AS use_hold,
