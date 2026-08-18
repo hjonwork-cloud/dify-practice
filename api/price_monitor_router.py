@@ -144,7 +144,7 @@ def _get_our_products(plant: str, active_only: bool = True) -> list[dict]:
                 COALESCE(z.`사용보류`, '') AS use_hold,
                 COALESCE(z.`주문상태`, '') AS order_status
             FROM {T_ZSDR} z
-            LEFT JOIN {T_ZMM60} m ON z.`상품코드` = m.`자재번호`
+            LEFT JOIN {T_ZMM60} m ON z.`상품코드` = m.`상품코드`
             WHERE z.`플랜트` = '{plant}'
               {active_filter}
             ORDER BY m.`자재내역`
@@ -435,7 +435,7 @@ async def api_our_products(request: Request, plant: str = "4120", keyword: str =
                 COALESCE(z.`사용보류`, '') AS use_hold,
                 COALESCE(z.`주문상태`, '') AS order_status
             FROM {T_ZSDR} z
-            LEFT JOIN {T_ZMM60} m ON z.`상품코드` = m.`자재번호`
+            LEFT JOIN {T_ZMM60} m ON z.`상품코드` = m.`상품코드`
             WHERE z.`플랜트` = '{plant}'
               {active_filter}
             ORDER BY m.`자재내역`
