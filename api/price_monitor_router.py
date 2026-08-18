@@ -134,7 +134,8 @@ def _preload_products_background():
         for plant in PLANTS:
             try:
                 _get_our_products(plant)
-                logger.info(f"[price_monitor] preload 완료: plant={plant}, {len(_product_cache.get(f'products_{plant}', (0,[]))[1])}건")
+                _get_our_products_with_batch(plant)
+                logger.info(f"[price_monitor] preload 완료: plant={plant}")
             except Exception as e:
                 logger.warning(f"[price_monitor] preload 실패 ({plant}): {e}")
     t = threading.Thread(target=_load, daemon=True, name="pm-preload")
@@ -145,26 +146,29 @@ _preload_products_background()
 
 
 def _get_our_products(plant: str) -> list[dict]:
-    """플랜트 기준 운영상품 목록 (SAP zsdr0017 + zmm60 JOIN, 전용상품 5140 제외)"""
+    """매핑 등록용: 상품코드당 1건 (배치 무시, GROUP BY 상품코드)"""
     cache_key = f"products_{plant}"
     if cache_key in _product_cache:
         ts, data = _product_cache[cache_key]
         if time.time() - ts < _PRODUCT_CACHE_TTL:
             return data
     try:
+        # 대상 배치 필터: 4120→01, 4123→01·03
+        batch_filter = "AND z.`배치` = '01'" if plant == "4120" else "AND z.`배치` IN ('01','03')"
         rows = _q(f"""
             SELECT
-                z.`상품코드`                             AS product_code,
-                COALESCE(MAX(m.`상품명`), z.`상품코드`) AS product_name,
-                MAX(m.`자재유형명`)                  AS brand,
-                MAX(m.`단위`)                          AS unit,
-                MAX(m.`자재그룹명`)                  AS product_group,
-                MAX(m.`자재그룹`)                    AS material_group,
-                z.`플랜트`                               AS plant,
-                MAX(COALESCE(z.`사용보류`, ''))       AS use_hold
+                z.`상품코드`                                    AS product_code,
+                COALESCE(MAX(m.`상품명`), z.`상품코드`)        AS product_name,
+                MAX(m.`자재유형명`)                            AS brand,
+                MAX(m.`단위`)                                  AS unit,
+                MAX(m.`자재그룹명`)                            AS product_group,
+                MAX(m.`자재그룹`)                              AS material_group,
+                z.`플랜트`                                      AS plant,
+                MAX(COALESCE(z.`사용보류`, ''))                AS use_hold
             FROM {T_ZSDR} z
             LEFT JOIN {T_ZMM60} m ON z.`상품코드` = m.`상품코드`
             WHERE z.`플랜트` = '{plant}'
+              {batch_filter}
               AND COALESCE(m.`자재그룹`, '') != '5140'
             GROUP BY z.`상품코드`, z.`플랜트`
             ORDER BY COALESCE(MAX(m.`상품명`), z.`상품코드`)
@@ -175,6 +179,47 @@ def _get_our_products(plant: str) -> list[dict]:
     except Exception as e:
         logger.warning(f"[price_monitor] our_products 조회 실패 ({plant}): {e}")
         return []
+
+
+def _get_our_products_with_batch(plant: str) -> list[dict]:
+    """운영상품 목록용: 배치별 행 반환 (4120→01, 4123→01+03)"""
+    cache_key = f"products_batch_{plant}"
+    if cache_key in _product_cache:
+        ts, data = _product_cache[cache_key]
+        if time.time() - ts < _PRODUCT_CACHE_TTL:
+            return data
+    try:
+        batch_filter = "AND z.`배치` = '01'" if plant == "4120" else "AND z.`배치` IN ('01','03')"
+        rows = _q(f"""
+            SELECT
+                z.`상품코드`                                    AS product_code,
+                z.`배치`                                        AS batch,
+                COALESCE(MAX(m.`상품명`), z.`상품코드`)        AS product_name,
+                MAX(m.`자재유형명`)                            AS brand,
+                MAX(m.`단위`)                                  AS unit,
+                MAX(m.`자재그룹명`)                            AS product_group,
+                MAX(m.`자재그룹`)                              AS material_group,
+                z.`플랜트`                                      AS plant,
+                MAX(COALESCE(z.`사용보류`, ''))                AS use_hold
+            FROM {T_ZSDR} z
+            LEFT JOIN {T_ZMM60} m ON z.`상품코드` = m.`상품코드`
+            WHERE z.`플랜트` = '{plant}'
+              {batch_filter}
+              AND COALESCE(m.`자재그룹`, '') != '5140'
+            GROUP BY z.`상품코드`, z.`배치`, z.`플랜트`
+            ORDER BY COALESCE(MAX(m.`상품명`), z.`상품코드`), z.`배치`
+            LIMIT 30000
+        """)
+        _product_cache[cache_key] = (time.time(), rows)
+        return rows
+    except Exception as e:
+        logger.warning(f"[price_monitor] our_products_with_batch 조회 실패 ({plant}): {e}")
+        return []
+
+
+def _get_platform_latest(product_keys: list[str] | None = None,
+                          keyword: str = "") -> list[dict]:
+    """silver.dim_platform_products 최신 가격 조회"""
     try:
         if product_keys is not None:
             if not product_keys:
@@ -315,7 +360,7 @@ async def pm_products(
         plant = "4120"
     PAGE_SIZE = 100
 
-    products = _get_our_products(plant)
+    products = _get_our_products_with_batch(plant)
     all_mappings = portal_db.pm_list_all_mappings(plant)
     # 상품코드별 매핑 수 집계
     mapping_count: dict[str, dict] = {}

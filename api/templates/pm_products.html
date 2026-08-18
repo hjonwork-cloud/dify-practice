@@ -32,11 +32,11 @@
       <thead>
         <tr>
           <th>상품코드</th>
+          <th>배치</th>
           <th>상품명</th>
           <th>브랜드</th>
           <th>단위</th>
           <th>플랜트</th>
-          <th>주문상태</th>
           <th>운영여부</th>
           <th>배민상회</th>
           <th>식봄</th>
@@ -47,13 +47,13 @@
         {% for r in rows %}
         <tr>
           <td><code style="font-size:.78rem;">{{ r.product_code }}</code></td>
+          <td><span class="badge badge-blue" style="font-size:.75rem;">{{ r.batch or '-' }}</span></td>
           <td style="font-weight:600;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ r.product_name }}">
             {{ r.product_name or '-' }}
           </td>
           <td style="font-size:.8rem;color:#475569;">{{ r.brand or '-' }}</td>
           <td style="font-size:.8rem;">{{ r.unit or '-' }}</td>
           <td><span class="badge badge-blue">{{ r.plant }}</span></td>
-          <td style="font-size:.8rem;">{{ r.order_status or '-' }}</td>
           <td>
             {% if r.is_stopped %}
               <span class="badge badge-alert">운영중단</span>
