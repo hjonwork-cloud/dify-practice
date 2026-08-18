@@ -80,6 +80,21 @@ def _q(sql: str) -> list[dict]:
     return _main.run_query(sql)
 
 
+def _serialize_rows(rows: list[dict]) -> list[dict]:
+    """date/datetime 등 JSON 비직렬화 타입을 str로 변환."""
+    import datetime
+    result = []
+    for row in rows:
+        new_row = {}
+        for k, v in row.items():
+            if isinstance(v, (datetime.date, datetime.datetime)):
+                new_row[k] = v.isoformat()
+            else:
+                new_row[k] = v
+        result.append(new_row)
+    return result
+
+
 # ── 기준가/구매가 캐시 (5분) ─────────────────────────────────────────────────
 _price_cache: dict[str, tuple[float, list]] = {}
 _CACHE_TTL = 300
@@ -240,7 +255,7 @@ def _get_platform_latest(product_keys: list[str] | None = None,
             ORDER BY platform, platform_seller_name, price_sale
             LIMIT 500
         """)
-        return rows
+        return _serialize_rows(rows)
     except Exception as e:
         logger.warning(f"[price_monitor] platform_latest 조회 실패: {e}")
         return []
@@ -535,6 +550,7 @@ async def api_platform_products(
         logger.warning(f"[price_monitor] platform_products 조회 실패: {e}")
     if platform and rows:
         rows = [r for r in rows if r.get("platform") == platform]
+    rows = _serialize_rows(rows)
     return JSONResponse({"data": rows[:200], "error": error_msg, "total": len(rows)})
 
 
