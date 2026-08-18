@@ -1,4 +1,4 @@
-"""?¸ë? ?Œë«??ê°€ê²?ëª¨ë‹ˆ?°ë§ ?¼ìš°??(ë°°ë??íšŒ/?ë´„ vs ?°ë¦¬ ?í’ˆ)."""
+ï»¿"""?ï¿½ï¿½? ?ï¿½ë«??ê°€ï¿½?ëª¨ë‹ˆ?ï¿½ë§ ?ï¿½ìš°??(ë°°ï¿½??ï¿½íšŒ/?ï¿½ë´„ vs ?ï¿½ë¦¬ ?ï¿½í’ˆ)."""
 from __future__ import annotations
 
 import os
@@ -26,17 +26,17 @@ _jinja_env = Environment(
 _SESSION_COOKIE = "dongwon_portal_session"
 _SESSION_SECRET = os.getenv("PORTAL_SESSION_SECRET", "dongwon-portal-dev-secret-change-me")
 
-# ?ŒìŠ¤??ê¸°ê°„ ì¤?ê´€ë¦¬ì ?„ìš©
+# ?ï¿½ìŠ¤??ê¸°ê°„ ï¿½?ê´€ë¦¬ì ?ï¿½ìš©
 _ALLOWED_EMP_CODES: set[str] = {access_control.ADMIN_EMP_CODE}
 
 PLANTS = ["4120", "4123"]
 GP_ALERT_PCT = 10.0   # GP < 10% ??ê²½ë³´
 GP_WARN_PCT  = 20.0   # GP < 20% ??ì£¼ì˜
 
-# ?€?€ ?¸ì¦ ?¬í¼ ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
+# ?ï¿½?ï¿½ ?ï¿½ì¦ ?ï¿½í¼ ?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½
 
 def _get_session(request: Request) -> dict | None:
-    """portal_router?€ ?™ì¼???¸ì…˜ ?Œì‹±. ?±ê³µ ??user dict ë°˜í™˜."""
+    """portal_router?ï¿½ ?ï¿½ì¼???ï¿½ì…˜ ?ï¿½ì‹±. ?ï¿½ê³µ ??user dict ë°˜í™˜."""
     try:
         import portal_router as _pr
         cookie = request.cookies.get(_SESSION_COOKIE, "")
@@ -46,18 +46,18 @@ def _get_session(request: Request) -> dict | None:
         user = _pr._portal_user(emp_code)
         return user
     except Exception as e:
-        logger.warning(f"[pm] _get_session ?¤ë¥˜: {e}")
+        logger.warning(f"[pm] _get_session ?ï¿½ë¥˜: {e}")
         return None
 
 
 def _require_pm_access(request: Request) -> dict:
-    """ê°€ê²?ëª¨ë‹ˆ?°ë§ ?‘ê·¼ ê¶Œí•œ ?•ì¸. ?„ì¬??ê´€ë¦¬ì ?„ìš©."""
+    """ê°€ï¿½?ëª¨ë‹ˆ?ï¿½ë§ ?ï¿½ê·¼ ê¶Œí•œ ?ï¿½ì¸. ?ï¿½ì¬??ê´€ë¦¬ì ?ï¿½ìš©."""
     session = _get_session(request)
     if not session:
-        raise HTTPException(status_code=401, detail="ë¡œê·¸?¸ì´ ?„ìš”?©ë‹ˆ??")
+        raise HTTPException(status_code=401, detail="ë¡œê·¸?ï¿½ì´ ?ï¿½ìš”?ï¿½ë‹ˆ??")
     emp_code = session.get("emp_code", "")
     if emp_code not in _ALLOWED_EMP_CODES:
-        raise HTTPException(status_code=403, detail="ê°€ê²?ëª¨ë‹ˆ?°ë§ ê¸°ëŠ¥?€ ?„ì¬ ê´€ë¦¬ì ?ŒìŠ¤??ì¤‘ì…?ˆë‹¤.")
+        raise HTTPException(status_code=403, detail="ê°€ï¿½?ëª¨ë‹ˆ?ï¿½ë§ ê¸°ëŠ¥?ï¿½ ?ï¿½ì¬ ê´€ë¦¬ì ?ï¿½ìŠ¤??ì¤‘ì…?ï¿½ë‹¤.")
     return session
 
 
@@ -71,21 +71,21 @@ def _render(request: Request, template_name: str, **ctx) -> HTMLResponse:
     return HTMLResponse(html)
 
 
-# ?€?€ Databricks ì¿¼ë¦¬ ?¬í¼ ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
+# ?ï¿½?ï¿½ Databricks ì¿¼ë¦¬ ?ï¿½í¼ ?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½
 
 def _q(sql: str) -> list[dict]:
-    """Databricks SQL ì¿¼ë¦¬ ?¤í–‰. main.run_query ?˜í¼."""
+    """Databricks SQL ì¿¼ë¦¬ ?ï¿½í–‰. main.run_query ?ï¿½í¼."""
     import main as _main
     return _main.run_query(sql)
 
 
-# ?€?€ ê¸°ì?ê°€/êµ¬ë§¤ê°€ ìºì‹œ (5ë¶? ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
+# ?ï¿½?ï¿½ ê¸°ï¿½?ê°€/êµ¬ë§¤ê°€ ìºì‹œ (5ï¿½? ?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½
 _price_cache: dict[str, tuple[float, list]] = {}
 _CACHE_TTL = 300
 
 
 def _get_base_prices(plant: str) -> list[dict]:
-    """compat ìµœê·¼ 2ì£??‰ê·  ?ë§¤?¨ê?(ê¸°ì?ê°€) + ?‰ê·  êµ¬ë§¤?¨ê? (?Œëœ?¸ë³„)"""
+    """compat ìµœê·¼ 2ï¿½??ï¿½ê·  ?ï¿½ë§¤?ï¿½ï¿½?(ê¸°ï¿½?ê°€) + ?ï¿½ê·  êµ¬ë§¤?ï¿½ï¿½? (?ï¿½ëœ?ï¿½ë³„)"""
     cache_key = f"base_prices_{plant}"
     if cache_key in _price_cache:
         ts, data = _price_cache[cache_key]
@@ -95,28 +95,28 @@ def _get_base_prices(plant: str) -> list[dict]:
         import main as _main
         rows = _q(f"""
             SELECT
-                `?í’ˆì½”ë“œ`                                          AS product_code,
-                ROUND(AVG(`?¨ê?`), 2)                              AS avg_sale_price,
+                `?ï¿½í’ˆì½”ë“œ`                                          AS product_code,
+                ROUND(AVG(`?ï¿½ï¿½?`), 2)                              AS avg_sale_price,
                 ROUND(
-                    SUM(CAST(`ë§¤ì¶œ?ê?` AS DOUBLE)) /
-                    NULLIF(SUM(CAST(`ë§¤ì¶œ?˜ëŸ‰` AS DOUBLE)), 0)
+                    SUM(CAST(`ë§¤ì¶œ?ï¿½ï¿½?` AS DOUBLE)) /
+                    NULLIF(SUM(CAST(`ë§¤ì¶œ?ï¿½ëŸ‰` AS DOUBLE)), 0)
                 , 2)                                               AS avg_buy_price
             FROM {_main.T_MAIN}
-            WHERE `?¬ì—…?? = '{plant}'
-              AND `?„ì›”` >= DATE_FORMAT(DATE_SUB(CURRENT_DATE(), INTERVAL 14 DAY), '%Y%m')
-              AND `?í’ˆì½”ë“œ` IS NOT NULL
-              AND `ë§¤ì¶œ?˜ëŸ‰` IS NOT NULL
-              AND `ë§¤ì¶œ?ê?` IS NOT NULL
-            GROUP BY `?í’ˆì½”ë“œ`
+            WHERE `?ï¿½ì—…?? = '{plant}'
+              AND `?ï¿½ì›”` >= DATE_FORMAT(DATE_SUB(CURRENT_DATE(), INTERVAL 14 DAY), '%Y%m')
+              AND `?ï¿½í’ˆì½”ë“œ` IS NOT NULL
+              AND `ë§¤ì¶œ?ï¿½ëŸ‰` IS NOT NULL
+              AND `ë§¤ì¶œ?ï¿½ï¿½?` IS NOT NULL
+            GROUP BY `?ï¿½í’ˆì½”ë“œ`
         """)
         _price_cache[cache_key] = (time.time(), rows)
         return rows
     except Exception as e:
-        logger.warning(f"[price_monitor] base_prices ì¡°íšŒ ?¤íŒ¨ ({plant}): {e}")
+        logger.warning(f"[price_monitor] base_prices ì¡°íšŒ ?ï¿½íŒ¨ ({plant}): {e}")
         return []
 
 
-# ?€?€ ?´ì˜?í’ˆ ëª©ë¡ ìºì‹œ (5ë¶? ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
+# ?ï¿½?ï¿½ ?ï¿½ì˜?ï¿½í’ˆ ëª©ë¡ ìºì‹œ (5ï¿½? ?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½
 _product_cache: dict[str, tuple[float, list]] = {}
 
 T_ZSDR = "h_hmfo_fsi.gd_fsi_ent.sap_zsdr0017_order_linkage_status_d"
@@ -125,7 +125,7 @@ T_SILVER = "silver.dim_platform_products"
 
 
 def _get_our_products(plant: str) -> list[dict]:
-    """?Œëœ??ê¸°ì? ?´ì˜?í’ˆ ëª©ë¡ (SAP zsdr0017 + zmm60 JOIN)"""
+    """?ï¿½ëœ??ê¸°ï¿½? ?ï¿½ì˜?ï¿½í’ˆ ëª©ë¡ (SAP zsdr0017 + zmm60 JOIN)"""
     cache_key = f"products_{plant}"
     if cache_key in _product_cache:
         ts, data = _product_cache[cache_key]
@@ -134,31 +134,31 @@ def _get_our_products(plant: str) -> list[dict]:
     try:
         rows = _q(f"""
             SELECT
-                z.`?í’ˆì½”ë“œ`        AS product_code,
-                m.`?í’ˆëª?          AS product_name,
-                m.`?ì¬? í˜•ëª?      AS brand,
-                m.`?¨ìœ„`            AS unit,
-                m.`?ì¬ê·¸ë£¹ëª?      AS product_group,
-                m.`?ì¬ê·¸ë£¹`        AS material_group,
-                z.`?Œëœ??          AS plant,
-                COALESCE(z.`?¬ìš©ë³´ë¥˜`, '') AS use_hold
+                z.`?ï¿½í’ˆì½”ë“œ`        AS product_code,
+                m.`?ï¿½í’ˆï¿½?          AS product_name,
+                m.`?ï¿½ì¬?ï¿½í˜•ï¿½?      AS brand,
+                m.`?ï¿½ìœ„`            AS unit,
+                m.`?ï¿½ì¬ê·¸ë£¹ï¿½?      AS product_group,
+                m.`?ï¿½ì¬ê·¸ë£¹`        AS material_group,
+                z.`?ï¿½ëœ??          AS plant,
+                COALESCE(z.`?ï¿½ìš©ë³´ë¥˜`, '') AS use_hold
             FROM {T_ZSDR} z
-            LEFT JOIN {T_ZMM60} m ON z.`?í’ˆì½”ë“œ` = m.`?í’ˆì½”ë“œ`
-            WHERE z.`?Œëœ?? = '{plant}'
-              AND COALESCE(m.`?ì¬ê·¸ë£¹`, '') != '5140'
-            ORDER BY m.`?í’ˆëª?
+            LEFT JOIN {T_ZMM60} m ON z.`?ï¿½í’ˆì½”ë“œ` = m.`?ï¿½í’ˆì½”ë“œ`
+            WHERE z.`?ï¿½ëœ?? = '{plant}'
+              AND COALESCE(m.`?ï¿½ì¬ê·¸ë£¹`, '') != '5140'
+            ORDER BY m.`?ï¿½í’ˆï¿½?
             LIMIT 2000
         """)
         _product_cache[cache_key] = (time.time(), rows)
         return rows
     except Exception as e:
-        logger.warning(f"[price_monitor] our_products ì¡°íšŒ ?¤íŒ¨ ({plant}): {e}")
+        logger.warning(f"[price_monitor] our_products ì¡°íšŒ ?ï¿½íŒ¨ ({plant}): {e}")
         return []
 
 
 def _get_platform_latest(product_keys: list[str] | None = None,
                           keyword: str = "") -> list[dict]:
-    """silver.dim_platform_products ìµœì‹  ê°€ê²?ì¡°íšŒ"""
+    """silver.dim_platform_products ìµœì‹  ê°€ï¿½?ì¡°íšŒ"""
     try:
         if product_keys is not None:
             if not product_keys:
@@ -181,12 +181,12 @@ def _get_platform_latest(product_keys: list[str] | None = None,
         """)
         return rows
     except Exception as e:
-        logger.warning(f"[price_monitor] platform_latest ì¡°íšŒ ?¤íŒ¨: {e}")
+        logger.warning(f"[price_monitor] platform_latest ì¡°íšŒ ?ï¿½íŒ¨: {e}")
         return []
 
 
 def _calc_gp(platform_price: float | None, buy_price: float | None) -> float | None:
-    """GP??ê³„ì‚°: (?ë§¤ê°€ - êµ¬ë§¤ê°€) / ?ë§¤ê°€ Ã— 100"""
+    """GP??ê³„ì‚°: (?ï¿½ë§¤ê°€ - êµ¬ë§¤ê°€) / ?ï¿½ë§¤ê°€ Ã— 100"""
     if not platform_price or not buy_price:
         return None
     try:
@@ -205,7 +205,7 @@ def _gp_status(gp: float | None) -> str:
     return "ok"
 
 
-# ?€?€ ?”ë©´ 1: ê°€ê²?ë¹„êµ ?€?œë³´???€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
+# ?ï¿½?ï¿½ ?ï¿½ë©´ 1: ê°€ï¿½?ë¹„êµ ?ï¿½?ï¿½ë³´???ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½
 
 @router.get("/", response_class=HTMLResponse)
 async def pm_dashboard(
@@ -218,13 +218,13 @@ async def pm_dashboard(
     if plant not in PLANTS:
         plant = "4120"
 
-    # ê¸°ì?ê°€/êµ¬ë§¤ê°€
+    # ê¸°ï¿½?ê°€/êµ¬ë§¤ê°€
     price_rows = _get_base_prices(plant)
     price_map: dict[str, dict] = {
         r["product_code"]: r for r in price_rows
     }
 
-    # ?„ì²´ ë§¤í•‘ ëª©ë¡
+    # ?ï¿½ì²´ ë§¤í•‘ ëª©ë¡
     all_mappings = portal_db.pm_list_all_mappings(plant)
     if not all_mappings:
         return _render(request, "pm_dashboard.html",
@@ -232,12 +232,12 @@ async def pm_dashboard(
                        platform=platform, alert_only=alert_only,
                        last_crawl_date="", total=0)
 
-    # ?Œë«??ìµœì‹  ê°€ê²?
+    # ?ï¿½ë«??ìµœì‹  ê°€ï¿½?
     product_keys = [m["product_key"] for m in all_mappings]
     platform_rows = _get_platform_latest(product_keys=product_keys)
     platform_map: dict[str, dict] = {r["product_key"]: r for r in platform_rows}
 
-    # ë§¤í•‘ + ê°€ê²?+ GP ê³„ì‚°
+    # ë§¤í•‘ + ê°€ï¿½?+ GP ê³„ì‚°
     rows = []
     for m in all_mappings:
         pk = m["product_key"]
@@ -272,7 +272,7 @@ async def pm_dashboard(
             "product_key":        pk,
         })
 
-    # GP ?¤ë¦„ì°¨ìˆœ (ê²½ë³´ ìµœìƒ??
+    # GP ?ï¿½ë¦„ì°¨ìˆœ (ê²½ë³´ ìµœìƒ??
     rows.sort(key=lambda r: (r["gp_pct"] if r["gp_pct"] is not None else 999))
 
     last_crawl = rows[0]["crawl_date"] if rows else ""
@@ -284,7 +284,7 @@ async def pm_dashboard(
                    total=len(rows))
 
 
-# ?€?€ ?”ë©´ 2: ?´ì˜?í’ˆ ëª©ë¡ & ë§¤í•‘ ?„í™© ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
+# ?ï¿½?ï¿½ ?ï¿½ë©´ 2: ?ï¿½ì˜?ï¿½í’ˆ ëª©ë¡ & ë§¤í•‘ ?ï¿½í™© ?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½
 
 @router.get("/products", response_class=HTMLResponse)
 async def pm_products(
@@ -299,7 +299,7 @@ async def pm_products(
 
     products = _get_our_products(plant)
     all_mappings = portal_db.pm_list_all_mappings(plant)
-    # ?í’ˆì½”ë“œë³?ë§¤í•‘ ??ì§‘ê³„
+    # ?ï¿½í’ˆì½”ë“œï¿½?ë§¤í•‘ ??ì§‘ê³„
     mapping_count: dict[str, dict] = {}
     for m in all_mappings:
         c = m["our_product_code"]
@@ -333,7 +333,7 @@ async def pm_products(
                    total=len(rows))
 
 
-# ?€?€ ?”ë©´ 3: ë§¤í•‘ ?±ë¡ ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
+# ?ï¿½?ï¿½ ?ï¿½ë©´ 3: ë§¤í•‘ ?ï¿½ë¡ ?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½
 
 @router.get("/mapping", response_class=HTMLResponse)
 async def pm_mapping_page(request: Request, plant: str = "4120"):
@@ -343,14 +343,14 @@ async def pm_mapping_page(request: Request, plant: str = "4120"):
     return _render(request, "pm_mapping.html", plant=plant, plants=PLANTS)
 
 
-# ?€?€ API: ì§„ë‹¨ ê³µê°œ??(?¸ì¦ ?†ìŒ, ?„ì‹œ) ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
+# ?ï¿½?ï¿½ API: ì§„ë‹¨ ê³µê°œ??(?ï¿½ì¦ ?ï¿½ìŒ, ?ï¿½ì‹œ) ?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½
 
 @router.get("/api/debug-pub")
 async def api_debug_pub(request: Request):
-    """?¸ì¦ ?†ì´ ?Œì´ë¸?ì»¬ëŸ¼ ?•ì¸???„ì‹œ ?”ë“œ?¬ì¸??""
+    """?ï¿½ì¦ ?ï¿½ì´ ?ï¿½ì´ï¿½?ì»¬ëŸ¼ ?ï¿½ì¸???ï¿½ì‹œ ?ï¿½ë“œ?ï¿½ì¸??""
     result = {}
     try:
-        rows = _q(f"SELECT * FROM {T_ZSDR} WHERE `?Œëœ??='4120' LIMIT 1")
+        rows = _q(f"SELECT * FROM {T_ZSDR} WHERE `?ï¿½ëœ??='4120' LIMIT 1")
         result["zsdr_columns"] = list(rows[0].keys()) if rows else []
     except Exception as e:
         result["zsdr_error"] = str(e)
@@ -362,23 +362,23 @@ async def api_debug_pub(request: Request):
     return JSONResponse(result)
 
 
-# ?€?€ API: ì§„ë‹¨ (?°ì´?°ì†Œ???°ê²° ?•ì¸) ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
+# ?ï¿½?ï¿½ API: ì§„ë‹¨ (?ï¿½ì´?ï¿½ì†Œ???ï¿½ê²° ?ï¿½ì¸) ?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½
 
 @router.get("/api/debug")
 async def api_debug(request: Request):
     _require_pm_access(request)
     result = {}
 
-    # 1. ?°ë¦¬ ?í’ˆ ?Œì´ë¸?
+    # 1. ?ï¿½ë¦¬ ?ï¿½í’ˆ ?ï¿½ì´ï¿½?
     try:
-        rows = _q(f"SELECT COUNT(*) AS cnt FROM {T_ZSDR} WHERE `?Œëœ??='4120' LIMIT 1")
+        rows = _q(f"SELECT COUNT(*) AS cnt FROM {T_ZSDR} WHERE `?ï¿½ëœ??='4120' LIMIT 1")
         result["zsdr_count"] = rows[0]["cnt"] if rows else 0
         result["zsdr_ok"] = True
     except Exception as e:
         result["zsdr_ok"] = False
         result["zsdr_error"] = str(e)
 
-    # 2. ?ì¬ë§ˆìŠ¤???Œì´ë¸?+ ì»¬ëŸ¼ ?•ì¸ + JOIN ?ŒìŠ¤??
+    # 2. ?ï¿½ì¬ë§ˆìŠ¤???ï¿½ì´ï¿½?+ ì»¬ëŸ¼ ?ï¿½ì¸ + JOIN ?ï¿½ìŠ¤??
     try:
         rows = _q(f"SELECT COUNT(*) AS cnt FROM {T_ZMM60} LIMIT 1")
         result["zmm60_count"] = rows[0]["cnt"] if rows else 0
@@ -387,7 +387,7 @@ async def api_debug(request: Request):
         result["zmm60_ok"] = False
         result["zmm60_error"] = str(e)
 
-    # 2-1. ZMM60 ?˜í”Œ 1ê±?(ì»¬ëŸ¼ëª??•ì¸)
+    # 2-1. ZMM60 ?ï¿½í”Œ 1ï¿½?(ì»¬ëŸ¼ï¿½??ï¿½ì¸)
     try:
         rows = _q(f"SELECT * FROM {T_ZMM60} LIMIT 1")
         result["zmm60_columns"] = list(rows[0].keys()) if rows else []
@@ -395,22 +395,22 @@ async def api_debug(request: Request):
     except Exception as e:
         result["zmm60_columns_error"] = str(e)
 
-    # 2-2. ?í’ˆì½”ë“œë¡?JOIN ?ŒìŠ¤??
+    # 2-2. ?ï¿½í’ˆì½”ë“œï¿½?JOIN ?ï¿½ìŠ¤??
     try:
         rows = _q(f"""
-            SELECT z.`?í’ˆì½”ë“œ`, m.`?ì¬?´ì—­`, m.`ê¸°ë³¸?¨ìœ„`
+            SELECT z.`?ï¿½í’ˆì½”ë“œ`, m.`?ï¿½ì¬?ï¿½ì—­`, m.`ê¸°ë³¸?ï¿½ìœ„`
             FROM {T_ZSDR} z
-            LEFT JOIN {T_ZMM60} m ON z.`?í’ˆì½”ë“œ` = m.`?í’ˆì½”ë“œ`
-            WHERE z.`?Œëœ?? = '4120'
+            LEFT JOIN {T_ZMM60} m ON z.`?ï¿½í’ˆì½”ë“œ` = m.`?ï¿½í’ˆì½”ë“œ`
+            WHERE z.`?ï¿½ëœ?? = '4120'
             LIMIT 3
         """)
-        result["join_test_by_?í’ˆì½”ë“œ"] = rows
+        result["join_test_by_?ï¿½í’ˆì½”ë“œ"] = rows
         result["join_test_ok"] = True
     except Exception as e:
         result["join_test_ok"] = False
         result["join_test_error"] = str(e)
 
-    # 3. ?Œë«???í’ˆ ?Œì´ë¸?(?¬ë¡¤ë§?ê²°ê³¼)
+    # 3. ?ï¿½ë«???ï¿½í’ˆ ?ï¿½ì´ï¿½?(?ï¿½ë¡¤ï¿½?ê²°ê³¼)
     try:
         rows = _q(f"SELECT MAX(crawl_date) AS max_date, COUNT(*) AS cnt FROM {T_SILVER}")
         result["silver_count"] = rows[0]["cnt"] if rows else 0
@@ -420,10 +420,10 @@ async def api_debug(request: Request):
         result["silver_ok"] = False
         result["silver_error"] = str(e)
 
-    # 4. compat ?Œì´ë¸?(ê¸°ì?ê°€)
+    # 4. compat ?ï¿½ì´ï¿½?(ê¸°ï¿½?ê°€)
     try:
         import main as _main
-        rows = _q(f"SELECT MAX(`?„ì›”`) AS max_ym FROM {_main.T_MAIN} WHERE `?¬ì—…??='4120' LIMIT 1")
+        rows = _q(f"SELECT MAX(`?ï¿½ì›”`) AS max_ym FROM {_main.T_MAIN} WHERE `?ï¿½ì—…??='4120' LIMIT 1")
         result["compat_max_ym"] = rows[0]["max_ym"] if rows else None
         result["compat_ok"] = True
     except Exception as e:
@@ -433,7 +433,7 @@ async def api_debug(request: Request):
     return JSONResponse(result)
 
 
-# ?€?€ API: ?°ë¦¬ ?í’ˆ ê²€??(AJAX) ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
+# ?ï¿½?ï¿½ API: ?ï¿½ë¦¬ ?ï¿½í’ˆ ê²€??(AJAX) ?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½
 
 @router.get("/api/our-products")
 async def api_our_products(request: Request, plant: str = "4120", keyword: str = ""):
@@ -443,25 +443,25 @@ async def api_our_products(request: Request, plant: str = "4120", keyword: str =
     try:
         rows = _q(f"""
             SELECT
-                z.`?í’ˆì½”ë“œ`        AS product_code,
-                m.`?í’ˆëª?          AS product_name,
-                m.`?ì¬? í˜•ëª?      AS brand,
-                m.`?¨ìœ„`            AS unit,
-                m.`?ì¬ê·¸ë£¹ëª?      AS product_group,
-                m.`?ì¬ê·¸ë£¹`        AS material_group,
-                z.`?Œëœ??          AS plant,
-                COALESCE(z.`?¬ìš©ë³´ë¥˜`, '') AS use_hold
+                z.`?ï¿½í’ˆì½”ë“œ`        AS product_code,
+                m.`?ï¿½í’ˆï¿½?          AS product_name,
+                m.`?ï¿½ì¬?ï¿½í˜•ï¿½?      AS brand,
+                m.`?ï¿½ìœ„`            AS unit,
+                m.`?ï¿½ì¬ê·¸ë£¹ï¿½?      AS product_group,
+                m.`?ï¿½ì¬ê·¸ë£¹`        AS material_group,
+                z.`?ï¿½ëœ??          AS plant,
+                COALESCE(z.`?ï¿½ìš©ë³´ë¥˜`, '') AS use_hold
             FROM {T_ZSDR} z
-            LEFT JOIN {T_ZMM60} m ON z.`?í’ˆì½”ë“œ` = m.`?í’ˆì½”ë“œ`
-            WHERE z.`?Œëœ?? = '{plant}'
-              AND COALESCE(m.`?ì¬ê·¸ë£¹`, '') != '5140'
-            ORDER BY m.`?í’ˆëª?
+            LEFT JOIN {T_ZMM60} m ON z.`?ï¿½í’ˆì½”ë“œ` = m.`?ï¿½í’ˆì½”ë“œ`
+            WHERE z.`?ï¿½ëœ?? = '{plant}'
+              AND COALESCE(m.`?ï¿½ì¬ê·¸ë£¹`, '') != '5140'
+            ORDER BY m.`?ï¿½í’ˆï¿½?
             LIMIT 2000
         """)
         products = rows or []
     except Exception as e:
         error_msg = str(e)
-        logger.warning(f"[price_monitor] our_products ì¡°íšŒ ?¤íŒ¨ ({plant}): {e}")
+        logger.warning(f"[price_monitor] our_products ì¡°íšŒ ?ï¿½íŒ¨ ({plant}): {e}")
     kw = keyword.lower()
     if kw and products:
         products = [
@@ -471,7 +471,7 @@ async def api_our_products(request: Request, plant: str = "4120", keyword: str =
     return JSONResponse({"data": products[:100], "error": error_msg, "total_before_filter": len(products)})
 
 
-# ?€?€ API: ?Œë«???í’ˆ ê²€??(AJAX) ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
+# ?ï¿½?ï¿½ API: ?ï¿½ë«???ï¿½í’ˆ ê²€??(AJAX) ?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½
 
 @router.get("/api/platform-products")
 async def api_platform_products(
@@ -481,7 +481,7 @@ async def api_platform_products(
 ):
     _require_pm_access(request)
     if not keyword:
-        return JSONResponse({"data": [], "error": None, "hint": "keyword ?Œë¼ë¯¸í„° ?„ìš”"})
+        return JSONResponse({"data": [], "error": None, "hint": "keyword ?ï¿½ë¼ë¯¸í„° ?ï¿½ìš”"})
     error_msg = None
     rows = []
     try:
@@ -496,13 +496,13 @@ async def api_platform_products(
         """) or []
     except Exception as e:
         error_msg = str(e)
-        logger.warning(f"[price_monitor] platform_products ì¡°íšŒ ?¤íŒ¨: {e}")
+        logger.warning(f"[price_monitor] platform_products ì¡°íšŒ ?ï¿½íŒ¨: {e}")
     if platform and rows:
         rows = [r for r in rows if r.get("platform") == platform]
     return JSONResponse({"data": rows[:200], "error": error_msg, "total": len(rows)})
 
 
-# ?€?€ API: ë§¤í•‘ ì¶”ê? (ì¦‰ì‹œ ë°˜ì˜, ?¹ì¸ ë¶ˆí•„?? ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
+# ?ï¿½?ï¿½ API: ë§¤í•‘ ì¶”ï¿½? (ì¦‰ì‹œ ë°˜ì˜, ?ï¿½ì¸ ë¶ˆí•„?? ?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½
 
 @router.post("/api/mapping/add")
 async def api_mapping_add(request: Request):
@@ -519,9 +519,9 @@ async def api_mapping_add(request: Request):
     seller_name         = body.get("seller_name", "")
 
     if not all([our_product_code, plant, product_key, platform]):
-        return JSONResponse({"ok": False, "error": "?„ìˆ˜ê°??„ë½"}, status_code=400)
+        return JSONResponse({"ok": False, "error": "?ï¿½ìˆ˜ï¿½??ï¿½ë½"}, status_code=400)
     if plant not in PLANTS:
-        return JSONResponse({"ok": False, "error": "?ˆìš©?˜ì? ?Šì? ?Œëœ??}, status_code=400)
+        return JSONResponse({"ok": False, "error": "?ï¿½ìš©?ï¿½ï¿½? ?ï¿½ï¿½? ?ï¿½ëœ??}, status_code=400)
 
     mapping_id = portal_db.pm_add_mapping(
         our_product_code=our_product_code,
@@ -537,7 +537,7 @@ async def api_mapping_add(request: Request):
     return JSONResponse({"ok": True, "mapping_id": mapping_id})
 
 
-# ?€?€ API: ë§¤í•‘ ëª©ë¡ ì¡°íšŒ (AJAX) ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
+# ?ï¿½?ï¿½ API: ë§¤í•‘ ëª©ë¡ ì¡°íšŒ (AJAX) ?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½
 
 @router.get("/api/mapping/{our_product_code}")
 async def api_mapping_list(request: Request, our_product_code: str, plant: str = "4120"):
@@ -546,7 +546,7 @@ async def api_mapping_list(request: Request, our_product_code: str, plant: str =
     return JSONResponse(rows)
 
 
-# ?€?€ API: ë§¤í•‘ ë¹„í™œ?±í™” (soft delete) ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
+# ?ï¿½?ï¿½ API: ë§¤í•‘ ë¹„í™œ?ï¿½í™” (soft delete) ?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½
 
 @router.post("/api/mapping/remove")
 async def api_mapping_remove(request: Request):
@@ -554,12 +554,12 @@ async def api_mapping_remove(request: Request):
     body = await request.json()
     mapping_id = int(body.get("mapping_id", 0))
     if not mapping_id:
-        return JSONResponse({"ok": False, "error": "mapping_id ?„ìš”"}, status_code=400)
+        return JSONResponse({"ok": False, "error": "mapping_id ?ï¿½ìš”"}, status_code=400)
     portal_db.pm_deactivate_mapping(mapping_id)
     return JSONResponse({"ok": True})
 
 
-# ?€?€ ?”ë©´ 4: ê°€ê²??´ë ¥ ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
+# ?ï¿½?ï¿½ ?ï¿½ë©´ 4: ê°€ï¿½??ï¿½ë ¥ ?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½
 
 @router.get("/history/{product_code}", response_class=HTMLResponse)
 async def pm_history(
@@ -591,21 +591,21 @@ async def pm_history(
                 ORDER BY crawl_date DESC, platform, platform_seller_name
             """)
         except Exception as e:
-            logger.warning(f"[price_monitor] history ì¡°íšŒ ?¤íŒ¨: {e}")
+            logger.warning(f"[price_monitor] history ì¡°íšŒ ?ï¿½íŒ¨: {e}")
 
-    # ê°€ê²?ê¸°ì?ê°?
+    # ê°€ï¿½?ê¸°ï¿½?ï¿½?
     price_rows = _get_base_prices(plant)
     price_map = {r["product_code"]: r for r in price_rows}
     price_info = price_map.get(product_code, {})
 
-    # GP ê³„ì‚° ì¶”ê?
+    # GP ê³„ì‚° ì¶”ï¿½?
     for row in history_rows:
         gp = _calc_gp(row.get("price_sale"), price_info.get("avg_buy_price"))
         row["gp_pct"] = gp
         row["gp_status"] = _gp_status(gp)
         row["crawl_date"] = str(row.get("crawl_date", ""))
 
-    # ?œí’ˆëª?
+    # ?ï¿½í’ˆï¿½?
     our_products = _get_our_products(plant)
     product_info = next((p for p in our_products if p["product_code"] == product_code), {})
 
@@ -617,7 +617,7 @@ async def pm_history(
                    plant=plant, plants=PLANTS, days=days)
 
 
-# ?€?€ ?”ë©´ 5: ë§¤í•‘ ?˜ì •?”ì²­ (DELETE/REPLACE) ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
+# ?ï¿½?ï¿½ ?ï¿½ë©´ 5: ë§¤í•‘ ?ï¿½ì •?ï¿½ì²­ (DELETE/REPLACE) ?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½
 
 @router.get("/change-request/{product_code}", response_class=HTMLResponse)
 async def pm_change_request_page(
@@ -649,11 +649,11 @@ async def api_change_request_submit(request: Request):
     reason              = body.get("reason", "").strip()
 
     if not our_product_code or not request_type or not reason:
-        return JSONResponse({"ok": False, "error": "?„ìˆ˜ê°??„ë½"}, status_code=400)
+        return JSONResponse({"ok": False, "error": "?ï¿½ìˆ˜ï¿½??ï¿½ë½"}, status_code=400)
     if request_type not in ("DELETE", "REPLACE"):
-        return JSONResponse({"ok": False, "error": "? íš¨?˜ì? ?Šì? ?”ì²­ ? í˜•"}, status_code=400)
+        return JSONResponse({"ok": False, "error": "?ï¿½íš¨?ï¿½ï¿½? ?ï¿½ï¿½? ?ï¿½ì²­ ?ï¿½í˜•"}, status_code=400)
     if not delete_keys:
-        return JSONResponse({"ok": False, "error": "?? œ ?€?ì„ ? íƒ?´ì£¼?¸ìš”"}, status_code=400)
+        return JSONResponse({"ok": False, "error": "??ï¿½ï¿½ ?ï¿½?ï¿½ì„ ?ï¿½íƒ?ï¿½ì£¼?ï¿½ìš”"}, status_code=400)
 
     emp_name = session.get("name", session.get("emp_code", ""))
     request_id = portal_db.pm_create_change_request(
@@ -669,7 +669,7 @@ async def api_change_request_submit(request: Request):
     return JSONResponse({"ok": True, "request_id": request_id})
 
 
-# ?€?€ ?”ë©´ 6: ê´€ë¦¬ì ?˜ì •?”ì²­ ëª©ë¡ ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
+# ?ï¿½?ï¿½ ?ï¿½ë©´ 6: ê´€ë¦¬ì ?ï¿½ì •?ï¿½ì²­ ëª©ë¡ ?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½
 
 @router.get("/admin/requests", response_class=HTMLResponse)
 async def pm_admin_requests(
@@ -692,9 +692,9 @@ async def api_admin_review(request: Request):
     admin_memo = body.get("admin_memo", "").strip()
 
     if not request_id or action not in ("APPROVE", "REJECT"):
-        return JSONResponse({"ok": False, "error": "?˜ëª»???”ì²­"}, status_code=400)
+        return JSONResponse({"ok": False, "error": "?ï¿½ëª»???ï¿½ì²­"}, status_code=400)
     if action == "REJECT" and not admin_memo:
-        return JSONResponse({"ok": False, "error": "ë°˜ë ¤ ???¬ìœ  ?…ë ¥ ?„ìˆ˜"}, status_code=400)
+        return JSONResponse({"ok": False, "error": "ë°˜ë ¤ ???ï¿½ìœ  ?ï¿½ë ¥ ?ï¿½ìˆ˜"}, status_code=400)
 
     result = portal_db.pm_review_change_request(
         request_id=request_id,
@@ -703,11 +703,11 @@ async def api_admin_review(request: Request):
         admin_memo=admin_memo,
     )
     if result is None:
-        return JSONResponse({"ok": False, "error": "?”ì²­??ì°¾ì„ ???†ê±°???´ë? ì²˜ë¦¬??}, status_code=404)
+        return JSONResponse({"ok": False, "error": "?ï¿½ì²­??ì°¾ì„ ???ï¿½ê±°???ï¿½ï¿½? ì²˜ë¦¬??}, status_code=404)
     return JSONResponse({"ok": True, "request_id": request_id, "status": action})
 
 
-# ?€?€ ?”ë©´ 7: ê´€ë¦¬ì ?€???¤ì • ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
+# ?ï¿½?ï¿½ ?ï¿½ë©´ 7: ê´€ë¦¬ì ?ï¿½???ï¿½ì • ?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½?ï¿½
 
 @router.get("/admin/sellers", response_class=HTMLResponse)
 async def pm_admin_sellers(request: Request):
@@ -723,6 +723,6 @@ async def api_seller_toggle(request: Request):
     seller_id = int(body.get("seller_id", 0))
     is_active = int(body.get("is_active", 1))
     if not seller_id:
-        return JSONResponse({"ok": False, "error": "seller_id ?„ìš”"}, status_code=400)
+        return JSONResponse({"ok": False, "error": "seller_id ?ï¿½ìš”"}, status_code=400)
     portal_db.pm_toggle_seller(seller_id, is_active)
     return JSONResponse({"ok": True})
