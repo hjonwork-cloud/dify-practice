@@ -154,19 +154,20 @@ def _get_our_products(plant: str) -> list[dict]:
     try:
         rows = _q(f"""
             SELECT
-                z.`상품코드`        AS product_code,
-                COALESCE(m.`상품명`, z.`상품코드`) AS product_name,
-                m.`자재유형명`      AS brand,
-                m.`단위`            AS unit,
-                m.`자재그룹명`      AS product_group,
-                m.`자재그룹`        AS material_group,
-                z.`플랜트`          AS plant,
-                COALESCE(z.`사용보류`, '') AS use_hold
+                z.`상품코드`                             AS product_code,
+                COALESCE(MAX(m.`상품명`), z.`상품코드`) AS product_name,
+                MAX(m.`자재유형명`)                  AS brand,
+                MAX(m.`단위`)                          AS unit,
+                MAX(m.`자재그룹명`)                  AS product_group,
+                MAX(m.`자재그룹`)                    AS material_group,
+                z.`플랜트`                               AS plant,
+                MAX(COALESCE(z.`사용보류`, ''))       AS use_hold
             FROM {T_ZSDR} z
             LEFT JOIN {T_ZMM60} m ON z.`상품코드` = m.`상품코드`
             WHERE z.`플랜트` = '{plant}'
               AND COALESCE(m.`자재그룹`, '') != '5140'
-            ORDER BY COALESCE(m.`상품명`, z.`상품코드`)
+            GROUP BY z.`상품코드`, z.`플랜트`
+            ORDER BY COALESCE(MAX(m.`상품명`), z.`상품코드`)
             LIMIT 30000
         """)
         _product_cache[cache_key] = (time.time(), rows)
