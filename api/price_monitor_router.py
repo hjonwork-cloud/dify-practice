@@ -1,6 +1,7 @@
 """외부 플랫폼 가격 모니터링 라우터 (배민상회/식봄 vs 우리 상품)."""
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
 
