@@ -369,7 +369,7 @@ async def api_debug(request: Request):
     _require_pm_access(request)
     result = {}
 
-    # 1. 우리 상품 테이블
+    # 1. ZSDR 테이블
     try:
         rows = _q(f"SELECT COUNT(*) AS cnt FROM {T_ZSDR} WHERE `플랜트`='4120' LIMIT 1")
         result["zsdr_count"] = rows[0]["cnt"] if rows else 0
@@ -378,7 +378,7 @@ async def api_debug(request: Request):
         result["zsdr_ok"] = False
         result["zsdr_error"] = str(e)
 
-    # 2. 자재마스터 테이블 + 컬럼 확인 + JOIN 테스트
+    # 2. ZMM60 테이블
     try:
         rows = _q(f"SELECT COUNT(*) AS cnt FROM {T_ZMM60} LIMIT 1")
         result["zmm60_count"] = rows[0]["cnt"] if rows else 0
@@ -387,30 +387,7 @@ async def api_debug(request: Request):
         result["zmm60_ok"] = False
         result["zmm60_error"] = str(e)
 
-    # 2-1. ZMM60 샘플 1건 (컬럼명 확인)
-    try:
-        rows = _q(f"SELECT * FROM {T_ZMM60} LIMIT 1")
-        result["zmm60_columns"] = list(rows[0].keys()) if rows else []
-        result["zmm60_sample"] = rows[0] if rows else {}
-    except Exception as e:
-        result["zmm60_columns_error"] = str(e)
-
-    # 2-2. 상품코드로 JOIN 테스트
-    try:
-        rows = _q(f"""
-            SELECT z.`상품코드`, m.`자재내역`, m.`기본단위`
-            FROM {T_ZSDR} z
-            LEFT JOIN {T_ZMM60} m ON z.`상품코드` = m.`상품코드`
-            WHERE z.`플랜트` = '4120'
-            LIMIT 3
-        """)
-        result["join_test_by_상품코드"] = rows
-        result["join_test_ok"] = True
-    except Exception as e:
-        result["join_test_ok"] = False
-        result["join_test_error"] = str(e)
-
-    # 3. 플랫폼 상품 테이블 (크롤링 결과)
+    # 3. silver 플랫폼 상품 테이블
     try:
         rows = _q(f"SELECT MAX(crawl_date) AS max_date, COUNT(*) AS cnt FROM {T_SILVER}")
         result["silver_count"] = rows[0]["cnt"] if rows else 0
@@ -419,16 +396,6 @@ async def api_debug(request: Request):
     except Exception as e:
         result["silver_ok"] = False
         result["silver_error"] = str(e)
-
-    # 4. compat 테이블 (기준가)
-    try:
-        import main as _main
-        rows = _q(f"SELECT MAX(`년월`) AS max_ym FROM {_main.T_MAIN} WHERE `사업장`='4120' LIMIT 1")
-        result["compat_max_ym"] = rows[0]["max_ym"] if rows else None
-        result["compat_ok"] = True
-    except Exception as e:
-        result["compat_ok"] = False
-        result["compat_error"] = str(e)
 
     return JSONResponse(result)
 
