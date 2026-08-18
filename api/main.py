@@ -52,12 +52,27 @@ from admin_router import router as _admin_router
 app.include_router(_admin_router)
 from portal_router import router as _portal_router
 app.include_router(_portal_router)
+_pm_load_error: str = ""
 try:
     from price_monitor_router import router as _pm_router
     app.include_router(_pm_router)
-except Exception as _pm_err:
     import logging as _logging
-    _logging.getLogger(__name__).error(f"[price_monitor] 라우터 로드 실패 (무시): {_pm_err}")
+    _logging.getLogger(__name__).info("[price_monitor] 라우터 로드 성공")
+except Exception as _pm_err:
+    import logging as _logging, traceback as _tb
+    _pm_load_error = _tb.format_exc()
+    _logging.getLogger(__name__).error(f"[price_monitor] 라우터 로드 실패:\n{_pm_load_error}")
+
+    # 임시 fallback: 오류 내용을 브라우저에서 볼 수 있는 진단 라우트
+    from fastapi import APIRouter as _AR
+    from fastapi.responses import PlainTextResponse as _PT
+    _diag = _AR(prefix="/portal/price-monitor", tags=["pm-diag"])
+
+    @_diag.get("/{path:path}", response_class=_PT)
+    async def _pm_diag(path: str = ""):
+        return _PT(f"[가격모니터링 로드 실패]\n\n{_pm_load_error}", status_code=500)
+
+    app.include_router(_diag)
 import admin_db  # VOC 접수 / 공개 FAQ 자동응답
 
 # ── 포털 401 → 로그인 페이지 리다이렉트 ────────────────────────────────────
