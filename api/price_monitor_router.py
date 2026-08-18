@@ -135,7 +135,7 @@ def _get_our_products(plant: str) -> list[dict]:
         rows = _q(f"""
             SELECT
                 z.`상품코드`        AS product_code,
-                m.`상품명`          AS product_name,
+                COALESCE(m.`상품명`, z.`상품코드`) AS product_name,
                 m.`자재유형명`      AS brand,
                 m.`단위`            AS unit,
                 m.`자재그룹명`      AS product_group,
@@ -146,8 +146,8 @@ def _get_our_products(plant: str) -> list[dict]:
             LEFT JOIN {T_ZMM60} m ON z.`상품코드` = m.`상품코드`
             WHERE z.`플랜트` = '{plant}'
               AND COALESCE(m.`자재그룹`, '') != '5140'
-            ORDER BY m.`상품명`
-            LIMIT 2000
+            ORDER BY COALESCE(m.`상품명`, z.`상품코드`)
+            LIMIT 10000
         """)
         _product_cache[cache_key] = (time.time(), rows)
         return rows
@@ -359,6 +359,24 @@ async def api_debug_pub(request: Request):
         result["zmm60_columns"] = list(rows[0].keys()) if rows else []
     except Exception as e:
         result["zmm60_error"] = str(e)
+    # 175301 직접 조회 (5140 필터 우회)
+    try:
+        rows = _q(f"""
+            SELECT z.`상품코드`, m.`상품명`, m.`자재그룹`, m.`자재그룹명`
+            FROM {T_ZSDR} z
+            LEFT JOIN {T_ZMM60} m ON z.`상품코드` = m.`상품코드`
+            WHERE z.`상품코드` = '175301'
+            LIMIT 5
+        """)
+        result["check_175301"] = rows
+    except Exception as e:
+        result["check_175301_error"] = str(e)
+    # 4120 플랜트 전체 건수
+    try:
+        rows = _q(f"SELECT COUNT(*) AS cnt FROM {T_ZSDR} WHERE `플랜트`='4120'")
+        result["zsdr_4120_total"] = rows[0]["cnt"] if rows else 0
+    except Exception as e:
+        result["zsdr_4120_count_error"] = str(e)
     return JSONResponse(result)
 
 
@@ -411,7 +429,7 @@ async def api_our_products(request: Request, plant: str = "4120", keyword: str =
         rows = _q(f"""
             SELECT
                 z.`상품코드`        AS product_code,
-                m.`상품명`          AS product_name,
+                COALESCE(m.`상품명`, z.`상품코드`) AS product_name,
                 m.`자재유형명`      AS brand,
                 m.`단위`            AS unit,
                 m.`자재그룹명`      AS product_group,
@@ -422,8 +440,8 @@ async def api_our_products(request: Request, plant: str = "4120", keyword: str =
             LEFT JOIN {T_ZMM60} m ON z.`상품코드` = m.`상품코드`
             WHERE z.`플랜트` = '{plant}'
               AND COALESCE(m.`자재그룹`, '') != '5140'
-            ORDER BY m.`상품명`
-            LIMIT 2000
+            ORDER BY COALESCE(m.`상품명`, z.`상품코드`)
+            LIMIT 10000
         """)
         products = rows or []
     except Exception as e:
