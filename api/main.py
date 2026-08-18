@@ -52,8 +52,12 @@ from admin_router import router as _admin_router
 app.include_router(_admin_router)
 from portal_router import router as _portal_router
 app.include_router(_portal_router)
-from price_monitor_router import router as _pm_router
-app.include_router(_pm_router)
+try:
+    from price_monitor_router import router as _pm_router
+    app.include_router(_pm_router)
+except Exception as _pm_err:
+    import logging as _logging
+    _logging.getLogger(__name__).error(f"[price_monitor] 라우터 로드 실패 (무시): {_pm_err}")
 import admin_db  # VOC 접수 / 공개 FAQ 자동응답
 
 # ── 포털 401 → 로그인 페이지 리다이렉트 ────────────────────────────────────
