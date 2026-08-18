@@ -1,13 +1,11 @@
 """외부 플랫폼 가격 모니터링 라우터 (배민상회/식봄 vs 우리 상품)."""
 from __future__ import annotations
 
-import json
-import os
 import time
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 import access_control
@@ -37,26 +35,17 @@ GP_WARN_PCT  = 20.0   # GP < 20% → 주의
 # ── 인증 헬퍼 ──────────────────────────────────────────────────────────────
 
 def _get_session(request: Request) -> dict | None:
-    """현재 요청의 세션 딕셔너리 반환. 없으면 None."""
-    import hmac as _hmac, hashlib as _hashlib, base64 as _b64
-    cookie = request.cookies.get(_SESSION_COOKIE, "")
-    if not cookie:
-        return None
+    """portal_router와 동일한 세션 파싱. 성공 시 user dict 반환."""
     try:
-        parts = cookie.rsplit(".", 1)
-        if len(parts) != 2:
+        import portal_router as _pr
+        cookie = request.cookies.get(_SESSION_COOKIE, "")
+        emp_code = _pr._read_session(cookie)
+        if not emp_code:
             return None
-        payload_b64, sig = parts
-        expected_sig = _hmac.new(
-            _SESSION_SECRET.encode(), payload_b64.encode(), _hashlib.sha256
-        ).hexdigest()
-        if not _hmac.compare_digest(sig, expected_sig):
-            return None
-        payload = json.loads(_b64.b64decode(payload_b64 + "==").decode())
-        if time.time() > payload.get("exp", 0):
-            return None
-        return payload
-    except Exception:
+        user = _pr._portal_user(emp_code)
+        return user
+    except Exception as e:
+        logger.warning(f"[pm] _get_session 오류: {e}")
         return None
 
 
@@ -64,7 +53,7 @@ def _require_pm_access(request: Request) -> dict:
     """가격 모니터링 접근 권한 확인. 현재는 관리자 전용."""
     session = _get_session(request)
     if not session:
-        raise HTTPException(status_code=302, headers={"Location": "/portal/login?error=로그인이+필요합니다"})
+        raise HTTPException(status_code=401, detail="로그인이 필요합니다.")
     emp_code = session.get("emp_code", "")
     if emp_code not in _ALLOWED_EMP_CODES:
         raise HTTPException(status_code=403, detail="가격 모니터링 기능은 현재 관리자 테스트 중입니다.")

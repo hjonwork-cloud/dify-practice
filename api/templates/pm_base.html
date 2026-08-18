@@ -110,7 +110,9 @@
         {% if plants is defined %}
         <div class="plant-toggle">
           {% for p in plants %}
-          <a href="{{ plant_url(p) }}" class="{% if plant==p %}active{% endif %}">{{ p }} 플랜트</a>
+          <a href="javascript:void(0)"
+             onclick="switchPlant('{{ p }}')"
+             class="{% if plant is defined and plant==p %}active{% endif %}">{{ p }} 플랜트</a>
           {% endfor %}
         </div>
         {% endif %}
@@ -125,6 +127,11 @@
 
 <div class="pm-toast" id="pmToast"></div>
 <script>
+function switchPlant(p){
+  const url = new URL(window.location.href);
+  url.searchParams.set('plant', p);
+  window.location.href = url.toString();
+}
 function showToast(msg, type='info'){
   const t=document.getElementById('pmToast');
   t.textContent=msg;
