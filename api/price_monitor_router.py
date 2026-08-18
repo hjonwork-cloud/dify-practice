@@ -123,7 +123,7 @@ _PRODUCT_CACHE_TTL = 3600  # 1시간
 
 T_ZSDR  = "h_hmfo_fsi.gd_fsi_ent.sap_zsdr0017_order_linkage_status_d"
 T_ZMM60 = "h_hmfo_fsi.gd_fsi_ent.sap_zmm60_material_master_d"
-T_SILVER = "silver.dim_platform_products"
+T_SILVER = "h_hmfo_fsi_dm.gd_rst_ing.dim_platform_products"
 
 
 def _preload_products_background():
