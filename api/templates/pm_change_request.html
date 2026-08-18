@@ -1,0 +1,199 @@
+{% extends "pm_base.html" %}
+{% set active_page = "dashboard" %}
+{% macro plant_url(p) %}/portal/price-monitor/change-request/{{ product_code }}?plant={{ p }}{% endmacro %}
+
+{% block title %}매핑 수정요청 — {{ product_code }}{% endblock %}
+{% block page_title %}매핑 수정요청 (삭제/교체){% endblock %}
+
+{% block head %}
+<style>
+.mapping-row{display:flex;align-items:center;justify-content:space-between;padding:.6rem .9rem;border-radius:8px;border:1.5px solid #e2e8f0;background:#fafafa;margin-bottom:.4rem;font-size:.83rem;}
+.mapping-row.to-delete{border-color:#fca5a5;background:#fff1f0;text-decoration:line-through;color:#9ca3af;}
+.add-item-row{display:flex;align-items:center;justify-content:space-between;padding:.5rem .8rem;border-radius:8px;border:1px solid #bbf7d0;background:#f0fdf4;margin-bottom:.3rem;font-size:.82rem;}
+.search-results-sm{max-height:280px;overflow-y:auto;margin-top:.6rem;display:flex;flex-direction:column;gap:.25rem;}
+.result-item-sm{padding:.5rem .7rem;border-radius:7px;border:1.5px solid #e2e8f0;background:#fafafa;cursor:pointer;font-size:.82rem;transition:all .12s;}
+.result-item-sm:hover{border-color:#93c5fd;background:#eff6ff;}
+</style>
+{% endblock %}
+
+{% block content %}
+<div style="display:flex;align-items:center;gap:.75rem;margin-bottom:1rem;">
+  <a href="/portal/price-monitor/history/{{ product_code }}?plant={{ plant }}" class="pm-btn pm-btn-ghost pm-btn-sm">← 이력</a>
+  <span style="font-weight:700;">{{ product_info.product_name or product_code }}</span>
+  <span class="badge badge-blue">{{ product_code }}</span>
+  <span class="badge badge-blue" style="background:#e0f2fe;color:#0369a1;">{{ plant }} 플랜트</span>
+</div>
+
+<div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:.7rem 1rem;margin-bottom:1rem;font-size:.84rem;color:#92400e;">
+  ⚠️ <b>삭제/교체 요청은 관리자 승인 후 반영됩니다.</b> 추가(ADD)는 매핑 등록 화면에서 즉시 반영하세요.
+</div>
+
+<!-- 현재 매핑 -->
+<div class="pm-card">
+  <div class="pm-card-head">
+    <span class="pm-card-title">현재 매핑 목록</span>
+    <span class="badge badge-gray">{{ current_mappings | length }}개</span>
+  </div>
+  {% if current_mappings %}
+    {% for m in current_mappings %}
+    <div class="mapping-row" id="mrow_{{ m.mapping_id }}">
+      <div>
+        {% if m.platform=='baemin' %}
+          <span class="badge badge-baemin">배민상회</span>
+        {% else %}
+          <span class="badge badge-foodspring">식봄</span>
+        {% endif %}
+        <span style="margin-left:.4rem;font-weight:600;">{{ m.product_name or m.product_key }}</span>
+        <span style="color:#94a3b8;margin-left:.4rem;font-size:.77rem;">{{ m.seller_name or '' }}</span>
+      </div>
+      <button class="pm-btn pm-btn-danger pm-btn-sm" onclick="toggleDelete('{{ m.product_key }}','{{ m.mapping_id }}')">
+        삭제 선택
+      </button>
+    </div>
+    {% endfor %}
+  {% else %}
+    <div style="color:#94a3b8;font-size:.85rem;padding:.5rem 0;">등록된 매핑이 없습니다.</div>
+  {% endif %}
+</div>
+
+<!-- 교체 시 추가 상품 검색 -->
+<div class="pm-card" id="addSection" style="display:none;">
+  <div class="pm-card-title" style="margin-bottom:.75rem;">교체할 새 플랫폼 상품 검색 (선택)</div>
+  <div style="display:flex;gap:.5rem;">
+    <input type="text" id="addKeyword" class="pm-input" placeholder="플랫폼 상품명 검색"
+           oninput="searchAdd(this.value)" style="flex:1;">
+    <select id="addPlatFilter" class="pm-input" style="width:120px;" onchange="searchAdd(document.getElementById('addKeyword').value)">
+      <option value="">전체</option>
+      <option value="baemin">배민상회</option>
+      <option value="foodspring">식봄</option>
+    </select>
+  </div>
+  <div class="search-results-sm" id="addSearchResults"></div>
+  <div id="addedItems" style="margin-top:.75rem;display:flex;flex-direction:column;gap:.25rem;"></div>
+</div>
+
+<!-- 사유 입력 -->
+<div class="pm-card" id="reasonSection" style="display:none;">
+  <div class="pm-card-title" style="margin-bottom:.6rem;">수정 사유 <span style="color:#b91c1c;">*</span></div>
+  <textarea id="reasonText" class="pm-input" rows="3"
+            placeholder="삭제/교체 필요 사유를 입력해주세요 (필수)"></textarea>
+  <div style="margin-top:.75rem;display:flex;justify-content:flex-end;gap:.5rem;">
+    <button class="pm-btn pm-btn-ghost" onclick="clearRequest()">초기화</button>
+    <button class="pm-btn pm-btn-primary" onclick="submitRequest()">📤 수정요청 제출</button>
+  </div>
+</div>
+
+<script>
+const PLANT='{{ plant }}';
+const PRODUCT_CODE='{{ product_code }}';
+const PLAT_LABEL={'baemin':'배민상회','foodspring':'식봄'};
+const PLAT_COLOR={'baemin':'badge-baemin','foodspring':'badge-foodspring'};
+
+let deleteKeys=[];
+let addItems=[];
+let addTimer=null;
+
+function toggleDelete(productKey, mappingId){
+  const row=document.getElementById('mrow_'+mappingId);
+  const btn=row.querySelector('button');
+  const idx=deleteKeys.indexOf(productKey);
+  if(idx>=0){
+    deleteKeys.splice(idx,1);
+    row.classList.remove('to-delete');
+    btn.textContent='삭제 선택';
+    btn.className='pm-btn pm-btn-danger pm-btn-sm';
+  } else {
+    deleteKeys.push(productKey);
+    row.classList.add('to-delete');
+    btn.textContent='선택 취소';
+    btn.className='pm-btn pm-btn-ghost pm-btn-sm';
+  }
+  updateSections();
+}
+
+function updateSections(){
+  const hasDelete=deleteKeys.length>0;
+  document.getElementById('addSection').style.display=hasDelete?'block':'none';
+  document.getElementById('reasonSection').style.display=hasDelete?'block':'none';
+}
+
+async function searchAdd(kw){
+  if(!kw){document.getElementById('addSearchResults').innerHTML='';return;}
+  clearTimeout(addTimer);
+  addTimer=setTimeout(async()=>{
+    const pf=document.getElementById('addPlatFilter').value;
+    const res=await fetch(`/portal/price-monitor/api/platform-products?keyword=${encodeURIComponent(kw)}&platform=${pf}`);
+    const data=await res.json();
+    renderAddResults(data);
+  },350);
+}
+
+function renderAddResults(data){
+  const el=document.getElementById('addSearchResults');
+  if(!data.length){el.innerHTML='<div style="color:#94a3b8;font-size:.82rem;padding:.5rem;">검색 결과 없음</div>';return;}
+  el.innerHTML=data.slice(0,50).map(p=>{
+    const sel=addItems.some(a=>a.product_key===p.product_key);
+    return `<div class="result-item-sm${sel?' selected-plat':''}" onclick='toggleAdd(${JSON.stringify(p)})'>
+      <span class="badge ${PLAT_COLOR[p.platform]||'badge-gray'}">${PLAT_LABEL[p.platform]||p.platform}</span>
+      <b style="margin:0 .4rem;">${p.product_name||''}</b>
+      <span style="color:#6b7280;">${p.platform_seller_name||''} · ${p.price_sale?p.price_sale.toLocaleString()+'원':''}</span>
+    </div>`;
+  }).join('');
+}
+
+function toggleAdd(p){
+  const idx=addItems.findIndex(a=>a.product_key===p.product_key);
+  if(idx>=0) addItems.splice(idx,1);
+  else addItems.push(p);
+  renderAddedItems();
+  const kw=document.getElementById('addKeyword').value;
+  if(kw) searchAdd(kw);
+}
+
+function renderAddedItems(){
+  const el=document.getElementById('addedItems');
+  if(!addItems.length){el.innerHTML='';return;}
+  el.innerHTML=`<div style="font-size:.78rem;color:#475569;margin-bottom:.3rem;">교체할 상품 ${addItems.length}개</div>`+
+    addItems.map((p,i)=>`
+      <div class="add-item-row">
+        <span><span class="badge ${PLAT_COLOR[p.platform]||'badge-gray'}">${PLAT_LABEL[p.platform]||p.platform}</span>
+        ${p.product_name} · ${p.platform_seller_name}</span>
+        <button class="pm-btn pm-btn-ghost pm-btn-sm" onclick="addItems.splice(${i},1);renderAddedItems();">✕</button>
+      </div>`).join('');
+}
+
+async function submitRequest(){
+  const reason=document.getElementById('reasonText').value.trim();
+  if(!reason){showToast('수정 사유를 입력해주세요','error');return;}
+  if(!deleteKeys.length){showToast('삭제 대상을 선택해주세요','error');return;}
+
+  const requestType=addItems.length>0?'REPLACE':'DELETE';
+  const body={
+    our_product_code: PRODUCT_CODE,
+    plant: PLANT,
+    request_type: requestType,
+    delete_product_keys: deleteKeys,
+    add_product_keys: addItems,
+    reason: reason
+  };
+  const r=await pmPost('/portal/price-monitor/api/change-request/submit', body);
+  if(r.ok){
+    showToast('수정요청이 제출되었습니다. 관리자 검토 후 반영됩니다.','success');
+    setTimeout(()=>location.href='/portal/price-monitor/history/'+PRODUCT_CODE+'?plant='+PLANT, 1800);
+  } else {
+    showToast(r.error||'제출 실패','error');
+  }
+}
+
+function clearRequest(){
+  deleteKeys=[]; addItems=[];
+  document.querySelectorAll('.mapping-row').forEach(r=>{
+    r.classList.remove('to-delete');
+    const btn=r.querySelector('button');
+    if(btn){btn.textContent='삭제 선택';btn.className='pm-btn pm-btn-danger pm-btn-sm';}
+  });
+  document.getElementById('reasonText').value='';
+  updateSections();
+}
+</script>
+{% endblock %}

@@ -202,6 +202,64 @@ def init_db() -> None:
             );
             CREATE INDEX IF NOT EXISTS idx_notice_comments_post ON notice_comments(post_id, created_at);
         """)
+        # ── 가격 모니터링 테이블 ────────────────────────────────────────────
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS price_map_product_link (
+                mapping_id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                our_product_code    TEXT NOT NULL,
+                plant               TEXT NOT NULL DEFAULT '4120',
+                product_key         TEXT NOT NULL,
+                platform            TEXT NOT NULL,
+                platform_seller_id  TEXT,
+                platform_product_id TEXT,
+                product_name        TEXT,
+                seller_name         TEXT,
+                created_by          TEXT,
+                created_at          TEXT DEFAULT (datetime('now','localtime')),
+                is_active           INTEGER DEFAULT 1
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_price_map_unique
+                ON price_map_product_link(our_product_code, plant, product_key) WHERE is_active=1;
+            CREATE INDEX IF NOT EXISTS idx_price_map_code
+                ON price_map_product_link(our_product_code, plant);
+
+            CREATE TABLE IF NOT EXISTS price_map_change_request (
+                request_id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                our_product_code    TEXT NOT NULL,
+                plant               TEXT NOT NULL DEFAULT '4120',
+                request_type        TEXT NOT NULL,
+                delete_product_keys TEXT,
+                add_product_keys    TEXT,
+                reason              TEXT NOT NULL,
+                requested_by        TEXT,
+                requested_by_name   TEXT,
+                requested_at        TEXT DEFAULT (datetime('now','localtime')),
+                status              TEXT DEFAULT 'PENDING',
+                reviewed_by         TEXT,
+                reviewed_at         TEXT,
+                admin_memo          TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_price_cr_status
+                ON price_map_change_request(status, requested_at DESC);
+
+            CREATE TABLE IF NOT EXISTS price_baemin_sellers (
+                seller_id    INTEGER PRIMARY KEY,
+                seller_name  TEXT,
+                region       TEXT,
+                is_active    INTEGER DEFAULT 1,
+                updated_at   TEXT DEFAULT (datetime('now','localtime'))
+            );
+            INSERT OR IGNORE INTO price_baemin_sellers(seller_id,seller_name,region,is_active) VALUES
+                (907,  '이너피스',      '서울/경기/인천', 1),
+                (2090, '그로우식자재',  '서울/경기/인천', 1),
+                (2089, '스마일푸드',    '서울/경기/인천', 1),
+                (1384, '다봄푸드',      '서울/경기/인천', 1),
+                (1774, '온국민신선몰',  '서울/경기/인천', 1),
+                (2057, '세현F&B',       '서울/경기일부',  1),
+                (2006, '파라도',        '서울/경기일부',  1),
+                (2039, '현대그린푸드',  '전국',           1),
+                (2005, '얌피쉬',        '서울/경기/인천', 1);
+        """)
         # announcements 데이터 → notice_posts 자동 이관 (중복 방지)
         try:
             migrated = conn.execute("SELECT COUNT(*) FROM notice_posts").fetchone()[0]
@@ -843,6 +901,185 @@ def delete_voc_comment(comment_id: int, emp_code: str, is_admin: bool = False) -
                 return False
             conn.execute("DELETE FROM voc_comments WHERE id = ?", (comment_id,))
     return True
+
+
+# ── 가격 모니터링 DB 함수 ──────────────────────────────────────────────────
+
+def pm_list_mappings(our_product_code: str, plant: str) -> list[dict]:
+    """특정 상품+플랜트의 활성 매핑 목록"""
+    init_db()
+    with _connect() as conn:
+        rows = conn.execute(
+            """SELECT * FROM price_map_product_link
+               WHERE our_product_code=? AND plant=? AND is_active=1
+               ORDER BY created_at DESC""",
+            (our_product_code, plant),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def pm_list_all_mappings(plant: str) -> list[dict]:
+    """플랜트 기준 전체 활성 매핑 목록"""
+    init_db()
+    with _connect() as conn:
+        rows = conn.execute(
+            """SELECT * FROM price_map_product_link
+               WHERE plant=? AND is_active=1
+               ORDER BY our_product_code, platform""",
+            (plant,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def pm_add_mapping(our_product_code: str, plant: str, product_key: str,
+                   platform: str, platform_seller_id: str, platform_product_id: str,
+                   product_name: str, seller_name: str, created_by: str) -> int:
+    """매핑 즉시 추가 (ADD — 승인 불필요). 이미 존재하면 재활성화."""
+    init_db()
+    with _connect() as conn:
+        existing = conn.execute(
+            """SELECT mapping_id FROM price_map_product_link
+               WHERE our_product_code=? AND plant=? AND product_key=?""",
+            (our_product_code, plant, product_key),
+        ).fetchone()
+        if existing:
+            conn.execute(
+                "UPDATE price_map_product_link SET is_active=1, created_by=?, created_at=datetime('now','localtime') WHERE mapping_id=?",
+                (created_by, existing["mapping_id"]),
+            )
+            return existing["mapping_id"]
+        cur = conn.execute(
+            """INSERT INTO price_map_product_link
+               (our_product_code, plant, product_key, platform,
+                platform_seller_id, platform_product_id,
+                product_name, seller_name, created_by)
+               VALUES (?,?,?,?,?,?,?,?,?)""",
+            (our_product_code, plant, product_key, platform,
+             platform_seller_id, platform_product_id,
+             product_name, seller_name, created_by),
+        )
+        return cur.lastrowid
+
+
+def pm_deactivate_mapping(mapping_id: int) -> bool:
+    """매핑 비활성화 (soft delete)"""
+    init_db()
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE price_map_product_link SET is_active=0 WHERE mapping_id=?",
+            (mapping_id,),
+        )
+    return True
+
+
+def pm_create_change_request(our_product_code: str, plant: str, request_type: str,
+                              delete_product_keys: list, add_product_keys: list,
+                              reason: str, requested_by: str, requested_by_name: str) -> int:
+    """삭제/교체 수정요청 생성"""
+    import json
+    init_db()
+    with _connect() as conn:
+        cur = conn.execute(
+            """INSERT INTO price_map_change_request
+               (our_product_code, plant, request_type,
+                delete_product_keys, add_product_keys,
+                reason, requested_by, requested_by_name)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (our_product_code, plant, request_type,
+             json.dumps(delete_product_keys or [], ensure_ascii=False),
+             json.dumps(add_product_keys or [], ensure_ascii=False),
+             reason, requested_by, requested_by_name),
+        )
+        return cur.lastrowid
+
+
+def pm_list_change_requests(status: str | None = None) -> list[dict]:
+    """수정요청 목록"""
+    import json
+    init_db()
+    where = "WHERE status=?" if status else ""
+    params = (status,) if status else ()
+    with _connect() as conn:
+        rows = conn.execute(
+            f"SELECT * FROM price_map_change_request {where} ORDER BY requested_at DESC",
+            params,
+        ).fetchall()
+    result = []
+    for r in rows:
+        d = dict(r)
+        try: d["delete_product_keys"] = json.loads(d.get("delete_product_keys") or "[]")
+        except Exception: d["delete_product_keys"] = []
+        try: d["add_product_keys"] = json.loads(d.get("add_product_keys") or "[]")
+        except Exception: d["add_product_keys"] = []
+        result.append(d)
+    return result
+
+
+def pm_review_change_request(request_id: int, action: str,
+                              reviewed_by: str, admin_memo: str) -> dict | None:
+    """수정요청 승인/반려. 승인 시 매핑 테이블 자동 반영."""
+    import json
+    init_db()
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM price_map_change_request WHERE request_id=? AND status='PENDING'",
+            (request_id,),
+        ).fetchone()
+        if not row:
+            return None
+        req = dict(row)
+        now = _now()
+        if action == "APPROVE":
+            # 삭제 대상 비활성화
+            del_keys = json.loads(req.get("delete_product_keys") or "[]")
+            for pk in del_keys:
+                conn.execute(
+                    "UPDATE price_map_product_link SET is_active=0 WHERE our_product_code=? AND plant=? AND product_key=?",
+                    (req["our_product_code"], req["plant"], pk),
+                )
+            # 추가 대상 insert
+            add_keys_raw = json.loads(req.get("add_product_keys") or "[]")
+            for item in add_keys_raw:
+                if isinstance(item, dict):
+                    pk = item.get("product_key", "")
+                    conn.execute(
+                        """INSERT OR IGNORE INTO price_map_product_link
+                           (our_product_code, plant, product_key, platform,
+                            platform_seller_id, platform_product_id,
+                            product_name, seller_name, created_by)
+                           VALUES (?,?,?,?,?,?,?,?,?)""",
+                        (req["our_product_code"], req["plant"], pk,
+                         item.get("platform", ""), item.get("platform_seller_id", ""),
+                         item.get("platform_product_id", ""),
+                         item.get("product_name", ""), item.get("seller_name", ""),
+                         reviewed_by),
+                    )
+            conn.execute(
+                "UPDATE price_map_change_request SET status='APPROVED', reviewed_by=?, reviewed_at=?, admin_memo=? WHERE request_id=?",
+                (reviewed_by, now, admin_memo, request_id),
+            )
+        else:
+            conn.execute(
+                "UPDATE price_map_change_request SET status='REJECTED', reviewed_by=?, reviewed_at=?, admin_memo=? WHERE request_id=?",
+                (reviewed_by, now, admin_memo, request_id),
+            )
+    return pm_list_change_requests()[0] if False else {"request_id": request_id, "status": action}
+
+
+def pm_list_baemin_sellers() -> list[dict]:
+    init_db()
+    with _connect() as conn:
+        rows = conn.execute("SELECT * FROM price_baemin_sellers ORDER BY seller_id").fetchall()
+    return [dict(r) for r in rows]
+
+
+def pm_toggle_seller(seller_id: int, is_active: int) -> None:
+    init_db()
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE price_baemin_sellers SET is_active=?, updated_at=datetime('now','localtime') WHERE seller_id=?",
+            (is_active, seller_id),
+        )
 
 
 # ── 모듈 로드 시 DB 초기화 ──────────────────────────────────────────────────

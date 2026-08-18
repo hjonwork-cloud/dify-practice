@@ -1,0 +1,241 @@
+{% extends "pm_base.html" %}
+{% set active_page = "mapping" %}
+{% macro plant_url(p) %}/portal/price-monitor/mapping?plant={{ p }}{% endmacro %}
+
+{% block title %}매핑 등록{% endblock %}
+{% block page_title %}상품 매핑 등록{% endblock %}
+
+{% block head %}
+<style>
+.split-pane{display:grid;grid-template-columns:1fr 1fr;gap:1rem;}
+@media(max-width:900px){.split-pane{grid-template-columns:1fr;}}
+.search-results{max-height:380px;overflow-y:auto;margin-top:.75rem;display:flex;flex-direction:column;gap:.3rem;}
+.result-item{padding:.6rem .8rem;border-radius:8px;border:1.5px solid #e2e8f0;background:#fafafa;cursor:pointer;transition:all .12s;}
+.result-item:hover{border-color:#93c5fd;background:#eff6ff;}
+.result-item.selected-our{border-color:var(--pm-blue);background:#eff6ff;}
+.result-item.selected-plat{border-color:#16a34a;background:#f0fdf4;}
+.result-item .item-name{font-weight:600;font-size:.85rem;}
+.result-item .item-meta{font-size:.77rem;color:#6b7280;margin-top:.2rem;}
+.mapping-preview{margin-top:1rem;padding:.9rem;background:#f8fafc;border-radius:10px;border:1px dashed #cbd5e1;}
+.mapping-preview .map-line{display:flex;align-items:center;gap:.5rem;margin:.3rem 0;font-size:.83rem;}
+</style>
+{% endblock %}
+
+{% block content %}
+<div id="addedCount" style="display:none;"></div>
+
+<div class="split-pane">
+  <!-- 왼쪽: 우리 상품 -->
+  <div class="pm-card">
+    <div class="pm-card-head">
+      <span class="pm-card-title">① 우리 상품 선택</span>
+      <span id="ourSelectedBadge" style="display:none;" class="badge badge-blue"></span>
+    </div>
+    <input type="text" id="ourKeyword" class="pm-input" placeholder="상품코드 또는 상품명 입력"
+           oninput="searchOur(this.value)">
+    <div class="search-results" id="ourResults">
+      <div style="text-align:center;padding:2rem;color:#94a3b8;font-size:.84rem;">상품명을 입력하세요</div>
+    </div>
+    <!-- 선택 정보 -->
+    <div id="ourSelectedInfo" style="display:none;margin-top:.75rem;padding:.7rem .9rem;background:#eff6ff;border-radius:8px;border:1.5px solid var(--pm-blue);">
+      <div id="ourSelectedName" style="font-weight:700;font-size:.9rem;"></div>
+      <div id="ourSelectedMeta" style="font-size:.78rem;color:#475569;margin-top:.2rem;"></div>
+    </div>
+  </div>
+
+  <!-- 오른쪽: 플랫폼 상품 -->
+  <div class="pm-card">
+    <div class="pm-card-head">
+      <span class="pm-card-title">② 플랫폼 상품 선택</span>
+      <div style="display:flex;gap:.4rem;">
+        <select id="platformFilter" class="pm-input" style="width:110px;font-size:.8rem;">
+          <option value="">전체</option>
+          <option value="baemin">배민상회</option>
+          <option value="foodspring">식봄</option>
+        </select>
+      </div>
+    </div>
+    <input type="text" id="platKeyword" class="pm-input" placeholder="플랫폼 상품명 검색"
+           oninput="searchPlat(this.value)">
+    <div class="search-results" id="platResults">
+      <div style="text-align:center;padding:2rem;color:#94a3b8;font-size:.84rem;">상품명을 입력하세요</div>
+    </div>
+    <div id="selectedPlatList" style="margin-top:.75rem;display:flex;flex-direction:column;gap:.3rem;"></div>
+  </div>
+</div>
+
+<!-- 매핑 미리보기 & 등록 버튼 -->
+<div id="mappingPreview" class="mapping-preview" style="display:none;">
+  <div style="font-weight:700;margin-bottom:.5rem;font-size:.9rem;">📋 매핑 등록 미리보기</div>
+  <div id="previewLines"></div>
+  <div style="margin-top:.75rem;display:flex;gap:.5rem;justify-content:flex-end;">
+    <button class="pm-btn pm-btn-ghost" onclick="clearAll()">초기화</button>
+    <button class="pm-btn pm-btn-success" id="submitBtn" onclick="submitMapping()">
+      ✅ 매핑 등록 (즉시 반영)
+    </button>
+  </div>
+</div>
+
+<script>
+const PLANT = "{{ plant }}";
+let selectedOur = null;
+let selectedPlats = [];
+let ourTimer = null, platTimer = null;
+
+function debounce(fn, t){ return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a),t=350); }; }
+
+async function searchOur(kw){
+  if(!kw){document.getElementById('ourResults').innerHTML='<div style="text-align:center;padding:2rem;color:#94a3b8;font-size:.84rem;">상품명을 입력하세요</div>';return;}
+  clearTimeout(ourTimer);
+  ourTimer=setTimeout(async()=>{
+    const res=await fetch(`/portal/price-monitor/api/our-products?plant=${PLANT}&keyword=${encodeURIComponent(kw)}`);
+    const data=await res.json();
+    renderOurResults(data);
+  },350);
+}
+
+function renderOurResults(data){
+  const el=document.getElementById('ourResults');
+  if(!data.length){el.innerHTML='<div style="text-align:center;padding:2rem;color:#94a3b8;font-size:.84rem;">검색 결과 없음</div>';return;}
+  el.innerHTML=data.slice(0,50).map(p=>`
+    <div class="result-item${selectedOur&&selectedOur.product_code===p.product_code?' selected-our':''}"
+         onclick='selectOur(${JSON.stringify(p)})'>
+      <div class="item-name">${p.product_name||p.product_code}</div>
+      <div class="item-meta">${p.product_code} · ${p.brand||''} · ${p.unit||''}</div>
+    </div>`).join('');
+}
+
+function selectOur(p){
+  selectedOur=p;
+  document.getElementById('ourSelectedInfo').style.display='block';
+  document.getElementById('ourSelectedName').textContent=p.product_name||p.product_code;
+  document.getElementById('ourSelectedMeta').textContent=`${p.product_code} · ${p.brand||''} · ${PLANT} 플랜트`;
+  document.getElementById('ourSelectedBadge').textContent=p.product_code;
+  document.getElementById('ourSelectedBadge').style.display='inline-block';
+  // 리스트 재렌더 (선택 표시)
+  document.querySelectorAll('#ourResults .result-item').forEach(el=>{
+    el.classList.toggle('selected-our', el.querySelector('.item-meta')?.textContent?.includes(p.product_code));
+  });
+  updatePreview();
+}
+
+async function searchPlat(kw){
+  if(!kw){document.getElementById('platResults').innerHTML='<div style="text-align:center;padding:2rem;color:#94a3b8;font-size:.84rem;">상품명을 입력하세요</div>';return;}
+  clearTimeout(platTimer);
+  platTimer=setTimeout(async()=>{
+    const pf=document.getElementById('platformFilter').value;
+    const res=await fetch(`/portal/price-monitor/api/platform-products?keyword=${encodeURIComponent(kw)}&platform=${pf}`);
+    const data=await res.json();
+    renderPlatResults(data);
+  },350);
+}
+
+document.getElementById('platformFilter').onchange=()=>{
+  const kw=document.getElementById('platKeyword').value;
+  if(kw) searchPlat(kw);
+};
+
+const PLAT_LABEL={'baemin':'배민상회','foodspring':'식봄'};
+const PLAT_COLOR={'baemin':'badge-baemin','foodspring':'badge-foodspring'};
+
+function renderPlatResults(data){
+  const el=document.getElementById('platResults');
+  if(!data.length){el.innerHTML='<div style="text-align:center;padding:2rem;color:#94a3b8;font-size:.84rem;">검색 결과 없음</div>';return;}
+  el.innerHTML=data.slice(0,100).map(p=>{
+    const sel=selectedPlats.some(s=>s.product_key===p.product_key);
+    return `<div class="result-item${sel?' selected-plat':''}" onclick='togglePlat(${JSON.stringify(p)})'>
+      <div class="item-name">
+        <span class="badge ${PLAT_COLOR[p.platform]||'badge-gray'}" style="margin-right:.3rem;">${PLAT_LABEL[p.platform]||p.platform}</span>
+        ${p.product_name||''}
+      </div>
+      <div class="item-meta">${p.platform_seller_name||''} · ${p.spec||''} · <b>${p.price_sale?p.price_sale.toLocaleString()+'원':'-'}</b> · ${p.delivery_type||''}</div>
+    </div>`;
+  }).join('');
+}
+
+function togglePlat(p){
+  const idx=selectedPlats.findIndex(s=>s.product_key===p.product_key);
+  if(idx>=0) selectedPlats.splice(idx,1);
+  else selectedPlats.push(p);
+  updateSelectedPlatList();
+  // 리스트 재렌더
+  const kw=document.getElementById('platKeyword').value;
+  if(kw) searchPlat(kw);
+  updatePreview();
+}
+
+function updateSelectedPlatList(){
+  const el=document.getElementById('selectedPlatList');
+  if(!selectedPlats.length){el.innerHTML='';return;}
+  el.innerHTML=`<div style="font-size:.78rem;color:#475569;margin-bottom:.3rem;">선택된 플랫폼 상품 ${selectedPlats.length}개</div>`+
+    selectedPlats.map((p,i)=>`
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:.4rem .7rem;background:#f0fdf4;border-radius:7px;border:1px solid #bbf7d0;font-size:.8rem;">
+        <span><span class="badge ${PLAT_COLOR[p.platform]||'badge-gray'}">${PLAT_LABEL[p.platform]||p.platform}</span>
+        ${p.product_name} · ${p.platform_seller_name}</span>
+        <button class="pm-btn pm-btn-danger pm-btn-sm" onclick="removePlat(${i})">✕</button>
+      </div>`).join('');
+}
+
+function removePlat(i){selectedPlats.splice(i,1);updateSelectedPlatList();updatePreview();}
+
+function updatePreview(){
+  const preview=document.getElementById('mappingPreview');
+  const lines=document.getElementById('previewLines');
+  if(!selectedOur||!selectedPlats.length){preview.style.display='none';return;}
+  preview.style.display='block';
+  lines.innerHTML=selectedPlats.map(p=>`
+    <div class="map-line">
+      <span class="badge badge-blue">${selectedOur.product_name||selectedOur.product_code}</span>
+      <span style="color:#94a3b8;">↔</span>
+      <span class="badge ${PLAT_COLOR[p.platform]||'badge-gray'}">${PLAT_LABEL[p.platform]||p.platform}</span>
+      <span>${p.product_name} (${p.platform_seller_name})</span>
+      <span style="color:var(--pm-blue);font-weight:700;margin-left:auto;">${p.price_sale?p.price_sale.toLocaleString()+'원':''}</span>
+    </div>`).join('');
+}
+
+async function submitMapping(){
+  if(!selectedOur||!selectedPlats.length){showToast('우리 상품과 플랫폼 상품을 선택해주세요','error');return;}
+  const btn=document.getElementById('submitBtn');
+  btn.disabled=true; btn.textContent='등록 중...';
+  let ok=0;
+  for(const p of selectedPlats){
+    const r=await pmPost('/portal/price-monitor/api/mapping/add',{
+      our_product_code: selectedOur.product_code,
+      plant: PLANT,
+      product_key: p.product_key,
+      platform: p.platform,
+      platform_seller_id: String(p.platform_seller_id||''),
+      platform_product_id: String(p.platform_product_id||''),
+      product_name: selectedOur.product_name||'',
+      seller_name: p.platform_seller_name||''
+    });
+    if(r.ok) ok++;
+  }
+  showToast(`${ok}개 매핑이 등록되었습니다!`,'success');
+  btn.disabled=false; btn.textContent='✅ 매핑 등록 (즉시 반영)';
+  clearAll();
+}
+
+function clearAll(){
+  selectedOur=null; selectedPlats=[];
+  document.getElementById('ourKeyword').value='';
+  document.getElementById('platKeyword').value='';
+  document.getElementById('ourResults').innerHTML='<div style="text-align:center;padding:2rem;color:#94a3b8;font-size:.84rem;">상품명을 입력하세요</div>';
+  document.getElementById('platResults').innerHTML='<div style="text-align:center;padding:2rem;color:#94a3b8;font-size:.84rem;">상품명을 입력하세요</div>';
+  document.getElementById('ourSelectedInfo').style.display='none';
+  document.getElementById('ourSelectedBadge').style.display='none';
+  document.getElementById('selectedPlatList').innerHTML='';
+  document.getElementById('mappingPreview').style.display='none';
+}
+
+// URL 파라미터로 상품 자동 선택
+(async()=>{
+  const params=new URLSearchParams(location.search);
+  const code=params.get('our_code');
+  if(code){
+    document.getElementById('ourKeyword').value=code;
+    await searchOur(code);
+  }
+})();
+</script>
+{% endblock %}

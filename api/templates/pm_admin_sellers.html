@@ -1,0 +1,79 @@
+{% extends "pm_base.html" %}
+{% set active_page = "sellers" %}
+{% macro plant_url(p) %}/portal/price-monitor/admin/sellers{% endmacro %}
+
+{% block title %}셀러 설정{% endblock %}
+{% block page_title %}배민상회 셀러 설정{% endblock %}
+
+{% block content %}
+<div class="pm-card">
+  <div class="pm-card-head">
+    <span class="pm-card-title">배민상회 크롤링 대상 셀러</span>
+    <span class="badge badge-blue">{{ sellers | length }}개</span>
+  </div>
+  <p style="font-size:.83rem;color:#64748b;margin-bottom:1rem;">
+    비활성화된 셀러는 다음 크롤링 실행 시 수집에서 제외됩니다.
+  </p>
+  <table class="pm-table">
+    <thead>
+      <tr>
+        <th>셀러 ID</th>
+        <th>셀러명</th>
+        <th>지역</th>
+        <th>상태</th>
+        <th>마지막 수정</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for s in sellers %}
+      <tr id="seller_{{ s.seller_id }}">
+        <td><code style="font-size:.78rem;">{{ s.seller_id }}</code></td>
+        <td style="font-weight:600;">{{ s.seller_name or '-' }}</td>
+        <td style="font-size:.8rem;color:#475569;">{{ s.region or '-' }}</td>
+        <td>
+          {% if s.is_active %}
+            <span class="badge badge-ok">활성</span>
+          {% else %}
+            <span class="badge badge-gray">비활성</span>
+          {% endif %}
+        </td>
+        <td style="font-size:.78rem;color:#94a3b8;">{{ s.updated_at[:10] if s.updated_at else '-' }}</td>
+        <td>
+          {% if s.is_active %}
+            <button class="pm-btn pm-btn-ghost pm-btn-sm"
+                    onclick="toggleSeller({{ s.seller_id }}, 0)">비활성화</button>
+          {% else %}
+            <button class="pm-btn pm-btn-success pm-btn-sm"
+                    onclick="toggleSeller({{ s.seller_id }}, 1)">활성화</button>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="pm-card" style="background:#f8fafc;">
+  <div class="pm-card-title" style="margin-bottom:.5rem;">📝 참고</div>
+  <ul style="font-size:.83rem;color:#475569;line-height:1.8;padding-left:1.2rem;">
+    <li>크롤링은 매일 새벽 03:00 KST에 실행됩니다.</li>
+    <li>식봄은 현재 116개 셀러 자동 수집 중 (별도 ID 목록으로 관리)</li>
+    <li>새 배민상회 셀러 추가 시 개발팀에 요청해주세요.</li>
+  </ul>
+</div>
+
+<script>
+async function toggleSeller(sellerId, isActive){
+  const r=await pmPost('/portal/price-monitor/api/admin/seller-toggle',{
+    seller_id: sellerId, is_active: isActive
+  });
+  if(r.ok){
+    showToast(isActive?'셀러가 활성화되었습니다.':'셀러가 비활성화되었습니다.','success');
+    setTimeout(()=>location.reload(),1000);
+  } else {
+    showToast('처리 실패','error');
+  }
+}
+</script>
+{% endblock %}

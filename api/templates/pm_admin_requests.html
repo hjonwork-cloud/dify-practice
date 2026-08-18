@@ -1,0 +1,184 @@
+{% extends "pm_base.html" %}
+{% set active_page = "requests" %}
+{% macro plant_url(p) %}/portal/price-monitor/admin/requests{% endmacro %}
+
+{% block title %}수정요청 검토{% endblock %}
+{% block page_title %}매핑 수정요청 관리{% endblock %}
+
+{% block head %}
+<style>
+.tab-bar{display:flex;gap:0;border-bottom:2px solid #e2e8f0;margin-bottom:1rem;}
+.tab-bar a{padding:.5rem 1.1rem;font-size:.85rem;font-weight:600;color:#64748b;text-decoration:none;border-bottom:2px solid transparent;margin-bottom:-2px;transition:all .12s;}
+.tab-bar a.active{color:var(--pm-blue);border-bottom-color:var(--pm-blue);}
+.tab-bar a:hover{color:#1e293b;}
+.detail-keys{display:flex;flex-wrap:wrap;gap:.3rem;margin-top:.3rem;}
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center;}
+.modal-overlay.open{display:flex;}
+.modal-box{background:#fff;border-radius:14px;padding:1.5rem;width:min(560px,95vw);box-shadow:0 8px 32px rgba(0,0,0,.18);}
+.modal-title{font-size:1.05rem;font-weight:800;margin-bottom:1rem;}
+.desc-grid{display:grid;grid-template-columns:120px 1fr;gap:.4rem .75rem;font-size:.84rem;margin-bottom:1rem;}
+.desc-label{color:#64748b;font-weight:600;}
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- 탭 -->
+<div class="tab-bar">
+  <a href="?status=PENDING"  class="{% if status_filter=='PENDING'  %}active{% endif %}">⏳ 대기</a>
+  <a href="?status=APPROVED" class="{% if status_filter=='APPROVED' %}active{% endif %}">✅ 승인</a>
+  <a href="?status=REJECTED" class="{% if status_filter=='REJECTED' %}active{% endif %}">❌ 반려</a>
+  <a href="?status="         class="{% if not status_filter %}active{% endif %}">전체</a>
+</div>
+
+<div class="pm-card" style="padding:0;overflow:hidden;">
+  {% if rows %}
+  <div style="overflow-x:auto;">
+    <table class="pm-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>상태</th>
+          <th>상품코드</th>
+          <th>플랜트</th>
+          <th>유형</th>
+          <th>요청자</th>
+          <th>요청일시</th>
+          <th>사유</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td style="color:#94a3b8;font-size:.78rem;">{{ r.request_id }}</td>
+          <td>
+            {% if r.status=='PENDING'  %}<span class="badge" style="background:#fef3c7;color:#92400e;">대기</span>
+            {% elif r.status=='APPROVED'%}<span class="badge badge-ok">승인</span>
+            {% else %}<span class="badge badge-alert">반려</span>
+            {% endif %}
+          </td>
+          <td><code style="font-size:.78rem;">{{ r.our_product_code }}</code></td>
+          <td><span class="badge badge-blue">{{ r.plant }}</span></td>
+          <td>
+            {% if r.request_type=='DELETE' %}<span class="badge badge-alert">삭제</span>
+            {% else %}<span class="badge" style="background:#e0e7ff;color:#3730a3;">교체</span>
+            {% endif %}
+          </td>
+          <td style="font-size:.82rem;">{{ r.requested_by_name or r.requested_by or '-' }}</td>
+          <td style="font-size:.78rem;color:#64748b;white-space:nowrap;">{{ r.requested_at[:16] if r.requested_at else '-' }}</td>
+          <td style="font-size:.82rem;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ r.reason }}">
+            {{ r.reason }}
+          </td>
+          <td>
+            <button class="pm-btn pm-btn-ghost pm-btn-sm"
+                    onclick="openDetail({{ r | tojson }})">검토</button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div style="padding:3rem;text-align:center;color:#94a3b8;">
+    <div style="font-size:2rem;margin-bottom:.75rem;">📋</div>
+    <div>요청이 없습니다.</div>
+  </div>
+  {% endif %}
+</div>
+
+<!-- 상세 모달 -->
+<div class="modal-overlay" id="detailModal" onclick="if(event.target===this)closeModal()">
+  <div class="modal-box">
+    <div class="modal-title" id="modalTitle">수정요청 #<span id="mRequestId"></span></div>
+    <div class="desc-grid">
+      <span class="desc-label">상품코드</span><span id="mCode"></span>
+      <span class="desc-label">플랜트</span><span id="mPlant"></span>
+      <span class="desc-label">요청 유형</span><span id="mType"></span>
+      <span class="desc-label">요청자</span><span id="mRequester"></span>
+      <span class="desc-label">요청일시</span><span id="mDate"></span>
+      <span class="desc-label">사유</span><span id="mReason"></span>
+      <span class="desc-label">삭제 대상</span>
+      <div id="mDeleteKeys" class="detail-keys"></div>
+      <span class="desc-label">추가 대상</span>
+      <div id="mAddKeys" class="detail-keys"></div>
+    </div>
+    <!-- 관리자 메모 -->
+    <div style="margin-bottom:.75rem;">
+      <label style="font-size:.84rem;font-weight:600;display:block;margin-bottom:.3rem;">
+        관리자 메모 <span id="memoRequired" style="color:#b91c1c;display:none;">(반려 시 필수)</span>
+      </label>
+      <textarea id="adminMemo" class="pm-input" rows="2" placeholder="메모 또는 반려 사유"></textarea>
+    </div>
+    <!-- 버튼 -->
+    <div id="modalActions" style="display:flex;gap:.5rem;justify-content:flex-end;"></div>
+  </div>
+</div>
+
+<script>
+let currentReqId=null;
+
+function openDetail(r){
+  currentReqId=r.request_id;
+  document.getElementById('mRequestId').textContent=r.request_id;
+  document.getElementById('mCode').textContent=r.our_product_code;
+  document.getElementById('mPlant').textContent=r.plant;
+  document.getElementById('mType').textContent=r.request_type==='DELETE'?'삭제':'교체';
+  document.getElementById('mRequester').textContent=r.requested_by_name||r.requested_by||'-';
+  document.getElementById('mDate').textContent=(r.requested_at||'').slice(0,16);
+  document.getElementById('mReason').textContent=r.reason;
+  document.getElementById('adminMemo').value=r.admin_memo||'';
+
+  // 삭제 대상
+  const delEl=document.getElementById('mDeleteKeys');
+  const delKeys=Array.isArray(r.delete_product_keys)?r.delete_product_keys:[];
+  delEl.innerHTML=delKeys.length?delKeys.map(k=>`<span class="badge badge-alert">${k}</span>`).join(''):'<span style="color:#94a3b8;">-</span>';
+
+  // 추가 대상
+  const addEl=document.getElementById('mAddKeys');
+  const addItems=Array.isArray(r.add_product_keys)?r.add_product_keys:[];
+  addEl.innerHTML=addItems.length?addItems.map(item=>{
+    const name=typeof item==='object'?item.product_name||item.product_key:item;
+    return `<span class="badge badge-ok">${name}</span>`;
+  }).join(''):'<span style="color:#94a3b8;">-</span>';
+
+  // 버튼
+  const actions=document.getElementById('modalActions');
+  if(r.status==='PENDING'){
+    document.getElementById('memoRequired').style.display='none';
+    actions.innerHTML=`
+      <button class="pm-btn pm-btn-ghost" onclick="closeModal()">닫기</button>
+      <button class="pm-btn pm-btn-danger" onclick="doReview('REJECT')">❌ 반려</button>
+      <button class="pm-btn pm-btn-success" onclick="doReview('APPROVE')">✅ 승인 및 반영</button>`;
+  } else {
+    actions.innerHTML=`<button class="pm-btn pm-btn-ghost" onclick="closeModal()">닫기</button>`;
+  }
+
+  document.getElementById('detailModal').classList.add('open');
+}
+
+function closeModal(){
+  document.getElementById('detailModal').classList.remove('open');
+  currentReqId=null;
+}
+
+async function doReview(action){
+  const memo=document.getElementById('adminMemo').value.trim();
+  if(action==='REJECT'&&!memo){
+    document.getElementById('memoRequired').style.display='inline';
+    showToast('반려 시 사유를 입력해주세요','error');return;
+  }
+  const r=await pmPost('/portal/price-monitor/api/admin/review',{
+    request_id: currentReqId,
+    action,
+    admin_memo: memo
+  });
+  if(r.ok){
+    showToast(action==='APPROVE'?'승인 완료. 매핑에 반영되었습니다.':'반려 처리되었습니다.','success');
+    closeModal();
+    setTimeout(()=>location.reload(),1200);
+  } else {
+    showToast(r.error||'처리 실패','error');
+  }
+}
+</script>
+{% endblock %}

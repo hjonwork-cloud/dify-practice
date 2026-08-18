@@ -1,0 +1,94 @@
+{% extends "pm_base.html" %}
+{% set active_page = "products" %}
+{% macro plant_url(p) %}/portal/price-monitor/products?plant={{ p }}{% if keyword %}&keyword={{ keyword }}{% endif %}{% if map_filter %}&map_filter={{ map_filter }}{% endif %}{% endmacro %}
+
+{% block title %}운영상품 목록{% endblock %}
+{% block page_title %}운영상품 목록 &amp; 매핑 현황{% endblock %}
+
+{% block content %}
+<!-- 필터 -->
+<form method="get" class="pm-filterbar">
+  <input type="hidden" name="plant" value="{{ plant }}">
+  <input type="text" name="keyword" value="{{ keyword }}" placeholder="상품코드/상품명 검색"
+         class="pm-input" style="max-width:220px;">
+  <select name="map_filter" class="pm-input" style="width:140px;" onchange="this.form.submit()">
+    <option value="">전체</option>
+    <option value="mapped"   {% if map_filter=='mapped'   %}selected{% endif %}>매핑됨</option>
+    <option value="unmapped" {% if map_filter=='unmapped' %}selected{% endif %}>미매핑</option>
+  </select>
+  <button type="submit" class="pm-btn pm-btn-primary">검색</button>
+  <a href="/portal/price-monitor/mapping?plant={{ plant }}" class="pm-btn pm-btn-success">🔗 매핑 등록</a>
+  <span style="margin-left:auto;font-size:.83rem;color:#64748b;">총 {{ total }}건</span>
+</form>
+
+<div class="pm-card" style="padding:0;overflow:hidden;">
+  {% if rows %}
+  <div style="overflow-x:auto;">
+    <table class="pm-table">
+      <thead>
+        <tr>
+          <th>상품코드</th>
+          <th>상품명</th>
+          <th>브랜드</th>
+          <th>단위</th>
+          <th>플랜트</th>
+          <th>주문상태</th>
+          <th>운영여부</th>
+          <th>배민상회</th>
+          <th>식봄</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td><code style="font-size:.78rem;">{{ r.product_code }}</code></td>
+          <td style="font-weight:600;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ r.product_name }}">
+            {{ r.product_name or '-' }}
+          </td>
+          <td style="font-size:.8rem;color:#475569;">{{ r.brand or '-' }}</td>
+          <td style="font-size:.8rem;">{{ r.unit or '-' }}</td>
+          <td><span class="badge badge-blue">{{ r.plant }}</span></td>
+          <td style="font-size:.8rem;">{{ r.order_status or '-' }}</td>
+          <td>
+            {% if r.is_stopped %}
+              <span class="badge badge-alert">운영중단</span>
+            {% else %}
+              <span class="badge badge-ok">운영중</span>
+            {% endif %}
+          </td>
+          <td style="text-align:center;">
+            {% if r.mapping_baemin > 0 %}
+              <span class="badge badge-baemin">{{ r.mapping_baemin }}개</span>
+            {% else %}
+              <span style="color:#cbd5e1;font-size:.78rem;">-</span>
+            {% endif %}
+          </td>
+          <td style="text-align:center;">
+            {% if r.mapping_foodspring > 0 %}
+              <span class="badge badge-foodspring">{{ r.mapping_foodspring }}개</span>
+            {% else %}
+              <span style="color:#cbd5e1;font-size:.78rem;">-</span>
+            {% endif %}
+          </td>
+          <td style="white-space:nowrap;">
+            <a href="/portal/price-monitor/mapping?plant={{ plant }}&our_code={{ r.product_code }}"
+               class="pm-btn pm-btn-primary pm-btn-sm">매핑</a>
+            {% if r.mapping_total > 0 %}
+            <a href="/portal/price-monitor/history/{{ r.product_code }}?plant={{ plant }}"
+               class="pm-btn pm-btn-ghost pm-btn-sm">이력</a>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div style="padding:3rem;text-align:center;color:#94a3b8;">
+    <div style="font-size:2rem;margin-bottom:.75rem;">📦</div>
+    <div>검색 결과가 없습니다.</div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

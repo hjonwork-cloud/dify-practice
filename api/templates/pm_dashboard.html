@@ -1,0 +1,152 @@
+{% extends "pm_base.html" %}
+{% set active_page = "dashboard" %}
+{% macro plant_url(p) %}/portal/price-monitor/?plant={{ p }}{% if platform %}&platform={{ platform }}{% endif %}{% if alert_only %}&alert_only=1{% endif %}{% endmacro %}
+
+{% block title %}가격비교 대시보드{% endblock %}
+{% block page_title %}가격비교 대시보드{% endblock %}
+
+{% block head %}
+<style>
+.stat-row{display:flex;gap:1rem;margin-bottom:1rem;flex-wrap:wrap;}
+.stat-box{background:#fff;border-radius:10px;padding:.9rem 1.2rem;min-width:140px;box-shadow:0 1px 4px rgba(0,0,0,.06);}
+.stat-box .stat-label{font-size:.75rem;color:#94a3b8;font-weight:600;text-transform:uppercase;letter-spacing:.04em;}
+.stat-box .stat-val{font-size:1.5rem;font-weight:800;margin-top:.1rem;}
+.filter-row{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:1rem;}
+</style>
+{% endblock %}
+
+{% block content %}
+{% set cnt_alert = rows | selectattr("gp_status","eq","alert") | list | length %}
+{% set cnt_warn  = rows | selectattr("gp_status","eq","warn")  | list | length %}
+{% set cnt_ok    = rows | selectattr("gp_status","eq","ok")    | list | length %}
+
+<!-- 요약 통계 -->
+<div class="stat-row">
+  <div class="stat-box">
+    <div class="stat-label">전체 비교 항목</div>
+    <div class="stat-val" style="color:#1e293b;">{{ total }}</div>
+  </div>
+  <div class="stat-box">
+    <div class="stat-label">🔴 GP 경보 (< {{ gp_alert_pct }}%)</div>
+    <div class="stat-val" style="color:#b91c1c;">{{ cnt_alert }}</div>
+  </div>
+  <div class="stat-box">
+    <div class="stat-label">🟡 주의 ({{ gp_alert_pct }}~{{ gp_warn_pct }}%)</div>
+    <div class="stat-val" style="color:#92400e;">{{ cnt_warn }}</div>
+  </div>
+  <div class="stat-box">
+    <div class="stat-label">🟢 정상 (≥ {{ gp_warn_pct }}%)</div>
+    <div class="stat-val" style="color:#15803d;">{{ cnt_ok }}</div>
+  </div>
+  {% if last_crawl_date %}
+  <div class="stat-box">
+    <div class="stat-label">마지막 수집일</div>
+    <div class="stat-val" style="font-size:1rem;color:#475569;">{{ last_crawl_date }}</div>
+  </div>
+  {% endif %}
+</div>
+
+<!-- 필터 -->
+<div class="filter-row">
+  <form method="get" style="display:contents;">
+    <input type="hidden" name="plant" value="{{ plant }}">
+    <select name="platform" class="pm-input" style="width:130px;"
+            onchange="this.form.submit()">
+      <option value="">전체 플랫폼</option>
+      <option value="baemin"     {% if platform=='baemin'     %}selected{% endif %}>배민상회</option>
+      <option value="foodspring" {% if platform=='foodspring' %}selected{% endif %}>식봄</option>
+    </select>
+    <label style="display:flex;align-items:center;gap:.35rem;font-size:.84rem;cursor:pointer;">
+      <input type="checkbox" name="alert_only" value="1"
+             {% if alert_only %}checked{% endif %}
+             onchange="this.form.submit()">
+      경보/주의만 보기
+    </label>
+  </form>
+  <a href="/portal/price-monitor/products?plant={{ plant }}" class="pm-btn pm-btn-ghost pm-btn-sm">📦 운영상품 관리</a>
+  <a href="/portal/price-monitor/mapping?plant={{ plant }}" class="pm-btn pm-btn-primary pm-btn-sm">🔗 매핑 등록</a>
+</div>
+
+<!-- 테이블 -->
+<div class="pm-card" style="padding:0;overflow:hidden;">
+  {% if rows %}
+  <div style="overflow-x:auto;">
+    <table class="pm-table">
+      <thead>
+        <tr>
+          <th>상품코드</th>
+          <th>상품명</th>
+          <th>플랫폼</th>
+          <th>셀러</th>
+          <th>외부 상품명</th>
+          <th>규격</th>
+          <th>기준가(2주평균)</th>
+          <th>구매단가</th>
+          <th>외부판매가</th>
+          <th>외부GP율</th>
+          <th>배송</th>
+          <th>수집일</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr class="{% if r.gp_status=='alert' %}row-alert{% elif r.gp_status=='warn' %}row-warn{% endif %}">
+          <td><code style="font-size:.78rem;">{{ r.our_product_code }}</code></td>
+          <td style="font-weight:600;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ r.product_name }}">
+            {{ r.product_name or '-' }}
+          </td>
+          <td>
+            {% if r.platform=='baemin' %}
+              <span class="badge badge-baemin">배민상회</span>
+            {% else %}
+              <span class="badge badge-foodspring">식봄</span>
+            {% endif %}
+          </td>
+          <td style="font-size:.8rem;color:#475569;">{{ r.seller_name or '-' }}</td>
+          <td style="font-size:.8rem;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ r.ext_product_name }}">
+            {{ r.ext_product_name or '-' }}
+          </td>
+          <td style="font-size:.78rem;color:#64748b;">{{ r.ext_spec or '-' }}</td>
+          <td style="text-align:right;font-weight:600;">
+            {% if r.avg_sale_price %}{{ '{:,.0f}'.format(r.avg_sale_price) }}원{% else %}-{% endif %}
+          </td>
+          <td style="text-align:right;color:#475569;">
+            {% if r.avg_buy_price %}{{ '{:,.0f}'.format(r.avg_buy_price) }}원{% else %}-{% endif %}
+          </td>
+          <td style="text-align:right;font-weight:700;color:#0f172a;">
+            {% if r.ext_price %}{{ '{:,.0f}'.format(r.ext_price) }}원{% else %}-{% endif %}
+          </td>
+          <td style="text-align:center;">
+            {% if r.gp_pct is not none %}
+              <span class="gp-{{ r.gp_status }}">
+                {% if r.gp_status=='alert' %}🔴{% elif r.gp_status=='warn' %}🟡{% else %}🟢{% endif %}
+                {{ r.gp_pct }}%
+              </span>
+            {% else %}-{% endif %}
+          </td>
+          <td>
+            <span class="badge badge-gray" style="font-size:.72rem;">{{ r.delivery_type or '-' }}</span>
+            {% if r.is_free_delivery %}<span class="badge badge-ok" style="font-size:.68rem;">무료</span>{% endif %}
+          </td>
+          <td style="font-size:.78rem;color:#94a3b8;">{{ r.crawl_date }}</td>
+          <td>
+            <a href="/portal/price-monitor/history/{{ r.our_product_code }}?plant={{ plant }}"
+               class="pm-btn pm-btn-ghost pm-btn-sm">이력</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div style="padding:3rem;text-align:center;color:#94a3b8;">
+    <div style="font-size:2rem;margin-bottom:.75rem;">📭</div>
+    <div style="font-weight:600;">매핑된 상품이 없습니다.</div>
+    <div style="font-size:.85rem;margin-top:.4rem;">
+      <a href="/portal/price-monitor/mapping?plant={{ plant }}" style="color:var(--pm-blue);">매핑 등록</a>을 먼저 해주세요.
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
