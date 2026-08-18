@@ -1,6 +1,7 @@
 {% extends "pm_base.html" %}
 {% set active_page = "products" %}
 {% macro plant_url(p) %}/portal/price-monitor/products?plant={{ p }}{% if keyword %}&keyword={{ keyword }}{% endif %}{% if map_filter %}&map_filter={{ map_filter }}{% endif %}{% endmacro %}
+{% macro page_url(p) %}?plant={{ plant }}{% if keyword %}&keyword={{ keyword }}{% endif %}{% if map_filter %}&map_filter={{ map_filter }}{% endif %}&page={{ p }}{% endmacro %}
 
 {% block title %}운영상품 목록{% endblock %}
 {% block page_title %}운영상품 목록 &amp; 매핑 현황{% endblock %}
@@ -18,7 +19,10 @@
   </select>
   <button type="submit" class="pm-btn pm-btn-primary">검색</button>
   <a href="/portal/price-monitor/mapping?plant={{ plant }}" class="pm-btn pm-btn-success">🔗 매핑 등록</a>
-  <span style="margin-left:auto;font-size:.83rem;color:#64748b;">총 {{ total }}건</span>
+  <span style="margin-left:auto;font-size:.83rem;color:#64748b;">
+    총 {{ total }}건
+    {% if total_pages > 1 %} · {{ page }}/{{ total_pages }} 페이지{% endif %}
+  </span>
 </form>
 
 <div class="pm-card" style="padding:0;overflow:hidden;">
@@ -91,4 +95,26 @@
   </div>
   {% endif %}
 </div>
+
+{% if total_pages > 1 %}
+<div style="display:flex;align-items:center;justify-content:center;gap:.4rem;margin-top:1rem;flex-wrap:wrap;">
+  {% if page > 1 %}
+    <a href="{{ page_url(1) }}" class="pm-btn pm-btn-ghost pm-btn-sm">«</a>
+    <a href="{{ page_url(page - 1) }}" class="pm-btn pm-btn-ghost pm-btn-sm">‹ 이전</a>
+  {% endif %}
+  {% set start_p = [1, page - 2] | max %}
+  {% set end_p   = [total_pages, page + 2] | min %}
+  {% for p in range(start_p, end_p + 1) %}
+    {% if p == page %}
+      <span class="pm-btn pm-btn-primary pm-btn-sm" style="cursor:default;">{{ p }}</span>
+    {% else %}
+      <a href="{{ page_url(p) }}" class="pm-btn pm-btn-ghost pm-btn-sm">{{ p }}</a>
+    {% endif %}
+  {% endfor %}
+  {% if page < total_pages %}
+    <a href="{{ page_url(page + 1) }}" class="pm-btn pm-btn-ghost pm-btn-sm">다음 ›</a>
+    <a href="{{ page_url(total_pages) }}" class="pm-btn pm-btn-ghost pm-btn-sm">»</a>
+  {% endif %}
+</div>
+{% endif %}
 {% endblock %}
