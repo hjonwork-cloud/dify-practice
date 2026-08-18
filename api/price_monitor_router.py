@@ -360,7 +360,7 @@ async def api_debug(request: Request):
         result["zsdr_ok"] = False
         result["zsdr_error"] = str(e)
 
-    # 2. 자재마스터 테이블
+    # 2. 자재마스터 테이블 + 컬럼 확인 + JOIN 테스트
     try:
         rows = _q(f"SELECT COUNT(*) AS cnt FROM {T_ZMM60} LIMIT 1")
         result["zmm60_count"] = rows[0]["cnt"] if rows else 0
@@ -368,6 +368,29 @@ async def api_debug(request: Request):
     except Exception as e:
         result["zmm60_ok"] = False
         result["zmm60_error"] = str(e)
+
+    # 2-1. ZMM60 샘플 1건 (컬럼명 확인)
+    try:
+        rows = _q(f"SELECT * FROM {T_ZMM60} LIMIT 1")
+        result["zmm60_columns"] = list(rows[0].keys()) if rows else []
+        result["zmm60_sample"] = rows[0] if rows else {}
+    except Exception as e:
+        result["zmm60_columns_error"] = str(e)
+
+    # 2-2. 상품코드로 JOIN 테스트
+    try:
+        rows = _q(f"""
+            SELECT z.`상품코드`, m.`자재내역`, m.`기본단위`
+            FROM {T_ZSDR} z
+            LEFT JOIN {T_ZMM60} m ON z.`상품코드` = m.`상품코드`
+            WHERE z.`플랜트` = '4120'
+            LIMIT 3
+        """)
+        result["join_test_by_상품코드"] = rows
+        result["join_test_ok"] = True
+    except Exception as e:
+        result["join_test_ok"] = False
+        result["join_test_error"] = str(e)
 
     # 3. 플랫폼 상품 테이블 (크롤링 결과)
     try:
