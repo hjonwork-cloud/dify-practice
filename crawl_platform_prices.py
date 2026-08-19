@@ -135,15 +135,17 @@ def _num(v) -> str:
 
 
 def _batch_insert(conn, records: list[dict], today: str):
-    """100건씩 bulk VALUES INSERT (Databricks SQL 크기 한도 대응)"""
+    """100건씩 bulk VALUES INSERT (Databricks SQL 크기 한도 대응)
+    batch 실패 시 1건씩 재시도해서 문제 행만 건너뜀."""
     if not records:
         return
     BATCH = 100  # 500→100: 긴 상품명/이모지로 인한 SQL 크기 초과 방지
     total = 0
-    for i in range(0, len(records), BATCH):
-        chunk = records[i:i + BATCH]
+    skip_count = 0
+
+    def _insert_rows(rows):
         vals = []
-        for r in chunk:
+        for r in rows:
             vals.append(
                 f"({_esc(r['platform'])},{_esc(r['platform_seller_id'])},"
                 f"{_esc(r['platform_seller_name'])},{_esc(r['product_key'])},"
@@ -153,7 +155,7 @@ def _batch_insert(conn, records: list[dict], today: str):
                 f"{_esc(r['delivery_type'])},{'TRUE' if r['is_free_delivery'] else 'FALSE'},"
                 f"'{today}')"
             )
-        bulk_sql = (
+        sql = (
             f"INSERT INTO {T_SILVER} "
             "(platform,platform_seller_id,platform_seller_name,product_key,"
             "product_name,spec,price_original,price_sale,discount_rate,"
@@ -161,9 +163,26 @@ def _batch_insert(conn, records: list[dict], today: str):
             + ",\n".join(vals)
         )
         with conn.cursor() as cur:
-            cur.execute(bulk_sql)
-        total += len(chunk)
-        print(f"  INSERT {total}/{len(records)} 건 완료")
+            cur.execute(sql)
+
+    for i in range(0, len(records), BATCH):
+        chunk = records[i:i + BATCH]
+        try:
+            _insert_rows(chunk)
+            total += len(chunk)
+            print(f"  INSERT {total}/{len(records)} 건 완료")
+        except Exception as e:
+            print(f"  ⚠ 배치 INSERT 실패 ({len(chunk)}건), 1건씩 재시도: {e}")
+            for r in chunk:
+                try:
+                    _insert_rows([r])
+                    total += 1
+                except Exception as e2:
+                    skip_count += 1
+                    print(f"    ✗ 건너뜀: {r.get('product_name','')[:40]} / {e2}")
+            print(f"  INSERT {total}/{len(records)} 건 완료 (건너뜀 {skip_count}건)")
+    if skip_count:
+        print(f"  ⚠ 총 {skip_count}건 INSERT 실패로 건너뜀")
 
 
 # ── portal_db import (셀러 목록 DB 관리) ──────────────────────────────────
@@ -626,9 +645,24 @@ def main():
     parser.add_argument("--test",    action="store_true", help="셀러 1개, 1페이지만")
     parser.add_argument("--baemin",  action="store_true", help="배민상회만")
     parser.add_argument("--food",    action="store_true", help="식봄만")
+    parser.add_argument("--seller",  type=str, default="",
+                        help="특정 셀러만 재수집 (쉼표구분, 예: foodspring/1388,foodspring/5081)")
     parser.add_argument("--cleanup", action="store_true",
                         help="기존 배민 택배(NORMAL_DELIVERY/택배배송) 데이터 삭제만 실행")
     args = parser.parse_args()
+
+    # --seller 파싱: {"baemin": {"1234",...}, "foodspring": {"1388","5081"}}
+    seller_filter: dict[str, set] = {}
+    if args.seller:
+        for item in args.seller.split(","):
+            item = item.strip()
+            if "/" in item:
+                pf, sid = item.split("/", 1)
+                seller_filter.setdefault(pf.strip(), set()).add(sid.strip())
+            else:
+                # 플랫폼 없이 ID만 입력하면 식봄으로 간주
+                seller_filter.setdefault("foodspring", set()).add(item)
+        print(f"[셀러 필터] {seller_filter}")
 
     today = datetime.date.today().isoformat()
     print(f"{'='*60}")
@@ -663,20 +697,32 @@ def main():
         conn.close()
         return
 
-    # 오늘 날짜 기존 데이터 삭제
+    # 오늘 날짜 기존 데이터 삭제 (--seller 옵션 시 해당 셀러만 삭제)
     print(f"\n기존 {today} 데이터 삭제...")
-    if not args.food:
-        _exec(conn, f"DELETE FROM {T_SILVER} WHERE crawl_date='{today}' AND platform='baemin'")
-    if not args.baemin:
-        _exec(conn, f"DELETE FROM {T_SILVER} WHERE crawl_date='{today}' AND platform='foodspring'")
+    if seller_filter:
+        for pf, sids in seller_filter.items():
+            ids_str = ",".join(f"'{s}'" for s in sids)
+            _exec(conn, f"DELETE FROM {T_SILVER} WHERE crawl_date='{today}' AND platform='{pf}' AND platform_seller_id IN ({ids_str})")
+            print(f"  ✓ {pf} 셀러 {sids} 기존 데이터 삭제")
+    else:
+        if not args.food:
+            _exec(conn, f"DELETE FROM {T_SILVER} WHERE crawl_date='{today}' AND platform='baemin'")
+        if not args.baemin:
+            _exec(conn, f"DELETE FROM {T_SILVER} WHERE crawl_date='{today}' AND platform='foodspring'")
     print("  ✓ 삭제 완료")
 
     # 셀러별 크롤링 + 즉시 저장 (메모리에 쌓지 않음)
     total_saved = 0
     failed_sellers = []
 
-    if not args.food:
+    run_baemin = (not args.food) and (not seller_filter or "baemin" in seller_filter)
+    run_food   = (not args.baemin) and (not seller_filter or "foodspring" in seller_filter)
+
+    if run_baemin:
+        baemin_ids = seller_filter.get("baemin")
         for seller_id, records in _crawl_baemin_per_seller(test_mode=args.test):
+            if baemin_ids and seller_id not in baemin_ids:
+                continue
             if not records:
                 continue
             try:
@@ -687,8 +733,11 @@ def main():
                 print(f"  ✗ 배민 {seller_id} 저장 실패: {e}")
                 failed_sellers.append(f"baemin/{seller_id}")
 
-    if not args.baemin:
+    if run_food:
+        food_ids = seller_filter.get("foodspring")
         for seller_id, records in _crawl_food_per_seller(test_mode=args.test):
+            if food_ids and seller_id not in food_ids:
+                continue
             if not records:
                 continue
             try:
