@@ -89,7 +89,10 @@
             <a href="/portal/price-monitor/mapping?plant={{ plant }}&our_code={{ r.product_code }}"
                class="pm-btn pm-btn-primary pm-btn-sm">매핑</a>
             <button type="button" class="pm-btn pm-btn-ghost pm-btn-sm"
-                    onclick="openSuggest('{{ r.product_code }}','{{ r.product_name|replace("'","&#39;") }}','{{ plant }}')">
+                    data-code="{{ r.product_code|e }}"
+                    data-name="{{ r.product_name|e }}"
+                    data-plant="{{ plant|e }}"
+                    onclick="openSuggest(this)">
               💡 제안
             </button>
             {% if r.mapping_total > 0 %}
@@ -172,7 +175,10 @@
 let _smCode = '', _smDefaultPlant = '';
 const _smChecked = new Set();
 
-function openSuggest(code, name, plant) {
+function openSuggest(btn) {
+  const code  = btn.dataset.code;
+  const name  = btn.dataset.name;
+  const plant = btn.dataset.plant;
   _smCode = code;
   _smDefaultPlant = plant;
   _smChecked.clear();
