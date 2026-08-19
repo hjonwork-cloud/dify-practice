@@ -177,30 +177,63 @@
 <script>
 let _smCode = '', _smDefaultPlant = '';
 const _smChecked = new Set();
+const _smSelectedTokens = new Set();  // 선택된 키워드 토큰
 
 // 상품명 → 토큰 분리
 function _tokenize(name) {
-  // 괄호/슬래시/공백으로 분리, 빈 토큰/너무 짧은 토큰 제거
   return name
     .split(/[()\[\]\/,\s]+/)
     .map(t => t.trim())
     .filter(t => t.length >= 2)
-    .filter((t, i, a) => a.indexOf(t) === i);  // 중복 제거
+    .filter((t, i, a) => a.indexOf(t) === i);
+}
+
+// 선택된 토큰으로 검색창 값 업데이트
+function _syncKeywordFromTokens() {
+  const kw = document.getElementById('sm-keyword');
+  if (_smSelectedTokens.size === 0) {
+    kw.value = '';
+  } else {
+    const toks = [..._smSelectedTokens];
+    kw.value = '*' + toks.join('*') + '*';
+  }
+}
+
+// 토큰 버튼 스타일 갱신
+function _applyTokenStyle(btn, selected) {
+  if (selected) {
+    btn.style.background = '#2563eb';
+    btn.style.color      = '#fff';
+    btn.style.borderColor= '#2563eb';
+    btn.style.fontWeight = '700';
+  } else {
+    btn.style.background = '#eff6ff';
+    btn.style.color      = '#1d4ed8';
+    btn.style.borderColor= '#3b82f6';
+    btn.style.fontWeight = 'normal';
+  }
 }
 
 function _renderTokens(tokens) {
   const bar = document.getElementById('sm-token-bar');
   bar.innerHTML = '';
+  _smSelectedTokens.clear();
   tokens.forEach(tok => {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.textContent = tok;
+    btn.dataset.tok = tok;
     btn.style.cssText = 'padding:.25rem .65rem;border-radius:999px;border:1.5px solid #3b82f6;'
       + 'background:#eff6ff;color:#1d4ed8;font-size:.78rem;cursor:pointer;transition:all .15s;';
-    btn.onmouseover = () => { btn.style.background='#3b82f6'; btn.style.color='#fff'; };
-    btn.onmouseout  = () => { btn.style.background='#eff6ff'; btn.style.color='#1d4ed8'; };
     btn.onclick = () => {
-      document.getElementById('sm-keyword').value = tok;
+      if (_smSelectedTokens.has(tok)) {
+        _smSelectedTokens.delete(tok);
+        _applyTokenStyle(btn, false);
+      } else {
+        _smSelectedTokens.add(tok);
+        _applyTokenStyle(btn, true);
+      }
+      _syncKeywordFromTokens();
       searchSuggest();
     };
     bar.appendChild(btn);
@@ -214,14 +247,20 @@ function openSuggest(btn) {
   _smCode = code;
   _smDefaultPlant = plant;
   _smChecked.clear();
+  _smSelectedTokens.clear();
   document.getElementById('sm-title').textContent = name;
   document.getElementById('sm-code').textContent = code;
   document.getElementById('sm-plant').value = plant;
   // 키워드 토큰 렌더
   const tokens = _tokenize(name);
   _renderTokens(tokens);
-  // 첫 토큰으로 자동 검색
-  document.getElementById('sm-keyword').value = tokens[0] || name;
+  // 첫 토큰 자동 선택
+  if (tokens.length > 0) {
+    _smSelectedTokens.add(tokens[0]);
+    const firstBtn = document.querySelector('#sm-token-bar button');
+    if (firstBtn) _applyTokenStyle(firstBtn, true);
+    _syncKeywordFromTokens();
+  }
   document.getElementById('sm-results').innerHTML = '<div style="padding:2rem;text-align:center;color:#94a3b8;font-size:.88rem;">검색 중...</div>';
   updateMapBtn();
   document.getElementById('suggest-modal').style.display = 'flex';
@@ -229,6 +268,7 @@ function openSuggest(btn) {
 }
 
 function closeSuggest() {
+  _smSelectedTokens.clear();
   document.getElementById('suggest-modal').style.display = 'none';
 }
 
