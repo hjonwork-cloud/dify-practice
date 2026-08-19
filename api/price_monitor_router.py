@@ -628,7 +628,7 @@ async def api_mapping_add(request: Request):
 
     if not all([our_product_code, plant, product_key, platform]):
         return JSONResponse({"ok": False, "error": "필수값 누락"}, status_code=400)
-    if plant not in PLANTS:
+    if plant not in PLANTS and plant != "ALL":
         return JSONResponse({"ok": False, "error": "허용되지 않은 플랜트"}, status_code=400)
 
     mapping_id = portal_db.pm_add_mapping(

@@ -159,9 +159,9 @@
     </div>
     <div style="display:flex;align-items:center;gap:.75rem;font-size:.85rem;flex-wrap:wrap;">
       <label style="font-weight:600;">적용 플랜트:</label>
-      <select id="sm-plant" class="pm-input" style="width:130px;">
-        <option value="4120">4120 (수도권)</option>
-        <option value="4123">4123 (영남)</option>
+      <select id="sm-plant" class="pm-input" style="width:140px;">
+        <option value="4120">4120 (시화)</option>
+        <option value="4123">4123 (화성)</option>
         <option value="ALL">ALL (공유)</option>
       </select>
       <button id="sm-map-btn" class="pm-btn pm-btn-success" onclick="bulkMap()" disabled style="margin-left:auto;">
@@ -175,6 +175,35 @@
 let _smCode = '', _smDefaultPlant = '';
 const _smChecked = new Set();
 
+// 상품명 → 토큰 분리
+function _tokenize(name) {
+  // 괄호/슬래시/공백으로 분리, 빈 토큰/너무 짧은 토큰 제거
+  return name
+    .split(/[()\[\]\/,\s]+/)
+    .map(t => t.trim())
+    .filter(t => t.length >= 2)
+    .filter((t, i, a) => a.indexOf(t) === i);  // 중복 제거
+}
+
+function _renderTokens(tokens) {
+  const bar = document.getElementById('sm-token-bar');
+  bar.innerHTML = '';
+  tokens.forEach(tok => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = tok;
+    btn.style.cssText = 'padding:.25rem .65rem;border-radius:999px;border:1.5px solid #3b82f6;'
+      + 'background:#eff6ff;color:#1d4ed8;font-size:.78rem;cursor:pointer;transition:all .15s;';
+    btn.onmouseover = () => { btn.style.background='#3b82f6'; btn.style.color='#fff'; };
+    btn.onmouseout  = () => { btn.style.background='#eff6ff'; btn.style.color='#1d4ed8'; };
+    btn.onclick = () => {
+      document.getElementById('sm-keyword').value = tok;
+      searchSuggest();
+    };
+    bar.appendChild(btn);
+  });
+}
+
 function openSuggest(btn) {
   const code  = btn.dataset.code;
   const name  = btn.dataset.name;
@@ -185,9 +214,11 @@ function openSuggest(btn) {
   document.getElementById('sm-title').textContent = name;
   document.getElementById('sm-code').textContent = code;
   document.getElementById('sm-plant').value = plant;
-  // 자동 키워드: 숫자+단위 제거
-  const autoKw = name.replace(/\s*\d+\s*[gGkKmMlL개팩봉포]\w*\s*/g, ' ').replace(/\s+/g,'*').replace(/^\*|\*$/g,'').trim();
-  document.getElementById('sm-keyword').value = autoKw || name;
+  // 키워드 토큰 렌더
+  const tokens = _tokenize(name);
+  _renderTokens(tokens);
+  // 첫 토큰으로 자동 검색
+  document.getElementById('sm-keyword').value = tokens[0] || name;
   document.getElementById('sm-results').innerHTML = '<div style="padding:2rem;text-align:center;color:#94a3b8;font-size:.88rem;">검색 중...</div>';
   updateMapBtn();
   document.getElementById('suggest-modal').style.display = 'flex';
@@ -239,8 +270,14 @@ async function searchSuggest() {
     html += `<tr style="border-bottom:1px solid #f1f5f9;">
       <td style="padding:.3rem .5rem;text-align:center;">
         <input type="checkbox" class="sm-item-chk"
-               data-key="${esc(key)}" data-code="${esc(r.platform_product_code||'')}"
-               data-platform="${r.platform||''}" data-delivery="${r.delivery_type||''}"
+               data-key="${esc(key)}"
+               data-code="${esc(r.platform_product_code||'')}"
+               data-platform="${r.platform||''}"
+               data-delivery="${r.delivery_type||''}"
+               data-seller-id="${esc(r.platform_seller_id||r.seller_id||'')}"
+               data-product-id="${esc(r.platform_product_id||r.platform_product_code||'')}"
+               data-product-name="${esc(r.product_name||'')}"
+               data-seller-name="${esc(r.platform_seller_name||r.seller_name||'')}"
                onchange="toggleSm(this)" style="width:15px;height:15px;cursor:pointer;">
       </td>
       <td style="padding:.3rem .5rem;">${pfl}</td>
@@ -253,23 +290,32 @@ async function searchSuggest() {
   el.innerHTML = html;
 }
 
+function _cbPayload(cb) {
+  return JSON.stringify({
+    key:         cb.dataset.key,
+    code:        cb.dataset.code,
+    platform:    cb.dataset.platform,
+    delivery:    cb.dataset.delivery,
+    sellerId:    cb.dataset.sellerId,
+    productId:   cb.dataset.productId,
+    productName: cb.dataset.productName,
+    sellerName:  cb.dataset.sellerName,
+  });
+}
+
 function toggleAllSm(master) {
   document.querySelectorAll('.sm-item-chk').forEach(cb => {
     cb.checked = master.checked;
-    const key = cb.dataset.key;
-    const payload = JSON.stringify({key, code: cb.dataset.code, platform: cb.dataset.platform, delivery: cb.dataset.delivery});
-    if (master.checked) _smChecked.add(payload); else _smChecked.delete(payload);
+    const p = _cbPayload(cb);
+    if (master.checked) _smChecked.add(p); else _smChecked.delete(p);
   });
   updateMapBtn();
 }
 
 function toggleSm(cb) {
-  const payload = JSON.stringify({key: cb.dataset.key, code: cb.dataset.code, platform: cb.dataset.platform, delivery: cb.dataset.delivery});
-  if (cb.checked) _smChecked.add(payload);
-  else {
-    // key 기반 삭제
-    for (const s of _smChecked) { if (JSON.parse(s).key === cb.dataset.key) { _smChecked.delete(s); break; } }
-  }
+  const p = _cbPayload(cb);
+  if (cb.checked) { _smChecked.add(p); }
+  else { for (const s of _smChecked) { if (JSON.parse(s).key === cb.dataset.key) { _smChecked.delete(s); break; } } }
   updateMapBtn();
 }
 
@@ -280,17 +326,21 @@ async function bulkMap() {
   let ok = 0, fail = 0;
   for (const item of items) {
     try {
-      const r = await fetch('/portal/price-monitor/api/mapping/add', {
+      const resp = await fetch('/portal/price-monitor/api/mapping/add', {
         method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({
-          our_product_code: _smCode,
-          platform: item.platform,
-          platform_product_code: item.code,
-          delivery_type: item.delivery || null,
-          plant: plant,
+          our_product_code:      _smCode,
+          plant:                 plant,
+          product_key:           item.key,
+          platform:              item.platform,
+          platform_seller_id:    item.sellerId  || '',
+          platform_product_id:   item.productId || item.code || '',
+          product_name:          item.productName || '',
+          seller_name:           item.sellerName  || '',
         })
       });
-      if (r.ok) ok++; else fail++;
+      if (resp.ok) { const j = await resp.json(); if (j.ok) ok++; else fail++; }
+      else fail++;
     } catch { fail++; }
   }
   alert(`매핑 완료: ${ok}건 성공${fail ? ', ' + fail + '건 실패' : ''}`);
