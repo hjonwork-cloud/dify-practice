@@ -151,7 +151,7 @@ def _get_prev_month_sales(plant: str) -> dict[str, dict]:
         rows = _q(f"""
             SELECT
                 `자재`                                   AS product_code,
-                SUM(CAST(`매출액`   AS DOUBLE))          AS prev_sales_amt,
+                SUM(CAST(`매출액`   AS DOUBLE)) * 100    AS prev_sales_amt,
                 SUM(CAST(`매출수량` AS DOUBLE))          AS prev_sales_qty
             FROM {_main.T_MAIN}
             WHERE `플랜트` = '{plant}'
