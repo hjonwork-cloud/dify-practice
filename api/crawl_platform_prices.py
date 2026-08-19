@@ -19,8 +19,8 @@ except Exception:
 
 # ── Databricks 연결 설정 ──────────────────────────────────────────────────
 _THIS_DIR  = os.path.dirname(os.path.abspath(__file__))
-# api/ 안에 위치하므로 TOKEN_FILE은 같은 디렉토리에
-TOKEN_FILE = os.path.join(_THIS_DIR, ".token_cache")
+_API_DIR   = os.path.join(_THIS_DIR, "api")
+TOKEN_FILE = os.path.join(_API_DIR, ".token_cache")
 
 HOST      = "adb-707807361397497.17.azuredatabricks.net"
 HTTP_PATH = "/sql/1.0/warehouses/acc2ec933ffef2d0"
@@ -790,3 +790,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+#   s y n c   t e s t  
+ 
