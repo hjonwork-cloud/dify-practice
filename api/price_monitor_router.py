@@ -329,7 +329,7 @@ def _calc_gp(platform_price: float | None, buy_price: float | None,
         return None
     try:
         fee = _FEE_SINGSING if delivery_type == "싱싱배송" else _FEE_DIRECT
-        a = platform_price * (1.0 - fee)
+        a = platform_price * (1.0 - fee) / 1.1   # 수수료 차감 후 부가세(10%) 제외
         return round((a - buy_price) / a * 100, 1)
     except Exception:
         return None
