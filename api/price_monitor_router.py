@@ -194,7 +194,7 @@ def _get_our_products(plant: str) -> list[dict]:
                 MAX(m.`단위`)                                  AS unit,
                 MAX(m.`자재그룹명`)                            AS product_group,
                 MAX(m.`자재그룹`)                              AS material_group,
-                MAX(m.`자재계층1명`)                           AS category,
+                MAX(m.`대분류`)                                AS category,
                 z.`플랜트`                                      AS plant,
                 MAX(COALESCE(z.`사용보류`, ''))                AS use_hold
             FROM {T_ZSDR} z
@@ -231,7 +231,7 @@ def _get_our_products_with_batch(plant: str) -> list[dict]:
                 MAX(m.`단위`)                                  AS unit,
                 MAX(m.`자재그룹명`)                            AS product_group,
                 MAX(m.`자재그룹`)                              AS material_group,
-                MAX(m.`자재계층1명`)                           AS category,
+                MAX(m.`대분류`)                                AS category,
                 z.`플랜트`                                      AS plant,
                 MAX(COALESCE(z.`사용보류`, ''))                AS use_hold
             FROM {T_ZSDR} z
