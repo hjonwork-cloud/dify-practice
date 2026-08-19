@@ -282,7 +282,7 @@ function openSuggest(btn) {
   _smSelectedTokens.clear();
   document.getElementById('sm-title').textContent = name;
   document.getElementById('sm-code').textContent = code;
-  document.getElementById('sm-plant').value = plant;
+  document.getElementById('sm-plant').value = 'ALL';  // 기본값 항상 ALL
   // 키워드 토큰 렌더
   const tokens = _tokenize(name);
   _renderTokens(tokens);
