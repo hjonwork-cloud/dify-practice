@@ -1,7 +1,7 @@
 {% extends "pm_base.html" %}
 {% set active_page = "products" %}
-{% macro plant_url(p) %}/portal/price-monitor/products?plant={{ p }}{% if keyword %}&keyword={{ keyword }}{% endif %}{% if map_filter %}&map_filter={{ map_filter }}{% endif %}{% endmacro %}
-{% macro page_url(p) %}?plant={{ plant }}{% if keyword %}&keyword={{ keyword }}{% endif %}{% if map_filter %}&map_filter={{ map_filter }}{% endif %}&page={{ p }}{% endmacro %}
+{% macro plant_url(p) %}/portal/price-monitor/products?plant={{ p }}{% if keyword %}&keyword={{ keyword }}{% endif %}{% if map_filter %}&map_filter={{ map_filter }}{% endif %}{% if category %}&category={{ category }}{% endif %}{% endmacro %}
+{% macro page_url(p) %}?plant={{ plant }}{% if keyword %}&keyword={{ keyword }}{% endif %}{% if map_filter %}&map_filter={{ map_filter }}{% endif %}{% if category %}&category={{ category }}{% endif %}&page={{ p }}{% endmacro %}
 
 {% block title %}운영상품 목록{% endblock %}
 {% block page_title %}운영상품 목록 &amp; 매핑 현황{% endblock %}
@@ -12,11 +12,19 @@
   <input type="hidden" name="plant" value="{{ plant }}">
   <input type="text" name="keyword" value="{{ keyword }}" placeholder="상품코드/상품명 검색"
          class="pm-input" style="max-width:220px;">
-  <select name="map_filter" class="pm-input" style="width:140px;" onchange="this.form.submit()">
+  <select name="map_filter" class="pm-input" style="width:120px;" onchange="this.form.submit()">
     <option value="">전체</option>
     <option value="mapped"   {% if map_filter=='mapped'   %}selected{% endif %}>매핑됨</option>
     <option value="unmapped" {% if map_filter=='unmapped' %}selected{% endif %}>미매핑</option>
   </select>
+  {% if categories %}
+  <select name="category" class="pm-input" style="width:150px;" onchange="this.form.submit()">
+    <option value="">대분류 전체</option>
+    {% for cat in categories %}
+    <option value="{{ cat }}" {% if category == cat %}selected{% endif %}>{{ cat }}</option>
+    {% endfor %}
+  </select>
+  {% endif %}
   <button type="submit" class="pm-btn pm-btn-primary">검색</button>
   <a href="/portal/price-monitor/mapping?plant={{ plant }}" class="pm-btn pm-btn-success">🔗 매핑 등록</a>
   <span style="margin-left:auto;font-size:.83rem;color:#64748b;">
@@ -38,6 +46,7 @@
           <th>단위</th>
           <th>플랜트</th>
           <th>운영여부</th>
+          <th>대분류</th>
           <th>배민상회</th>
           <th>식봄</th>
           <th></th>
@@ -54,6 +63,7 @@
           <td style="font-size:.8rem;color:#475569;">{{ r.brand or '-' }}</td>
           <td style="font-size:.8rem;">{{ r.unit or '-' }}</td>
           <td><span class="badge badge-blue">{{ r.plant }}</span></td>
+          <td style="font-size:.78rem;color:#64748b;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ r.category or '' }}">{{ r.category or '-' }}</td>
           <td>
             {% if r.is_stopped %}
               <span class="badge badge-alert">운영중단</span>
@@ -78,6 +88,10 @@
           <td style="white-space:nowrap;">
             <a href="/portal/price-monitor/mapping?plant={{ plant }}&our_code={{ r.product_code }}"
                class="pm-btn pm-btn-primary pm-btn-sm">매핑</a>
+            <button type="button" class="pm-btn pm-btn-ghost pm-btn-sm"
+                    onclick="openSuggest('{{ r.product_code }}','{{ r.product_name|replace("'","&#39;") }}','{{ plant }}')">
+              💡 제안
+            </button>
             {% if r.mapping_total > 0 %}
             <a href="/portal/price-monitor/history/{{ r.product_code }}?plant={{ plant }}"
                class="pm-btn pm-btn-ghost pm-btn-sm">이력</a>
@@ -117,4 +131,169 @@
   {% endif %}
 </div>
 {% endif %}
+
+<!-- 5-C: 자동제안 모달 -->
+<div id="suggest-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9000;align-items:center;justify-content:center;">
+  <div style="background:#fff;border-radius:12px;padding:1.5rem;width:min(700px,96vw);max-height:88vh;display:flex;flex-direction:column;gap:1rem;box-shadow:0 20px 60px rgba(0,0,0,.25);">
+    <div style="display:flex;align-items:center;gap:.75rem;">
+      <div>
+        <div style="font-weight:700;font-size:1rem;" id="sm-title">자동제안</div>
+        <div style="font-size:.8rem;color:#64748b;" id="sm-code"></div>
+      </div>
+      <button onclick="closeSuggest()" style="margin-left:auto;background:none;border:none;font-size:1.4rem;cursor:pointer;color:#94a3b8;">✕</button>
+    </div>
+    <div style="display:flex;gap:.5rem;">
+      <input type="text" id="sm-keyword" placeholder="*삼겹* 형태 와일드카드 검색 가능" class="pm-input" style="flex:1;">
+      <select id="sm-platform" class="pm-input" style="width:130px;">
+        <option value="">전체 플랫폼</option>
+        <option value="baemin">배민상회</option>
+        <option value="foodspring">식봄</option>
+      </select>
+      <button class="pm-btn pm-btn-primary" onclick="searchSuggest()">검색</button>
+    </div>
+    <div id="sm-results" style="overflow-y:auto;flex:1;border:1px solid #e2e8f0;border-radius:8px;min-height:220px;max-height:380px;">
+      <div style="padding:2rem;text-align:center;color:#94a3b8;font-size:.88rem;">검색어를 입력하거나 위 버튼을 누르세요</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:.75rem;font-size:.85rem;flex-wrap:wrap;">
+      <label style="font-weight:600;">적용 플랜트:</label>
+      <select id="sm-plant" class="pm-input" style="width:130px;">
+        <option value="4120">4120 (수도권)</option>
+        <option value="4123">4123 (영남)</option>
+        <option value="ALL">ALL (공유)</option>
+      </select>
+      <button id="sm-map-btn" class="pm-btn pm-btn-success" onclick="bulkMap()" disabled style="margin-left:auto;">
+        선택한 0건 매핑
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+let _smCode = '', _smDefaultPlant = '';
+const _smChecked = new Set();
+
+function openSuggest(code, name, plant) {
+  _smCode = code;
+  _smDefaultPlant = plant;
+  _smChecked.clear();
+  document.getElementById('sm-title').textContent = name;
+  document.getElementById('sm-code').textContent = code;
+  document.getElementById('sm-plant').value = plant;
+  // 자동 키워드: 숫자+단위 제거
+  const autoKw = name.replace(/\s*\d+\s*[gGkKmMlL개팩봉포]\w*\s*/g, ' ').replace(/\s+/g,'*').replace(/^\*|\*$/g,'').trim();
+  document.getElementById('sm-keyword').value = autoKw || name;
+  document.getElementById('sm-results').innerHTML = '<div style="padding:2rem;text-align:center;color:#94a3b8;font-size:.88rem;">검색 중...</div>';
+  updateMapBtn();
+  document.getElementById('suggest-modal').style.display = 'flex';
+  searchSuggest();
+}
+
+function closeSuggest() {
+  document.getElementById('suggest-modal').style.display = 'none';
+}
+
+function updateMapBtn() {
+  const btn = document.getElementById('sm-map-btn');
+  const n = _smChecked.size;
+  btn.textContent = `선택한 ${n}건 매핑`;
+  btn.disabled = n === 0;
+}
+
+async function searchSuggest() {
+  const kw = document.getElementById('sm-keyword').value.trim();
+  const pf = document.getElementById('sm-platform').value;
+  if (!kw) return;
+  const el = document.getElementById('sm-results');
+  el.innerHTML = '<div style="padding:2rem;text-align:center;color:#94a3b8;">검색 중...</div>';
+  _smChecked.clear(); updateMapBtn();
+  const qs = new URLSearchParams({keyword: kw});
+  if (pf) qs.set('platform', pf);
+  const resp = await fetch(`/portal/price-monitor/api/platform-products?${qs}`);
+  const json = await resp.json();
+  const rows = json.data || [];
+  if (!rows.length) {
+    el.innerHTML = '<div style="padding:2rem;text-align:center;color:#94a3b8;">결과 없음 — 다른 키워드를 시도해보세요</div>';
+    return;
+  }
+  let html = `<table style="width:100%;border-collapse:collapse;font-size:.82rem;">
+    <thead><tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0;position:sticky;top:0;">
+      <th style="padding:.4rem .5rem;width:32px;"><input type="checkbox" id="sm-chk-all" onchange="toggleAllSm(this)" style="cursor:pointer;"></th>
+      <th style="padding:.4rem .5rem;">플랫폼</th>
+      <th style="padding:.4rem .5rem;text-align:left;">상품명</th>
+      <th style="padding:.4rem .5rem;text-align:right;">판매가</th>
+      <th style="padding:.4rem .5rem;text-align:left;">셀러</th>
+    </tr></thead><tbody>`;
+  rows.forEach(r => {
+    const key = r.product_key || `${r.platform}::${r.platform_product_code}`;
+    const pfl = r.platform === 'baemin'
+      ? '<span class="badge badge-baemin" style="font-size:.72rem;">배민</span>'
+      : '<span class="badge badge-foodspring" style="font-size:.72rem;">식봄</span>';
+    const price = r.price_sale ? Number(r.price_sale).toLocaleString() + '원' : '-';
+    const esc = v => (v||'').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+    html += `<tr style="border-bottom:1px solid #f1f5f9;">
+      <td style="padding:.3rem .5rem;text-align:center;">
+        <input type="checkbox" class="sm-item-chk"
+               data-key="${esc(key)}" data-code="${esc(r.platform_product_code||'')}"
+               data-platform="${r.platform||''}" data-delivery="${r.delivery_type||''}"
+               onchange="toggleSm(this)" style="width:15px;height:15px;cursor:pointer;">
+      </td>
+      <td style="padding:.3rem .5rem;">${pfl}</td>
+      <td style="padding:.3rem .5rem;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${esc(r.product_name)}">${r.product_name||'-'}</td>
+      <td style="padding:.3rem .5rem;text-align:right;font-weight:600;">${price}</td>
+      <td style="padding:.3rem .5rem;color:#64748b;max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${r.platform_seller_name||'-'}</td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  el.innerHTML = html;
+}
+
+function toggleAllSm(master) {
+  document.querySelectorAll('.sm-item-chk').forEach(cb => {
+    cb.checked = master.checked;
+    const key = cb.dataset.key;
+    const payload = JSON.stringify({key, code: cb.dataset.code, platform: cb.dataset.platform, delivery: cb.dataset.delivery});
+    if (master.checked) _smChecked.add(payload); else _smChecked.delete(payload);
+  });
+  updateMapBtn();
+}
+
+function toggleSm(cb) {
+  const payload = JSON.stringify({key: cb.dataset.key, code: cb.dataset.code, platform: cb.dataset.platform, delivery: cb.dataset.delivery});
+  if (cb.checked) _smChecked.add(payload);
+  else {
+    // key 기반 삭제
+    for (const s of _smChecked) { if (JSON.parse(s).key === cb.dataset.key) { _smChecked.delete(s); break; } }
+  }
+  updateMapBtn();
+}
+
+async function bulkMap() {
+  if (!_smChecked.size) return;
+  const plant = document.getElementById('sm-plant').value;
+  const items = [..._smChecked].map(s => JSON.parse(s));
+  let ok = 0, fail = 0;
+  for (const item of items) {
+    try {
+      const r = await fetch('/portal/price-monitor/api/mapping/add', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          our_product_code: _smCode,
+          platform: item.platform,
+          platform_product_code: item.code,
+          delivery_type: item.delivery || null,
+          plant: plant,
+        })
+      });
+      if (r.ok) ok++; else fail++;
+    } catch { fail++; }
+  }
+  alert(`매핑 완료: ${ok}건 성공${fail ? ', ' + fail + '건 실패' : ''}`);
+  closeSuggest();
+  location.reload();
+}
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSuggest(); });
+document.getElementById('sm-keyword').addEventListener('keydown', e => { if (e.key === 'Enter') searchSuggest(); });
+</script>
+
 {% endblock %}

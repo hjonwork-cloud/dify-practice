@@ -114,11 +114,11 @@ def _get_base_prices(plant: str) -> list[dict]:
                 `자재`                                                        AS product_code,
                 ROUND(
                     SUM(CAST(`매출액` AS DOUBLE)) /
-                    NULLIF(SUM(CAST(`매출수량` AS DOUBLE)), 0)
+                    NULLIF(SUM(CAST(`매출수량` AS DOUBLE)), 0) * 100
                 , 2)                                                          AS avg_sale_price,
                 ROUND(
                     SUM(CAST(`매출원가` AS DOUBLE)) /
-                    NULLIF(SUM(CAST(`매출수량` AS DOUBLE)), 0)
+                    NULLIF(SUM(CAST(`매출수량` AS DOUBLE)), 0) * 100
                 , 2)                                                          AS avg_buy_price
             FROM {_main.T_MAIN}
             WHERE `플랜트` = '{plant}'
@@ -163,6 +163,19 @@ def _preload_products_background():
 _preload_products_background()
 
 
+def _build_like_clause(keyword: str, col: str) -> str:
+    """와일드카드(*) 검색: *토큰* → LIKE '%토큰%' AND LIKE '%토큰2%'"""
+    if '*' in keyword:
+        tokens = [t for t in keyword.split('*') if t.strip()]
+        if not tokens:
+            return "1=1"
+        conditions = [f"{col} LIKE '%{t.replace(chr(39), chr(39)*2)}%'" for t in tokens]
+        return ' AND '.join(conditions)
+    else:
+        safe = keyword.replace("'", "''")
+        return f"{col} LIKE '%{safe}%'"
+
+
 def _get_our_products(plant: str) -> list[dict]:
     """매핑 등록용: 상품코드당 1건 (배치 무시, GROUP BY 상품코드)"""
     cache_key = f"products_{plant}"
@@ -181,6 +194,7 @@ def _get_our_products(plant: str) -> list[dict]:
                 MAX(m.`단위`)                                  AS unit,
                 MAX(m.`자재그룹명`)                            AS product_group,
                 MAX(m.`자재그룹`)                              AS material_group,
+                MAX(m.`자재계층1명`)                           AS category,
                 z.`플랜트`                                      AS plant,
                 MAX(COALESCE(z.`사용보류`, ''))                AS use_hold
             FROM {T_ZSDR} z
@@ -217,6 +231,7 @@ def _get_our_products_with_batch(plant: str) -> list[dict]:
                 MAX(m.`단위`)                                  AS unit,
                 MAX(m.`자재그룹명`)                            AS product_group,
                 MAX(m.`자재그룹`)                              AS material_group,
+                MAX(m.`자재계층1명`)                           AS category,
                 z.`플랜트`                                      AS plant,
                 MAX(COALESCE(z.`사용보류`, ''))                AS use_hold
             FROM {T_ZSDR} z
@@ -385,12 +400,13 @@ async def pm_products(
     plant: str = "4120",
     keyword: str = "",
     map_filter: str = "",  # "mapped" | "unmapped" | ""
+    category: str = "",   # 5-A: 대분류 필터
     page: int = 1,
 ):
     _require_pm_access(request)
     if plant not in PLANTS:
         plant = "4120"
-    PAGE_SIZE = 100
+    PAGE_SIZE = 20  # 5-A: 페이지당 20건
 
     products = _get_our_products_with_batch(plant)
     all_mappings = portal_db.pm_list_all_mappings(plant)
@@ -403,11 +419,25 @@ async def pm_products(
         mapping_count[c][m["platform"]] = mapping_count[c].get(m["platform"], 0) + 1
         mapping_count[c]["total"] += 1
 
+    # 대분류 목록 수집 (5-A)
+    categories = sorted(set(p.get("category") or "" for p in products if p.get("category")))
+
     all_rows = []
     for p in products:
         code = p["product_code"]
-        if keyword and keyword.lower() not in (p.get("product_name") or "").lower() \
-                   and keyword not in code:
+        # 5-B: 와일드카드 검색 (Python-side, cache된 목록에서 필터)
+        if keyword:
+            name = (p.get("product_name") or "").lower()
+            if '*' in keyword:
+                tokens = [t.lower() for t in keyword.split('*') if t.strip()]
+                if not all(t in name or t in code.lower() for t in tokens):
+                    continue
+            else:
+                kw = keyword.lower()
+                if kw not in name and kw not in code.lower():
+                    continue
+        # 5-A: 대분류 필터
+        if category and (p.get("category") or "") != category:
             continue
         mc = mapping_count.get(code, {"baemin": 0, "foodspring": 0, "total": 0})
         if map_filter == "mapped" and mc["total"] == 0:
@@ -430,6 +460,7 @@ async def pm_products(
     return _render(request, "pm_products.html",
                    rows=rows, plant=plant, plants=PLANTS,
                    keyword=keyword, map_filter=map_filter,
+                   category=category, categories=categories,
                    total=total, page=page, total_pages=total_pages,
                    page_size=PAGE_SIZE)
 
@@ -530,12 +561,20 @@ async def api_our_products(request: Request, plant: str = "4120", keyword: str =
     except Exception as e:
         error_msg = str(e)
         products = []
-    kw = keyword.lower()
-    if kw and products:
-        products = [
-            p for p in products
-            if kw in (p.get("product_name") or "").lower() or kw in (p.get("product_code") or "")
-        ]
+    if keyword and products:
+        if '*' in keyword:
+            tokens = [t.lower() for t in keyword.split('*') if t.strip()]
+            products = [
+                p for p in products
+                if all(t in (p.get("product_name") or "").lower() or t in (p.get("product_code") or "").lower()
+                       for t in tokens)
+            ]
+        else:
+            kw = keyword.lower()
+            products = [
+                p for p in products
+                if kw in (p.get("product_name") or "").lower() or kw in (p.get("product_code") or "")
+            ]
     return JSONResponse({"data": products[:100], "error": error_msg, "total_before_filter": len(products)})
 
 
@@ -553,12 +592,12 @@ async def api_platform_products(
     error_msg = None
     rows = []
     try:
-        safe_kw = keyword.replace("'", "''")
+        like_clause = _build_like_clause(keyword, 'p.product_name')
         rows = _q(f"""
             SELECT p.*
             FROM {T_SILVER} p
             CROSS JOIN (SELECT MAX(crawl_date) AS max_date FROM {T_SILVER}) latest
-            WHERE p.product_name LIKE '%{safe_kw}%' AND p.crawl_date = latest.max_date
+            WHERE ({like_clause}) AND p.crawl_date = latest.max_date
             ORDER BY platform, platform_seller_name, price_sale
             LIMIT 500
         """) or []
