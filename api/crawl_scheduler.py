@@ -17,8 +17,22 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# crawl_platform_prices.py 위치 (api/ 의 상위 폴더)
-_CRAWL_SCRIPT = str(Path(__file__).parent.parent / "crawl_platform_prices.py")
+# crawl_platform_prices.py 위치 탐색
+# Azure App Service: /home/site/wwwroot/crawl_platform_prices.py
+# 로컬: crawl_scheduler.py 기준 상위 폴더
+def _find_crawl_script() -> str:
+    candidates = [
+        Path("/home/site/wwwroot/crawl_platform_prices.py"),          # Azure App Service
+        Path(__file__).parent.parent / "crawl_platform_prices.py",    # 로컬 (api/../)
+        Path(os.getcwd()) / "crawl_platform_prices.py",               # cwd 기준
+    ]
+    for p in candidates:
+        if p.exists():
+            return str(p)
+    # 못 찾으면 Azure 경로를 기본값으로 (에러 메시지가 명확하게 남도록)
+    return str(candidates[0])
+
+_CRAWL_SCRIPT = _find_crawl_script()
 _PYTHON       = sys.executable
 
 _scheduler = None
@@ -128,6 +142,8 @@ def start():
     with _scheduler_lock:
         if _scheduler is not None:
             return
+
+        logger.info(f"[scheduler] crawl script 경로: {_CRAWL_SCRIPT} (존재여부: {Path(_CRAWL_SCRIPT).exists()})")
 
         try:
             from apscheduler.schedulers.background import BackgroundScheduler
