@@ -135,6 +135,39 @@ def _get_base_prices(plant: str) -> list[dict]:
         return []
 
 
+# ── 전월 매출 캐시 (1시간) ───────────────────────────────────────────────────
+_prev_sales_cache: dict[str, tuple[float, list]] = {}
+
+
+def _get_prev_month_sales(plant: str) -> dict[str, dict]:
+    """전월(1개월 전) 상품별 매출액·수량 합계 반환 (product_code → dict)"""
+    cache_key = f"prev_sales_{plant}"
+    if cache_key in _prev_sales_cache:
+        ts, data = _prev_sales_cache[cache_key]
+        if time.time() - ts < 3600:
+            return data
+    try:
+        import main as _main
+        rows = _q(f"""
+            SELECT
+                `자재`                                   AS product_code,
+                SUM(CAST(`매출액`   AS DOUBLE))          AS prev_sales_amt,
+                SUM(CAST(`매출수량` AS DOUBLE))          AS prev_sales_qty
+            FROM {_main.T_MAIN}
+            WHERE `플랜트` = '{plant}'
+              AND CAST(`년월` AS INT) = CAST(DATE_FORMAT(ADD_MONTHS(CURRENT_DATE(), -1), 'yyyyMM') AS INT)
+              AND `자재` IS NOT NULL
+              AND `매출수량` > 0
+            GROUP BY `자재`
+        """)
+        result = {r["product_code"]: r for r in (rows or [])}
+        _prev_sales_cache[cache_key] = (time.time(), result)
+        return result
+    except Exception as e:
+        logger.warning(f"[price_monitor] prev_month_sales 조회 실패 ({plant}): {e}")
+        return {}
+
+
 # ── 운영상품 목록 캐시 (1시간) ─────────────────────────────────────────────
 _product_cache: dict[str, tuple[float, list]] = {}
 _PRODUCT_CACHE_TTL = 3600  # 1시간
@@ -399,17 +432,21 @@ async def pm_products(
     request: Request,
     plant: str = "4120",
     keyword: str = "",
-    map_filter: str = "",  # "mapped" | "unmapped" | ""
-    category: str = "",   # 5-A: 대분류 필터
+    map_filter: str = "",       # "mapped" | "unmapped" | ""
+    category: str = "",         # 대분류 필터
+    status_filter: str = "",    # "active" | "stopped" | ""
+    sort: str = "sales_desc",   # "sales_desc" | "qty_desc" | ""
     page: int = 1,
 ):
     _require_pm_access(request)
     if plant not in PLANTS:
         plant = "4120"
-    PAGE_SIZE = 20  # 5-A: 페이지당 20건
+    PAGE_SIZE = 20
 
-    products = _get_our_products_with_batch(plant)
+    products    = _get_our_products_with_batch(plant)
+    prev_sales  = _get_prev_month_sales(plant)   # dict[product_code → {prev_sales_amt, prev_sales_qty}]
     all_mappings = portal_db.pm_list_all_mappings(plant)
+
     # 상품코드별 매핑 수 집계
     mapping_count: dict[str, dict] = {}
     for m in all_mappings:
@@ -419,13 +456,15 @@ async def pm_products(
         mapping_count[c][m["platform"]] = mapping_count[c].get(m["platform"], 0) + 1
         mapping_count[c]["total"] += 1
 
-    # 대분류 목록 수집 (5-A)
+    # 대분류 목록
     categories = sorted(set(p.get("category") or "" for p in products if p.get("category")))
 
     all_rows = []
     for p in products:
         code = p["product_code"]
-        # 5-B: 와일드카드 검색 (Python-side, cache된 목록에서 필터)
+        is_stopped = p.get("use_hold") == "X"
+
+        # 키워드 필터
         if keyword:
             name = (p.get("product_name") or "").lower()
             if '*' in keyword:
@@ -436,21 +475,37 @@ async def pm_products(
                 kw = keyword.lower()
                 if kw not in name and kw not in code.lower():
                     continue
-        # 5-A: 대분류 필터
+        # 대분류 필터
         if category and (p.get("category") or "") != category:
             continue
+        # 운영여부 필터
+        if status_filter == "active" and is_stopped:
+            continue
+        if status_filter == "stopped" and not is_stopped:
+            continue
+        # 매핑 필터
         mc = mapping_count.get(code, {"baemin": 0, "foodspring": 0, "total": 0})
         if map_filter == "mapped" and mc["total"] == 0:
             continue
         if map_filter == "unmapped" and mc["total"] > 0:
             continue
+
+        ps = prev_sales.get(code, {})
         all_rows.append({
             **p,
-            "mapping_baemin":    mc["baemin"],
+            "mapping_baemin":     mc["baemin"],
             "mapping_foodspring": mc["foodspring"],
-            "mapping_total":     mc["total"],
-            "is_stopped":        p.get("use_hold") == "X",
+            "mapping_total":      mc["total"],
+            "is_stopped":         is_stopped,
+            "prev_sales_amt":     ps.get("prev_sales_amt"),
+            "prev_sales_qty":     ps.get("prev_sales_qty"),
         })
+
+    # 정렬
+    if sort == "qty_desc":
+        all_rows.sort(key=lambda r: (r["prev_sales_qty"] or 0), reverse=True)
+    else:  # sales_desc (기본)
+        all_rows.sort(key=lambda r: (r["prev_sales_amt"] or 0), reverse=True)
 
     total = len(all_rows)
     total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
@@ -461,6 +516,7 @@ async def pm_products(
                    rows=rows, plant=plant, plants=PLANTS,
                    keyword=keyword, map_filter=map_filter,
                    category=category, categories=categories,
+                   status_filter=status_filter, sort=sort,
                    total=total, page=page, total_pages=total_pages,
                    page_size=PAGE_SIZE)
 

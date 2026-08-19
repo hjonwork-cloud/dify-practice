@@ -1,7 +1,7 @@
 {% extends "pm_base.html" %}
 {% set active_page = "products" %}
-{% macro plant_url(p) %}/portal/price-monitor/products?plant={{ p }}{% if keyword %}&keyword={{ keyword }}{% endif %}{% if map_filter %}&map_filter={{ map_filter }}{% endif %}{% if category %}&category={{ category }}{% endif %}{% endmacro %}
-{% macro page_url(p) %}?plant={{ plant }}{% if keyword %}&keyword={{ keyword }}{% endif %}{% if map_filter %}&map_filter={{ map_filter }}{% endif %}{% if category %}&category={{ category }}{% endif %}&page={{ p }}{% endmacro %}
+{% macro plant_url(p) %}/portal/price-monitor/products?plant={{ p }}{% if keyword %}&keyword={{ keyword }}{% endif %}{% if map_filter %}&map_filter={{ map_filter }}{% endif %}{% if category %}&category={{ category }}{% endif %}{% if status_filter %}&status_filter={{ status_filter }}{% endif %}&sort={{ sort }}{% endmacro %}
+{% macro page_url(p) %}?plant={{ plant }}{% if keyword %}&keyword={{ keyword }}{% endif %}{% if map_filter %}&map_filter={{ map_filter }}{% endif %}{% if category %}&category={{ category }}{% endif %}{% if status_filter %}&status_filter={{ status_filter }}{% endif %}&sort={{ sort }}&page={{ p }}{% endmacro %}
 
 {% block title %}운영상품 목록{% endblock %}
 {% block page_title %}운영상품 목록 &amp; 매핑 현황{% endblock %}
@@ -10,15 +10,21 @@
 <!-- 필터 -->
 <form method="get" class="pm-filterbar">
   <input type="hidden" name="plant" value="{{ plant }}">
+  <input type="hidden" name="sort"  value="{{ sort }}">
   <input type="text" name="keyword" value="{{ keyword }}" placeholder="상품코드/상품명 검색"
          class="pm-input" style="max-width:220px;">
-  <select name="map_filter" class="pm-input" style="width:120px;" onchange="this.form.submit()">
+  <select name="map_filter" class="pm-input" style="width:110px;" onchange="this.form.submit()">
     <option value="">전체</option>
-    <option value="mapped"   {% if map_filter=='mapped'   %}selected{% endif %}>매핑됨</option>
-    <option value="unmapped" {% if map_filter=='unmapped' %}selected{% endif %}>미매핑</option>
+    <option value="mapped"   {% if map_filter=='mapped'   %}selected{% endif %}>✅ 매핑됨</option>
+    <option value="unmapped" {% if map_filter=='unmapped' %}selected{% endif %}>❌ 미매핑</option>
+  </select>
+  <select name="status_filter" class="pm-input" style="width:110px;" onchange="this.form.submit()">
+    <option value="">운영여부 전체</option>
+    <option value="active"  {% if status_filter=='active'  %}selected{% endif %}>● 운영중</option>
+    <option value="stopped" {% if status_filter=='stopped' %}selected{% endif %}>○ 운영중단</option>
   </select>
   {% if categories %}
-  <select name="category" class="pm-input" style="width:150px;" onchange="this.form.submit()">
+  <select name="category" class="pm-input" style="width:130px;" onchange="this.form.submit()">
     <option value="">대분류 전체</option>
     {% for cat in categories %}
     <option value="{{ cat }}" {% if category == cat %}selected{% endif %}>{{ cat }}</option>
@@ -26,7 +32,11 @@
   </select>
   {% endif %}
   <button type="submit" class="pm-btn pm-btn-primary">검색</button>
-  <a href="/portal/price-monitor/mapping?plant={{ plant }}" class="pm-btn pm-btn-success">🔗 매핑 등록</a>
+  <!-- 정렬 버튼 -->
+  <a href="?plant={{ plant }}{% if keyword %}&keyword={{ keyword }}{% endif %}{% if map_filter %}&map_filter={{ map_filter }}{% endif %}{% if category %}&category={{ category }}{% endif %}{% if status_filter %}&status_filter={{ status_filter }}{% endif %}&sort=sales_desc"
+     class="pm-btn {% if sort=='sales_desc' %}pm-btn-primary{% else %}pm-btn-ghost{% endif %} pm-btn-sm">↓ 매출액</a>
+  <a href="?plant={{ plant }}{% if keyword %}&keyword={{ keyword }}{% endif %}{% if map_filter %}&map_filter={{ map_filter }}{% endif %}{% if category %}&category={{ category }}{% endif %}{% if status_filter %}&status_filter={{ status_filter }}{% endif %}&sort=qty_desc"
+     class="pm-btn {% if sort=='qty_desc' %}pm-btn-primary{% else %}pm-btn-ghost{% endif %} pm-btn-sm">↓ 수량</a>
   <span style="margin-left:auto;font-size:.83rem;color:#64748b;">
     총 {{ total }}건
     {% if total_pages > 1 %} · {{ page }}/{{ total_pages }} 페이지{% endif %}
@@ -42,12 +52,13 @@
           <th>상품코드</th>
           <th>배치</th>
           <th>상품명</th>
-          <th>브랜드</th>
           <th>단위</th>
           <th>플랜트</th>
-          <th>운영여부</th>
           <th>대분류</th>
-          <th>배민상회</th>
+          <th>운영여부</th>
+          <th style="text-align:right;cursor:pointer;" onclick="location.href='?plant={{ plant }}{% if keyword %}&keyword={{ keyword }}{% endif %}{% if map_filter %}&map_filter={{ map_filter }}{% endif %}{% if category %}&category={{ category }}{% endif %}{% if status_filter %}&status_filter={{ status_filter }}{% endif %}&sort=sales_desc'">전월매출{% if sort=='sales_desc' %} ↓{% endif %}</th>
+          <th style="text-align:right;cursor:pointer;" onclick="location.href='?plant={{ plant }}{% if keyword %}&keyword={{ keyword }}{% endif %}{% if map_filter %}&map_filter={{ map_filter }}{% endif %}{% if category %}&category={{ category }}{% endif %}{% if status_filter %}&status_filter={{ status_filter }}{% endif %}&sort=qty_desc'">전월수량{% if sort=='qty_desc' %} ↓{% endif %}</th>
+          <th>배민</th>
           <th>식봄</th>
           <th></th>
         </tr>
@@ -60,16 +71,25 @@
           <td style="font-weight:600;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ r.product_name }}">
             {{ r.product_name or '-' }}
           </td>
-          <td style="font-size:.8rem;color:#475569;">{{ r.brand or '-' }}</td>
           <td style="font-size:.8rem;">{{ r.unit or '-' }}</td>
           <td><span class="badge badge-blue">{{ r.plant }}</span></td>
-          <td style="font-size:.78rem;color:#64748b;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ r.category or '' }}">{{ r.category or '-' }}</td>
+          <td style="font-size:.78rem;color:#64748b;max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ r.category or '' }}">{{ r.category or '-' }}</td>
           <td>
             {% if r.is_stopped %}
               <span class="badge badge-alert">운영중단</span>
             {% else %}
               <span class="badge badge-ok">운영중</span>
             {% endif %}
+          </td>
+          <td style="text-align:right;font-size:.82rem;">
+            {% if r.prev_sales_amt %}
+              {{ '{:,.0f}'.format(r.prev_sales_amt) }}원
+            {% else %}-{% endif %}
+          </td>
+          <td style="text-align:right;font-size:.82rem;">
+            {% if r.prev_sales_qty %}
+              {{ '{:,.0f}'.format(r.prev_sales_qty) }}
+            {% else %}-{% endif %}
           </td>
           <td style="text-align:center;">
             {% if r.mapping_baemin > 0 %}
@@ -87,14 +107,12 @@
           </td>
           <td style="white-space:nowrap;">
             <a href="/portal/price-monitor/mapping?plant={{ plant }}&our_code={{ r.product_code }}"
-               class="pm-btn pm-btn-primary pm-btn-sm">매핑</a>
-            <button type="button" class="pm-btn pm-btn-ghost pm-btn-sm"
+               class="pm-btn pm-btn-ghost pm-btn-sm" title="매핑 등록">→</a>
+            <button type="button" class="pm-btn pm-btn-primary pm-btn-sm"
                     data-code="{{ r.product_code|e }}"
                     data-name="{{ r.product_name|e }}"
                     data-plant="{{ plant|e }}"
-                    onclick="openSuggest(this)">
-              💡 제안
-            </button>
+                    onclick="openSuggest(this)">매핑</button>
             {% if r.mapping_total > 0 %}
             <a href="/portal/price-monitor/history/{{ r.product_code }}?plant={{ plant }}"
                class="pm-btn pm-btn-ghost pm-btn-sm">이력</a>
@@ -163,9 +181,9 @@
     <div style="display:flex;align-items:center;gap:.75rem;font-size:.85rem;flex-wrap:wrap;">
       <label style="font-weight:600;">적용 플랜트:</label>
       <select id="sm-plant" class="pm-input" style="width:140px;">
+        <option value="ALL">ALL (공유)</option>
         <option value="4120">4120 (시화)</option>
         <option value="4123">4123 (화성)</option>
-        <option value="ALL">ALL (공유)</option>
       </select>
       <button id="sm-map-btn" class="pm-btn pm-btn-success" onclick="bulkMap()" disabled style="margin-left:auto;">
         선택한 0건 매핑
@@ -177,7 +195,8 @@
 <script>
 let _smCode = '', _smDefaultPlant = '';
 const _smChecked = new Set();
-const _smSelectedTokens = new Set();  // 선택된 키워드 토큰
+const _smSelectedTokens = new Set();
+let _kwManuallyEdited = false;  // 사용자가 검색랙을 직접 수정한 경우 토큰이 덮어쓰지 않도록
 
 // 상품명 → 토큰 분리
 function _tokenize(name) {
@@ -188,14 +207,14 @@ function _tokenize(name) {
     .filter((t, i, a) => a.indexOf(t) === i);
 }
 
-// 선택된 토큰으로 검색창 값 업데이트
+// 선택된 토큰으로 검색랙 값 업데이트 (직접 수정 중이면 건드리지 않음)
 function _syncKeywordFromTokens() {
+  if (_kwManuallyEdited) return;
   const kw = document.getElementById('sm-keyword');
   if (_smSelectedTokens.size === 0) {
     kw.value = '';
   } else {
-    const toks = [..._smSelectedTokens];
-    kw.value = '*' + toks.join('*') + '*';
+    kw.value = '*' + [..._smSelectedTokens].join('*') + '*';
   }
 }
 
@@ -247,6 +266,7 @@ function openSuggest(btn) {
   _smCode = code;
   _smDefaultPlant = plant;
   _smChecked.clear();
+  _kwManuallyEdited = false;  // 모달 열릴 때 리셋
   _smSelectedTokens.clear();
   document.getElementById('sm-title').textContent = name;
   document.getElementById('sm-code').textContent = code;
@@ -269,6 +289,7 @@ function openSuggest(btn) {
 
 function closeSuggest() {
   _smSelectedTokens.clear();
+  _kwManuallyEdited = false;
   document.getElementById('suggest-modal').style.display = 'none';
 }
 
@@ -392,7 +413,13 @@ async function bulkMap() {
 }
 
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSuggest(); });
-document.getElementById('sm-keyword').addEventListener('keydown', e => { if (e.key === 'Enter') searchSuggest(); });
+document.addEventListener('DOMContentLoaded', () => {
+  const kw = document.getElementById('sm-keyword');
+  if (kw) {
+    kw.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); searchSuggest(); } });
+    kw.addEventListener('input',   () => { _kwManuallyEdited = true; });  // 직접 타이핑 시 dirty 플래그
+  }
+});
 </script>
 
 {% endblock %}
