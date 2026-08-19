@@ -101,7 +101,7 @@ _CACHE_TTL = 300
 
 
 def _get_base_prices(plant: str) -> list[dict]:
-    """compat 최근 2주 평균 판매단가(기준가) + 평균 구매단가 (플랜트별)"""
+    """최근 2주 기준가(매출액/매출수량) + 구매단가(매출원가/매출수량) (플랜트별)"""
     cache_key = f"base_prices_{plant}"
     if cache_key in _price_cache:
         ts, data = _price_cache[cache_key]
@@ -111,19 +111,22 @@ def _get_base_prices(plant: str) -> list[dict]:
         import main as _main
         rows = _q(f"""
             SELECT
-                `상품코드`                                          AS product_code,
-                ROUND(AVG(`단가`), 2)                              AS avg_sale_price,
+                `자재`                                                        AS product_code,
+                ROUND(
+                    SUM(CAST(`매출액` AS DOUBLE)) /
+                    NULLIF(SUM(CAST(`매출수량` AS DOUBLE)), 0)
+                , 2)                                                          AS avg_sale_price,
                 ROUND(
                     SUM(CAST(`매출원가` AS DOUBLE)) /
                     NULLIF(SUM(CAST(`매출수량` AS DOUBLE)), 0)
-                , 2)                                               AS avg_buy_price
+                , 2)                                                          AS avg_buy_price
             FROM {_main.T_MAIN}
-            WHERE `사업장` = '{plant}'
-              AND `년월` >= DATE_FORMAT(DATE_SUB(CURRENT_DATE(), INTERVAL 14 DAY), '%Y%m')
-              AND `상품코드` IS NOT NULL
-              AND `매출수량` IS NOT NULL
+            WHERE `플랜트` = '{plant}'
+              AND CAST(`년월` AS INT) >= YEAR(DATE_SUB(CURRENT_DATE(), 14)) * 100 + MONTH(DATE_SUB(CURRENT_DATE(), 14))
+              AND `자재` IS NOT NULL
+              AND `매출수량` > 0
               AND `매출원가` IS NOT NULL
-            GROUP BY `상품코드`
+            GROUP BY `자재`
         """)
         _price_cache[cache_key] = (time.time(), rows)
         return rows
@@ -261,12 +264,25 @@ def _get_platform_latest(product_keys: list[str] | None = None,
         return []
 
 
-def _calc_gp(platform_price: float | None, buy_price: float | None) -> float | None:
-    """GP율 계산: (판매가 - 구매가) / 판매가 × 100"""
+# 외부 플랫폼 수수료율 (VAT 포함)
+_FEE_DIRECT   = 0.066   # 직배송: PG 3% + 플랫폼 3% + VAT = 6.6%
+_FEE_SINGSING = 0.171   # 싱싱배송: 직배송 6.6% + 추가 10.5% = 17.1%
+
+
+def _calc_gp(platform_price: float | None, buy_price: float | None,
+             delivery_type: str = "직배송") -> float | None:
+    """
+    수수료 차감 후 GP율 계산.
+    - 직배송: 외부판매가 × (1 - 0.066) = 수취액 A
+    - 싱싱배송: 외부판매가 × (1 - 0.171) = 수취액 A
+    - GP% = (A - 구매단가) / A × 100
+    """
     if not platform_price or not buy_price:
         return None
     try:
-        return round((platform_price - buy_price) / platform_price * 100, 1)
+        fee = _FEE_SINGSING if delivery_type == "싱싱배송" else _FEE_DIRECT
+        a = platform_price * (1.0 - fee)
+        return round((a - buy_price) / a * 100, 1)
     except Exception:
         return None
 
@@ -326,7 +342,8 @@ async def pm_dashboard(
         price_info = price_map.get(p_code, {})
         buy_price = price_info.get("avg_buy_price")
         sale_price = pf_data.get("price_sale")
-        gp = _calc_gp(sale_price, buy_price)
+        delivery_type = pf_data.get("delivery_type", "직배송")
+        gp = _calc_gp(sale_price, buy_price, delivery_type)
         status = _gp_status(gp)
         if alert_only and status not in ("alert", "warn"):
             continue
@@ -631,7 +648,6 @@ async def pm_history(
     if product_keys:
         try:
             keys_str = ", ".join(f"'{k}'" for k in product_keys)
-            cutoff = f"DATE_SUB(CURRENT_DATE(), INTERVAL {days} DAY)"
             history_rows = _q(f"""
                 SELECT
                     product_key, platform, platform_seller_name,
@@ -639,11 +655,11 @@ async def pm_history(
                     delivery_type, is_free_delivery, crawl_date
                 FROM {T_SILVER}
                 WHERE product_key IN ({keys_str})
-                  AND crawl_date >= {cutoff}
+                  AND crawl_date >= DATE_SUB(CURRENT_DATE(), {days})
                 ORDER BY crawl_date DESC, platform, platform_seller_name
             """)
         except Exception as e:
-            logger.warning(f"[price_monitor] history 조회 실패: {e}")
+            logger.exception(f"[price_monitor] history 조회 실패 (product_code={product_code}, plant={plant}, keys={product_keys}): {e}")
 
     # 가격 기준값
     price_rows = _get_base_prices(plant)
@@ -652,7 +668,11 @@ async def pm_history(
 
     # GP 계산 추가
     for row in history_rows:
-        gp = _calc_gp(row.get("price_sale"), price_info.get("avg_buy_price"))
+        gp = _calc_gp(
+            row.get("price_sale"),
+            price_info.get("avg_buy_price"),
+            row.get("delivery_type", "직배송"),
+        )
         row["gp_pct"] = gp
         row["gp_status"] = _gp_status(gp)
         row["crawl_date"] = str(row.get("crawl_date", ""))

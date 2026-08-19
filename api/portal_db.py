@@ -259,6 +259,133 @@ def init_db() -> None:
                 (2006, '파라도',        '서울/경기일부',  1),
                 (2039, '현대그린푸드',  '전국',           1),
                 (2005, '얌피쉬',        '서울/경기/인천', 1);
+
+            -- 식봄(foodspring) 셀러 관리 테이블
+            -- delivery_type: 'direct'(직배송) | 'singsing'(싱싱배송) | ''(미확인)
+            CREATE TABLE IF NOT EXISTS price_foodspring_sellers (
+                seller_id    INTEGER PRIMARY KEY,
+                seller_name  TEXT,
+                delivery_type TEXT DEFAULT '',
+                is_active    INTEGER DEFAULT 1,
+                updated_at   TEXT DEFAULT (datetime('now','localtime'))
+            );
+            -- 식봄.md 기준 113개 셀러 초기 데이터 (배송타입은 크롤 시 자동 감지)
+            INSERT OR IGNORE INTO price_foodspring_sellers(seller_id,seller_name,delivery_type,is_active) VALUES
+                -- 싱싱배송 (AggregateDelivery)
+                (1517,'CJ프레시웨이','singsing',1),
+                (3105,'우주식품 디씨오피','singsing',1),
+                (4709,'에드벨류','singsing',1),
+                (4777,'이너피스(싱싱배송)','singsing',1),
+                (3738,'사조푸디스트','singsing',1),
+                (3825,'푸딩팩토리(안주)','singsing',1),
+                (4861,'대상주식회사(싱싱배송)','singsing',1),
+                (4921,'쉐프스푸드','singsing',1),
+                (4956,'식품팜','singsing',1),
+                (3638,'우진식품','singsing',1),
+                (2575,'팜파스','singsing',1),
+                (3215,'쉐프의정원','singsing',1),
+                (4141,'예주나라','singsing',1),
+                (4568,'에이치제이팩토리','singsing',1),
+                (3672,'면사랑','singsing',1),
+                (4646,'더바모스','singsing',1),
+                (4744,'푸드올마켓','singsing',1),
+                (4375,'지이디통상','singsing',1),
+                (4484,'영인코퍼레이션','singsing',1),
+                (4603,'감성팩','singsing',1),
+                (3241,'야채는 농부네','singsing',1),
+                (4572,'영남코프레이션','singsing',1),
+                (4883,'더고기','singsing',1),
+                (4787,'효성푸드','singsing',1),
+                (3994,'푸딩팩토리(튀김)','singsing',1),
+                (4926,'싱싱 플러스','singsing',1),
+                (4673,'대성푸드시스템','singsing',1),
+                (4782,'에이치푸드서플라이','singsing',1),
+                (3899,'주흥상사','singsing',1),
+                (3643,'서진그룹','singsing',1),
+                (4677,'와이즈온','singsing',1),
+                (4448,'엠제이푸드','singsing',1),
+                (4123,'누리로지스','singsing',1),
+                (5044,'사조대림','singsing',1),
+                (4423,'코우인터내셔널','singsing',1),
+                (4907,'소반푸드','singsing',1),
+                (4212,'푸드렐라','singsing',1),
+                (3102,'우성물산','singsing',1),
+                (3603,'아시안푸드스타','singsing',1),
+                (4645,'코주부어묵','singsing',1),
+                (4636,'다들림푸드','singsing',1),
+                (4785,'치즈트리','singsing',1),
+                (4025,'돌우물','singsing',1),
+                (4853,'수플린','singsing',1),
+                (4833,'계식이푸드','singsing',1),
+                (4281,'토자연','singsing',1),
+                (4776,'푸르온','singsing',1),
+                (4946,'두보식품','singsing',1),
+                (4422,'더블제이푸드','singsing',1),
+                (4305,'오름(싱싱배송)','singsing',1),
+                (5070,'벌크푸드','singsing',1),
+                (4802,'조인','singsing',1),
+                (4791,'청계원','singsing',1),
+                -- 직배송 (DirectDelivery)
+                (5081,'푸드팡-수도권','direct',1),
+                (2716,'현대그린푸드','direct',1),
+                (2626,'식자재119','direct',1),
+                (867,'온국민 신선몰','direct',1),
+                (4069,'디어푸드','direct',1),
+                (3038,'푸드레인','direct',1),
+                (2455,'세현F&B','direct',1),
+                (1388,'다봄푸드','direct',1),
+                (3828,'케이에프피(강남)','direct',1),
+                (3359,'베이킹몬','direct',1),
+                (3680,'내가그린푸드','direct',1),
+                (2019,'대상(수도권)','direct',1),
+                (1702,'써니플러스','direct',1),
+                (560,'푸드코리아시스템','direct',1),
+                (3183,'두리식자재','direct',1),
+                (3610,'얌피쉬홀세일','direct',1),
+                (1862,'서일코퍼레이션','direct',1),
+                (693,'이너피스(직배송)','direct',1),
+                (4533,'그로우식자재','direct',1),
+                (4473,'윤진유통','direct',1),
+                (3452,'굿모닝식자재','direct',1),
+                (2711,'메종베르','direct',1),
+                (4431,'착한푸드','direct',1),
+                (4195,'마당몰','direct',1),
+                (1104,'신선한식탁','direct',1),
+                (3554,'스마일푸드','direct',1),
+                (1838,'토박이유통','direct',1),
+                (3451,'싱싱채소 그린팜','direct',1),
+                (4067,'푸드베테랑','direct',1),
+                (4034,'진프레시','direct',1),
+                (4328,'푸르메 씨앤푸드','direct',1),
+                (2203,'무진물산','direct',1),
+                (2587,'주설유통','direct',1),
+                (3646,'미트프렌즈','direct',1),
+                (2897,'미트클럽','direct',1),
+                (4312,'한양유통','direct',1),
+                (3455,'공주유통','direct',1),
+                (3827,'봄봄상회','direct',1),
+                (3841,'바름푸드','direct',1),
+                (2481,'블루푸드','direct',1),
+                (4071,'오름푸드시스템','direct',1),
+                (3172,'원흥축산','direct',1),
+                (2984,'한올미트','direct',1),
+                (2488,'디보트코리아','direct',1),
+                (920,'서울식자재','direct',1),
+                (3652,'더고기(신선직배송)','direct',1),
+                (1186,'OTTO 영흥식품','direct',1),
+                (2901,'도깨비가게','direct',1),
+                (3314,'진우푸드','direct',1),
+                (2198,'엠에이치컴퍼니','direct',1),
+                (2729,'에이젯유통','direct',1),
+                (4656,'세현F&B_정육','direct',1),
+                (3984,'BEST RICE 31','direct',1),
+                (3271,'제이엘유지','direct',1),
+                (4004,'현대비즈','direct',1),
+                (2380,'혜성프로비젼','direct',1),
+                (1556,'고구마켓','direct',1),
+                (1913,'가온 신선팜','direct',1),
+                (1725,'에그랑에프엔비','direct',1),
+                (3384,'하늘농원','direct',1);
         """)
         # announcements 데이터 → notice_posts 자동 이관 (중복 방지)
         try:
@@ -906,12 +1033,14 @@ def delete_voc_comment(comment_id: int, emp_code: str, is_admin: bool = False) -
 # ── 가격 모니터링 DB 함수 ──────────────────────────────────────────────────
 
 def pm_list_mappings(our_product_code: str, plant: str) -> list[dict]:
-    """특정 상품+플랜트의 활성 매핑 목록"""
+    """특정 상품+플랜트의 활성 매핑 목록.
+    plant='ALL'로 등록된 공통 매핑도 함께 반환.
+    """
     init_db()
     with _connect() as conn:
         rows = conn.execute(
             """SELECT * FROM price_map_product_link
-               WHERE our_product_code=? AND plant=? AND is_active=1
+               WHERE our_product_code=? AND (plant=? OR plant='ALL') AND is_active=1
                ORDER BY created_at DESC""",
             (our_product_code, plant),
         ).fetchall()
@@ -919,12 +1048,14 @@ def pm_list_mappings(our_product_code: str, plant: str) -> list[dict]:
 
 
 def pm_list_all_mappings(plant: str) -> list[dict]:
-    """플랜트 기준 전체 활성 매핑 목록"""
+    """플랜트 기준 전체 활성 매핑 목록.
+    plant='ALL'로 등록된 공통 매핑도 함께 반환.
+    """
     init_db()
     with _connect() as conn:
         rows = conn.execute(
             """SELECT * FROM price_map_product_link
-               WHERE plant=? AND is_active=1
+               WHERE (plant=? OR plant='ALL') AND is_active=1
                ORDER BY our_product_code, platform""",
             (plant,),
         ).fetchall()
@@ -1078,6 +1209,46 @@ def pm_toggle_seller(seller_id: int, is_active: int) -> None:
     with _connect() as conn:
         conn.execute(
             "UPDATE price_baemin_sellers SET is_active=?, updated_at=datetime('now','localtime') WHERE seller_id=?",
+            (is_active, seller_id),
+        )
+
+
+def pm_list_foodspring_sellers(active_only: bool = True) -> list[dict]:
+    """식봄 셀러 목록 반환. delivery_type: 'direct'|'singsing'|''"""
+    init_db()
+    with _connect() as conn:
+        if active_only:
+            rows = conn.execute(
+                "SELECT * FROM price_foodspring_sellers WHERE is_active=1 ORDER BY seller_id"
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM price_foodspring_sellers ORDER BY seller_id"
+            ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def pm_update_foodspring_delivery_type(seller_id: int, delivery_type: str, seller_name: str = "") -> None:
+    """크롤 시 감지한 배송타입을 업데이트"""
+    init_db()
+    with _connect() as conn:
+        if seller_name:
+            conn.execute(
+                "UPDATE price_foodspring_sellers SET delivery_type=?, seller_name=?, updated_at=datetime('now','localtime') WHERE seller_id=?",
+                (delivery_type, seller_name, seller_id),
+            )
+        else:
+            conn.execute(
+                "UPDATE price_foodspring_sellers SET delivery_type=?, updated_at=datetime('now','localtime') WHERE seller_id=?",
+                (delivery_type, seller_id),
+            )
+
+
+def pm_toggle_foodspring_seller(seller_id: int, is_active: int) -> None:
+    init_db()
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE price_foodspring_sellers SET is_active=?, updated_at=datetime('now','localtime') WHERE seller_id=?",
             (is_active, seller_id),
         )
 

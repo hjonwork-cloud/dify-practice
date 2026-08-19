@@ -157,34 +157,66 @@ def _batch_insert(conn, records: list[dict], today: str):
         print(f"  INSERT {total}/{len(records)} 건 완료")
 
 
+# ── portal_db import (셀러 목록 DB 관리) ──────────────────────────────────
+_THIS_DIR_ROOT = os.path.dirname(os.path.abspath(__file__))
+_API_DIR_PATH  = os.path.join(_THIS_DIR_ROOT, "api")
+if _API_DIR_PATH not in sys.path:
+    sys.path.insert(0, _API_DIR_PATH)
+try:
+    import portal_db as _portal_db
+    _DB_AVAILABLE = True
+except ImportError:
+    _DB_AVAILABLE = False
+    print("⚠ portal_db 로드 실패: 셀러 목록을 DB에서 읽을 수 없습니다.")
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # 배민상회 크롤러
 # ══════════════════════════════════════════════════════════════════════════
-BAEMIN_SELLERS = [
-    {"id": "907",  "name": "이너피스"},
-    {"id": "2090", "name": "그로우식자재"},
-    {"id": "2089", "name": "스마일푸드"},
-    {"id": "1384", "name": "다봄푸드"},
-    {"id": "1774", "name": "온국민신선몰"},
-    {"id": "2057", "name": "세현F&B"},
-    {"id": "2006", "name": "파라도"},
-    {"id": "2039", "name": "현대그린푸드"},
-    {"id": "2005", "name": "얌피쉬"},
-]
-
-BAEMIN_API    = "https://gw-api-mart.baemin.com/front-api/v1/sellers"
+BAEMIN_API     = "https://gw-api-mart.baemin.com/front-api/v1/sellers"
 BAEMIN_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
     "Accept": "application/json",
     "Referer": "https://mart.baemin.com/",
     "Origin": "https://mart.baemin.com",
 }
-DELIVERY_MAP = {
+# 배민상회 배송타입 매핑 (상품별 goodsDeliveryType)
+# DIRECT_DELIVERY → 직배송 (수집 대상)
+# NORMAL_DELIVERY → 택배배송 (수집 제외)
+BAEMIN_DELIVERY_MAP = {
     "DIRECT_DELIVERY": "직배송",
-    "PARCEL": "택배배송",
-    "FRESH": "새벽배송",
-    "MARKET_DAY": "장날배송",
+    "NORMAL_DELIVERY": "택배배송",   # 수집 제외
+    "PARCEL":          "택배배송",   # 수집 제외
+    "FRESH":           "새벽배송",
+    "MARKET_DAY":      "장날배송",
 }
+# 수집 대상 배송유형 (택배 제외)
+BAEMIN_COLLECT_TYPES = {"직배송", "새벽배송", "장날배송"}
+
+
+def _get_baemin_sellers() -> list[dict]:
+    """DB에서 활성 배민 셀러 목록 반환. DB 없으면 기본값 사용."""
+    if _DB_AVAILABLE:
+        try:
+            rows = _portal_db.pm_list_baemin_sellers()
+            sellers = [{"id": str(r["seller_id"]), "name": r["seller_name"]}
+                       for r in rows if r.get("is_active", 1)]
+            if sellers:
+                return sellers
+        except Exception as e:
+            print(f"  ⚠ DB 셀러 조회 실패: {e}")
+    # 폴백: 기본 셀러 목록
+    return [
+        {"id": "907",  "name": "이너피스"},
+        {"id": "2090", "name": "그로우식자재"},
+        {"id": "2089", "name": "스마일푸드"},
+        {"id": "1384", "name": "다봄푸드"},
+        {"id": "1774", "name": "온국민신선몰"},
+        {"id": "2057", "name": "세현F&B"},
+        {"id": "2006", "name": "파라도"},
+        {"id": "2039", "name": "현대그린푸드"},
+        {"id": "2005", "name": "얌피쉬"},
+    ]
 
 
 def _baemin_fetch_page(seller_id: str, page: int) -> dict | None:
@@ -204,8 +236,13 @@ def _baemin_fetch_page(seller_id: str, page: int) -> dict | None:
 
 
 def crawl_baemin(test_mode=False) -> list[dict]:
+    """배민상회 크롤링. DIRECT_DELIVERY(직배송)만 수집. 택배(NORMAL_DELIVERY) 제외."""
     records = []
-    sellers = BAEMIN_SELLERS[:1] if test_mode else BAEMIN_SELLERS
+    sellers = _get_baemin_sellers()
+    if test_mode:
+        sellers = sellers[:1]
+    print(f"배민상회 셀러 {len(sellers)}개 수집 시작")
+
     for s in sellers:
         print(f"\n[배민상회] {s['name']} (id={s['id']})")
         first = _baemin_fetch_page(s["id"], 0)
@@ -213,6 +250,8 @@ def crawl_baemin(test_mode=False) -> list[dict]:
             print("  ✗ 첫 페이지 실패, 건너뜀")
             continue
         total_pages = first.get("totalPages", 1) if not test_mode else 1
+        seller_direct = 0
+        seller_skip   = 0
         print(f"  총 {first.get('totalElements',0)}개 / {total_pages}페이지")
 
         for page_no in range(total_pages):
@@ -226,10 +265,12 @@ def crawl_baemin(test_mode=False) -> list[dict]:
                 items = first.get("content", [])
 
             for item in items:
-                delivery_raw = item.get("goodsDeliveryType", "")
-                delivery_text = DELIVERY_MAP.get(delivery_raw, delivery_raw)
-                if item.get("freshShipping"):
-                    delivery_text = "새벽배송"
+                delivery_raw  = item.get("goodsDeliveryType", "")
+                delivery_text = BAEMIN_DELIVERY_MAP.get(delivery_raw, delivery_raw)
+                # 택배배송 제외
+                if delivery_text not in BAEMIN_COLLECT_TYPES:
+                    seller_skip += 1
+                    continue
                 product_id = str(item.get("id", ""))
                 records.append({
                     "platform":             "baemin",
@@ -245,7 +286,9 @@ def crawl_baemin(test_mode=False) -> list[dict]:
                     "delivery_type":        delivery_text,
                     "is_free_delivery":     bool(item.get("freeShipping")),
                 })
-            print(f"  page {page_no}: {len(items)}개 (누적 {len(records)}개)")
+                seller_direct += 1
+
+            print(f"  page {page_no}: 수집 {seller_direct}건 / 제외(택배) {seller_skip}건 (누적 {len(records)}건)")
 
     print(f"\n✓ 배민상회 수집 완료: {len(records)}건")
     return records
@@ -254,11 +297,6 @@ def crawl_baemin(test_mode=False) -> list[dict]:
 # ══════════════════════════════════════════════════════════════════════════
 # 식봄 크롤러
 # ══════════════════════════════════════════════════════════════════════════
-FOOD_SELLERS = [
-    "1517", "5081", "2716", "2626", "867",
-    "4069", "3038", "2455", "1388", "3828",
-]
-
 FOOD_GQL_URL = "https://api.foodspring.co.kr/v2/graphql"
 FOOD_HEADERS = {
     "Content-Type": "application/json",
@@ -266,6 +304,19 @@ FOOD_HEADERS = {
     "Referer": "https://www.foodspring.co.kr/",
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
 }
+
+# 식봄 GraphQL delivery __typename → 배송유형 매핑
+FOOD_DELIVERY_TYPENAME_MAP = {
+    "DirectDelivery":    "직배송",
+    "AggregateDelivery": "싱싱배송",
+}
+# DB에서 읽어온 delivery_type 값 → 표시 이름
+FOOD_DB_DELIVERY_MAP = {
+    "direct":   "직배송",
+    "singsing": "싱싱배송",
+}
+
+# 상품 + 배송타입 동시 조회 쿼리
 FOOD_QUERY = """
 query SellerGoods($id: ID!, $input: GoodsListInput!, $after: String, $areaId: ID) {
   goodsListPC: goodsList(first: 80, after: $after, input: $input, areaId: $areaId) {
@@ -286,16 +337,38 @@ query SellerGoods($id: ID!, $input: GoodsListInput!, $after: String, $areaId: ID
     ... on Vendor {
       nid
       name
-      delivery {
-        ... on DirectDelivery {
-          arrivalTag
-          deliveryFee { condition price }
-        }
-      }
+      delivery { __typename }
     }
   }
 }
 """
+
+
+def _get_foodspring_sellers() -> list[dict]:
+    """DB에서 활성 식봄 셀러 목록 반환 (113개). DB 없으면 기존 10개 사용."""
+    if _DB_AVAILABLE:
+        try:
+            rows = _portal_db.pm_list_foodspring_sellers(active_only=True)
+            sellers = [{"id": str(r["seller_id"]), "name": r["seller_name"],
+                        "delivery_type": r.get("delivery_type", "")}
+                       for r in rows]
+            if sellers:
+                return sellers
+        except Exception as e:
+            print(f"  ⚠ DB 식봄 셀러 조회 실패: {e}")
+    # 폴백: 기존 10개
+    return [
+        {"id": "1517", "name": "CJ프레시웨이",    "delivery_type": "singsing"},
+        {"id": "5081", "name": "푸드팡-수도권",   "delivery_type": "direct"},
+        {"id": "2716", "name": "현대그린푸드",    "delivery_type": "direct"},
+        {"id": "2626", "name": "식자재119",       "delivery_type": "direct"},
+        {"id": "867",  "name": "온국민 신선몰",   "delivery_type": "direct"},
+        {"id": "4069", "name": "디어푸드",        "delivery_type": "direct"},
+        {"id": "3038", "name": "푸드레인",        "delivery_type": "direct"},
+        {"id": "2455", "name": "세현F&B",         "delivery_type": "direct"},
+        {"id": "1388", "name": "다봄푸드",        "delivery_type": "direct"},
+        {"id": "3828", "name": "케이에프피(강남)", "delivery_type": "direct"},
+    ]
 
 
 def _food_fetch_page(seller_id: str, after: str | None) -> dict | None:
@@ -326,34 +399,69 @@ def _food_fetch_page(seller_id: str, after: str | None) -> dict | None:
 
 
 def crawl_foodspring(test_mode=False) -> list[dict]:
+    """
+    식봄 크롤링.
+    - 배송타입을 GraphQL __typename으로 동적 감지: DirectDelivery→직배송, AggregateDelivery→싱싱배송
+    - 감지한 배송타입을 portal_db에 업데이트 (신규 셀러 자동 반영)
+    - 직배송/싱싱배송만 수집 (기타 배송유형 제외)
+    """
     records = []
-    sellers = FOOD_SELLERS[:1] if test_mode else FOOD_SELLERS
-    for seller_id in sellers:
+    sellers = _get_foodspring_sellers()
+    if test_mode:
+        sellers = sellers[:1]
+    print(f"식봄 셀러 {len(sellers)}개 수집 시작")
+
+    for s in sellers:
+        seller_id = s["id"]
         print(f"\n[식봄] seller_id={seller_id}")
         after = None
-        seller_name = seller_id
-        page_no = 0
-        seller_count = 0
+        seller_name   = s.get("name", seller_id)
+        delivery_type = ""   # GraphQL로 감지 후 결정
+        page_no       = 0
+        seller_count  = 0
 
         while True:
             data = _food_fetch_page(seller_id, after)
             if not data:
                 break
 
-            # 셀러명 추출 (첫 페이지)
+            # 첫 페이지: 셀러명 + 배송타입 __typename 감지
             if page_no == 0:
                 node = data.get("node") or {}
                 seller_name = node.get("name", seller_id)
                 total = (data.get("goodsListPC") or {}).get("totalCount", 0)
-                print(f"  셀러명: {seller_name}, 총 {total}개")
+
+                # 배송타입 동적 감지
+                typename = (node.get("delivery") or {}).get("__typename", "")
+                delivery_type = FOOD_DELIVERY_TYPENAME_MAP.get(typename, "")
+                if not delivery_type:
+                    # DB에 저장된 값 폴백
+                    delivery_type = FOOD_DB_DELIVERY_MAP.get(s.get("delivery_type", ""), "직배송")
+
+                print(f"  셀러명: {seller_name}, 총 {total}개, 배송: {delivery_type} (typename={typename})")
+
+                # 비대상 배송유형이면 스킵 (현재는 모두 대상이므로 예방적 처리)
+                if delivery_type not in ("직배송", "싱싱배송"):
+                    print(f"  ⚠ 수집 제외 배송유형: {delivery_type}")
+                    break
+
+                # DB 배송타입 업데이트 (크롤 시 자동 갱신)
+                if _DB_AVAILABLE and typename:
+                    db_val = "singsing" if delivery_type == "싱싱배송" else "direct"
+                    try:
+                        _portal_db.pm_update_foodspring_delivery_type(
+                            int(seller_id), db_val, seller_name
+                        )
+                    except Exception:
+                        pass
 
             goods_list = data.get("goodsListPC") or {}
-            edges = goods_list.get("edges", [])
-            page_info = goods_list.get("pageInfo", {})
+            edges      = goods_list.get("edges", [])
+            page_info  = goods_list.get("pageInfo", {})
 
             for edge in edges:
-                node = edge.get("node", {})
-                price = node.get("price") or {}
+                node       = edge.get("node", {})
+                price      = node.get("price") or {}
                 product_id = str(node.get("nid", ""))
                 records.append({
                     "platform":             "foodspring",
@@ -366,7 +474,7 @@ def crawl_foodspring(test_mode=False) -> list[dict]:
                     "price_sale":           price.get("salePrice") or None,
                     "discount_rate":        price.get("discountRate") or None,
                     "unit_price_desc":      node.get("unit", ""),
-                    "delivery_type":        "직배송",
+                    "delivery_type":        delivery_type,
                     "is_free_delivery":     bool(node.get("isFreeDelivery")),
                 })
                 seller_count += 1
@@ -388,17 +496,40 @@ def crawl_foodspring(test_mode=False) -> list[dict]:
 # ══════════════════════════════════════════════════════════════════════════
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--test",   action="store_true", help="셀러 1개, 1페이지만")
-    parser.add_argument("--baemin", action="store_true", help="배민상회만")
-    parser.add_argument("--food",   action="store_true", help="식봄만")
+    parser.add_argument("--test",    action="store_true", help="셀러 1개, 1페이지만")
+    parser.add_argument("--baemin",  action="store_true", help="배민상회만")
+    parser.add_argument("--food",    action="store_true", help="식봄만")
+    parser.add_argument("--cleanup", action="store_true",
+                        help="기존 배민 택배(NORMAL_DELIVERY/택배배송) 데이터 삭제만 실행")
     args = parser.parse_args()
 
-    today = datetime.date.today().isoformat()  # "2026-08-18"
+    today = datetime.date.today().isoformat()
     print(f"{'='*60}")
     print(f"플랫폼 가격 크롤러 시작 (crawl_date={today})")
     if args.test:
         print("TEST MODE: 셀러 1개 / 1페이지만")
     print(f"{'='*60}")
+
+    # --cleanup: 기존 NORMAL_DELIVERY/택배배송 데이터 정리 후 종료
+    if args.cleanup:
+        print("\n[정리] 기존 배민 택배배송(NORMAL_DELIVERY) 데이터 삭제...")
+        try:
+            conn = _get_conn()
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"DELETE FROM {T_SILVER} "
+                    f"WHERE platform='baemin' AND delivery_type='NORMAL_DELIVERY'"
+                )
+                print("  ✓ NORMAL_DELIVERY raw값 삭제 완료")
+                cur.execute(
+                    f"DELETE FROM {T_SILVER} "
+                    f"WHERE platform='baemin' AND delivery_type='택배배송'"
+                )
+                print("  ✓ 택배배송 삭제 완료")
+            conn.close()
+        except Exception as e:
+            print(f"  ✗ 정리 실패: {e}")
+        return
 
     # 1. 크롤링
     records = []
