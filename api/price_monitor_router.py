@@ -897,9 +897,17 @@ async def api_seller_toggle(request: Request):
 
 # ── API: 스케줄러 상태 조회 ────────────────────────────────────────────────
 
+def _check_scheduler_auth(request: Request):
+    """스케줄러 API: 세션 OR X-Scheduler-Key 헤더 허용."""
+    secret = os.getenv("SCHEDULER_SECRET_KEY", "")
+    if secret and request.headers.get("X-Scheduler-Key") == secret:
+        return  # 시크릿 키 일치 → 통과
+    _require_pm_access(request)  # 세션 인증
+
+
 @router.get("/api/scheduler/status")
 async def api_scheduler_status(request: Request):
-    _require_pm_access(request)
+    _check_scheduler_auth(request)
     try:
         import crawl_scheduler
         return JSONResponse({"ok": True, **crawl_scheduler.status()})
@@ -910,7 +918,7 @@ async def api_scheduler_status(request: Request):
 @router.post("/api/scheduler/run-now")
 async def api_scheduler_run_now(request: Request):
     """즉시 크롤링 실행 (테스트/수동 재수집용)"""
-    _require_pm_access(request)
+    _check_scheduler_auth(request)
     import threading, crawl_scheduler
     t = threading.Thread(target=crawl_scheduler._run_crawl, daemon=True, name="crawl-manual")
     t.start()
