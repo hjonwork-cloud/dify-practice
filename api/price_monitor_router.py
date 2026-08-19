@@ -893,3 +893,25 @@ async def api_seller_toggle(request: Request):
         return JSONResponse({"ok": False, "error": "seller_id 필요"}, status_code=400)
     portal_db.pm_toggle_seller(seller_id, is_active)
     return JSONResponse({"ok": True})
+
+
+# ── API: 스케줄러 상태 조회 ────────────────────────────────────────────────
+
+@router.get("/api/scheduler/status")
+async def api_scheduler_status(request: Request):
+    _require_pm_access(request)
+    try:
+        import crawl_scheduler
+        return JSONResponse({"ok": True, **crawl_scheduler.status()})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)})
+
+
+@router.post("/api/scheduler/run-now")
+async def api_scheduler_run_now(request: Request):
+    """즉시 크롤링 실행 (테스트/수동 재수집용)"""
+    _require_pm_access(request)
+    import threading, crawl_scheduler
+    t = threading.Thread(target=crawl_scheduler._run_crawl, daemon=True, name="crawl-manual")
+    t.start()
+    return JSONResponse({"ok": True, "message": "크롤링 백그라운드 실행 시작됨"})

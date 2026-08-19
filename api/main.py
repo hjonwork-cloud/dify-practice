@@ -75,6 +75,20 @@ except Exception as _pm_err:
     app.include_router(_diag)
 import admin_db  # VOC 접수 / 공개 FAQ 자동응답
 
+# ── 크롤러 스케줄러 (매일 03:00 KST) ────────────────────────────────────────
+import crawl_scheduler as _crawl_scheduler
+
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def _lifespan(app):
+    """FastAPI lifespan: 시작 시 스케줄러 ON, 종료 시 OFF"""
+    _crawl_scheduler.start()
+    yield
+    _crawl_scheduler.stop()
+
+app.router.lifespan_context = _lifespan
+
 # ── 포털 401 → 로그인 페이지 리다이렉트 ────────────────────────────────────
 from fastapi.responses import JSONResponse as _JSONResponse, RedirectResponse as _RedirectResponse
 from fastapi.exceptions import HTTPException as _HTTPExc

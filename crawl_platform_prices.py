@@ -661,6 +661,8 @@ def main():
                         help="특정 셀러만 재수집 (쉼표구분, 예: foodspring/1388,foodspring/5081)")
     parser.add_argument("--cleanup", action="store_true",
                         help="기존 배민 택배(NORMAL_DELIVERY/택배배송) 데이터 삭제만 실행")
+    parser.add_argument("--delete-date", type=str, default="",
+                        help="특정 날짜 데이터 전체 삭제 후 종료 (예: --delete-date 2026-08-18)")
     args = parser.parse_args()
 
     # --seller 파싱: {"baemin": {"1234",...}, "foodspring": {"1388","5081"}}
@@ -706,6 +708,20 @@ def main():
                 print("  ✓ 택배배송 삭제 완료")
         except Exception as e:
             print(f"  ✗ 정리 실패: {e}")
+        conn.close()
+        return
+
+    # --delete-date: 특정 날짜 데이터 전체 삭제 후 종료
+    if args.delete_date:
+        d = args.delete_date.strip()
+        print(f"\n[삭제] {d} 날짜 데이터 전체 삭제 중...")
+        try:
+            _exec(conn, f"DELETE FROM {T_SILVER} WHERE crawl_date = '{d}'")
+            print(f"  ✓ {d} 데이터 삭제 완료")
+        except Exception as e:
+            print(f"  ✗ 삭제 실패: {e}")
+        conn.close()
+        return
         conn.close()
         return
 
