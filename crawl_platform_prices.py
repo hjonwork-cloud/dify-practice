@@ -119,10 +119,14 @@ def _exec(conn, sql: str):
 
 
 def _esc(v) -> str:
-    """SQL 문자열 이스케이프: None→NULL, 그 외 작은따옴표 '' 처리 (SQL 표준)"""
+    """SQL 문자열 이스케이프: None→NULL, 그 외 작은따옴표 '' 처리 (SQL 표준)
+    Databricks 파서 오동작 방지: 단따옴표(') → 유니코드 오른쪽 따옴표(')로 정규화"""
     if v is None:
         return "NULL"
-    return "'" + str(v).replace("'", "''") + "'"
+    # 단따옴표를 유니코드 RIGHT SINGLE QUOTATION MARK(\u2019)로 교체
+    # → SQL 내부 이스케이프 불필요, Databricks 파서 오동작 없음
+    cleaned = str(v).replace("'", "\u2019")
+    return "'" + cleaned + "'"
 
 
 def _num(v) -> str:
@@ -136,14 +140,22 @@ def _num(v) -> str:
 
 def _batch_insert(conn, records: list[dict], today: str):
     """100건씩 bulk VALUES INSERT (Databricks SQL 크기 한도 대응)
-    batch 실패 시 1건씩 재시도해서 문제 행만 건너뜀."""
+    batch 실패 시 파라미터 바인딩(%s)으로 1건씩 재시도 → 이스케이프 문제 완전 우회."""
     if not records:
         return
-    BATCH = 100  # 500→100: 긴 상품명/이모지로 인한 SQL 크기 초과 방지
+    BATCH = 100
     total = 0
     skip_count = 0
 
-    def _insert_rows(rows):
+    INSERT_PREFIX = (
+        f"INSERT INTO {T_SILVER} "
+        "(platform,platform_seller_id,platform_seller_name,product_key,"
+        "product_name,spec,price_original,price_sale,discount_rate,"
+        "unit_price_desc,delivery_type,is_free_delivery,crawl_date) VALUES "
+    )
+
+    def _insert_bulk(rows):
+        """rows: list[dict] → bulk VALUES INSERT (문자열 보간)"""
         vals = []
         for r in rows:
             vals.append(
@@ -155,31 +167,28 @@ def _batch_insert(conn, records: list[dict], today: str):
                 f"{_esc(r['delivery_type'])},{'TRUE' if r['is_free_delivery'] else 'FALSE'},"
                 f"'{today}')"
             )
-        sql = (
-            f"INSERT INTO {T_SILVER} "
-            "(platform,platform_seller_id,platform_seller_name,product_key,"
-            "product_name,spec,price_original,price_sale,discount_rate,"
-            "unit_price_desc,delivery_type,is_free_delivery,crawl_date) VALUES "
-            + ",\n".join(vals)
-        )
         with conn.cursor() as cur:
-            cur.execute(sql)
+            cur.execute(INSERT_PREFIX + ",\n".join(vals))
+
+    def _insert_one_safe(r):
+        """단건 INSERT - _esc에서 따옴표 정규화됐으므로 bulk와 동일 방식"""
+        _insert_bulk([r])
 
     for i in range(0, len(records), BATCH):
         chunk = records[i:i + BATCH]
         try:
-            _insert_rows(chunk)
+            _insert_bulk(chunk)
             total += len(chunk)
             print(f"  INSERT {total}/{len(records)} 건 완료")
         except Exception as e:
-            print(f"  ⚠ 배치 INSERT 실패 ({len(chunk)}건), 1건씩 재시도: {e}")
+            print(f"  ⚠ 배치 INSERT 실패 ({len(chunk)}건), 파라미터 바인딩으로 1건씩 재시도: {e}")
             for r in chunk:
                 try:
-                    _insert_rows([r])
+                    _insert_one_safe(r)
                     total += 1
                 except Exception as e2:
                     skip_count += 1
-                    print(f"    ✗ 건너뜀: {r.get('product_name','')[:40]} / {e2}")
+                    print(f"    ✗ 건너뜀: {(r.get('product_name') or '')[:40]} / {e2}")
             print(f"  INSERT {total}/{len(records)} 건 완료 (건너뜀 {skip_count}건)")
     if skip_count:
         print(f"  ⚠ 총 {skip_count}건 INSERT 실패로 건너뜀")
@@ -574,11 +583,14 @@ def _crawl_baemin_per_seller(test_mode: bool):
         yield s["id"], seller_records
 
 
-def _crawl_food_per_seller(test_mode: bool):
-    """식봄 셀러별 (seller_id, records) 제너레이터."""
+def _crawl_food_per_seller(test_mode: bool, only_ids: set | None = None):
+    """식봄 셀러별 (seller_id, records) 제너레이터.
+    only_ids: 수집할 seller_id 집합 (None이면 전체)"""
     sellers = _get_foodspring_sellers()
     if test_mode:
         sellers = sellers[:1]
+    if only_ids:
+        sellers = [s for s in sellers if s["id"] in only_ids]
     print(f"식봄 셀러 {len(sellers)}개 수집 시작")
     for s in sellers:
         seller_id = s["id"]
@@ -735,7 +747,7 @@ def main():
 
     if run_food:
         food_ids = seller_filter.get("foodspring")
-        for seller_id, records in _crawl_food_per_seller(test_mode=args.test):
+        for seller_id, records in _crawl_food_per_seller(test_mode=args.test, only_ids=food_ids):
             if food_ids and seller_id not in food_ids:
                 continue
             if not records:
