@@ -118,41 +118,50 @@ def _exec(conn, sql: str):
         cur.execute(sql)
 
 
+def _esc(v) -> str:
+    """SQL 문자열 이스케이프: None→NULL, 그 외 작은따옴표 '' 처리 (SQL 표준)"""
+    if v is None:
+        return "NULL"
+    return "'" + str(v).replace("'", "''") + "'"
+
+
+def _num(v) -> str:
+    if v is None:
+        return "NULL"
+    try:
+        return str(float(v))
+    except Exception:
+        return "NULL"
+
+
 def _batch_insert(conn, records: list[dict], today: str):
-    """500건씩 나눠서 INSERT INTO"""
+    """100건씩 bulk VALUES INSERT (Databricks SQL 크기 한도 대응)"""
     if not records:
         return
-    BATCH = 500
+    BATCH = 100  # 500→100: 긴 상품명/이모지로 인한 SQL 크기 초과 방지
     total = 0
     for i in range(0, len(records), BATCH):
         chunk = records[i:i + BATCH]
         vals = []
         for r in chunk:
-            def _s(v):
-                if v is None:
-                    return "NULL"
-                return "'" + str(v).replace("'", "\\'") + "'"
-            def _n(v):
-                if v is None:
-                    return "NULL"
-                try:
-                    return str(float(v))
-                except Exception:
-                    return "NULL"
-            def _b(v):
-                return "TRUE" if v else "FALSE"
             vals.append(
-                f"({_s(r['platform'])},{_s(r['platform_seller_id'])},"
-                f"{_s(r['platform_seller_name'])},{_s(r['product_key'])},"
-                f"{_s(r['product_name'])},{_s(r['spec'])},"
-                f"{_n(r['price_original'])},{_n(r['price_sale'])},"
-                f"{_n(r['discount_rate'])},{_s(r['unit_price_desc'])},"
-                f"{_s(r['delivery_type'])},{_b(r['is_free_delivery'])},"
+                f"({_esc(r['platform'])},{_esc(r['platform_seller_id'])},"
+                f"{_esc(r['platform_seller_name'])},{_esc(r['product_key'])},"
+                f"{_esc(r['product_name'])},{_esc(r['spec'])},"
+                f"{_num(r['price_original'])},{_num(r['price_sale'])},"
+                f"{_num(r['discount_rate'])},{_esc(r['unit_price_desc'])},"
+                f"{_esc(r['delivery_type'])},{'TRUE' if r['is_free_delivery'] else 'FALSE'},"
                 f"'{today}')"
             )
-        sql = f"INSERT INTO {T_SILVER} VALUES " + ",\n".join(vals)
+        bulk_sql = (
+            f"INSERT INTO {T_SILVER} "
+            "(platform,platform_seller_id,platform_seller_name,product_key,"
+            "product_name,spec,price_original,price_sale,discount_rate,"
+            "unit_price_desc,delivery_type,is_free_delivery,crawl_date) VALUES "
+            + ",\n".join(vals)
+        )
         with conn.cursor() as cur:
-            cur.execute(sql)
+            cur.execute(bulk_sql)
         total += len(chunk)
         print(f"  INSERT {total}/{len(records)} 건 완료")
 
@@ -494,6 +503,124 @@ def crawl_foodspring(test_mode=False) -> list[dict]:
 # ══════════════════════════════════════════════════════════════════════════
 # 메인
 # ══════════════════════════════════════════════════════════════════════════
+def _crawl_baemin_per_seller(test_mode: bool):
+    """배민상회 셀러별 (seller_id, records) 제너레이터."""
+    sellers = _get_baemin_sellers()
+    if test_mode:
+        sellers = sellers[:1]
+    print(f"배민상회 셀러 {len(sellers)}개 수집 시작")
+    for s in sellers:
+        print(f"\n[배민상회] {s['name']} (id={s['id']})")
+        first = _baemin_fetch_page(s["id"], 0)
+        if not first:
+            print("  ✗ 첫 페이지 실패, 건너뜀")
+            continue
+        total_pages = first.get("totalPages", 1) if not test_mode else 1
+        seller_records = []
+        seller_direct = 0
+        seller_skip   = 0
+        print(f"  총 {first.get('totalElements',0)}개 / {total_pages}페이지")
+        for page_no in range(total_pages):
+            if page_no > 0:
+                time.sleep(0.8)
+                data = _baemin_fetch_page(s["id"], page_no)
+                if not data:
+                    break
+                items = data.get("content", [])
+            else:
+                items = first.get("content", [])
+            for item in items:
+                delivery_raw  = item.get("goodsDeliveryType", "")
+                delivery_text = BAEMIN_DELIVERY_MAP.get(delivery_raw, delivery_raw)
+                if delivery_text not in BAEMIN_COLLECT_TYPES:
+                    seller_skip += 1
+                    continue
+                product_id = str(item.get("id", ""))
+                seller_records.append({
+                    "platform":             "baemin",
+                    "platform_seller_id":   s["id"],
+                    "platform_seller_name": s["name"],
+                    "product_key":          f"baemin_{s['id']}_{product_id}",
+                    "product_name":         item.get("name", ""),
+                    "spec":                 item.get("sizeDesc", ""),
+                    "price_original":       item.get("customerPrice") or None,
+                    "price_sale":           item.get("goodsPrice") or None,
+                    "discount_rate":        item.get("discountRate") or None,
+                    "unit_price_desc":      item.get("unitPriceDesc", ""),
+                    "delivery_type":        delivery_text,
+                    "is_free_delivery":     bool(item.get("freeShipping")),
+                })
+                seller_direct += 1
+            print(f"  page {page_no}: 수집 {seller_direct}건 / 제외(택배) {seller_skip}건")
+        yield s["id"], seller_records
+
+
+def _crawl_food_per_seller(test_mode: bool):
+    """식봄 셀러별 (seller_id, records) 제너레이터."""
+    sellers = _get_foodspring_sellers()
+    if test_mode:
+        sellers = sellers[:1]
+    print(f"식봄 셀러 {len(sellers)}개 수집 시작")
+    for s in sellers:
+        seller_id = s["id"]
+        print(f"\n[식봄] seller_id={seller_id}")
+        after = None
+        seller_name   = s.get("name", seller_id)
+        delivery_type = ""
+        page_no       = 0
+        seller_records = []
+        while True:
+            data = _food_fetch_page(seller_id, after)
+            if not data:
+                break
+            if page_no == 0:
+                node = data.get("node") or {}
+                seller_name = node.get("name", seller_id)
+                total = (data.get("goodsListPC") or {}).get("totalCount", 0)
+                typename = (node.get("delivery") or {}).get("__typename", "")
+                delivery_type = FOOD_DELIVERY_TYPENAME_MAP.get(typename, "")
+                if not delivery_type:
+                    delivery_type = FOOD_DB_DELIVERY_MAP.get(s.get("delivery_type", ""), "직배송")
+                print(f"  셀러명: {seller_name}, 총 {total}개, 배송: {delivery_type}")
+                if delivery_type not in ("직배송", "싱싱배송"):
+                    print(f"  ⚠ 수집 제외 배송유형: {delivery_type}")
+                    break
+                if _DB_AVAILABLE and typename:
+                    db_val = "singsing" if delivery_type == "싱싱배송" else "direct"
+                    try:
+                        _portal_db.pm_update_foodspring_delivery_type(int(seller_id), db_val, seller_name)
+                    except Exception:
+                        pass
+            goods_list = data.get("goodsListPC") or {}
+            edges      = goods_list.get("edges", [])
+            page_info  = goods_list.get("pageInfo", {})
+            for edge in edges:
+                node2      = edge.get("node", {})
+                price      = node2.get("price") or {}
+                product_id = str(node2.get("nid", ""))
+                seller_records.append({
+                    "platform":             "foodspring",
+                    "platform_seller_id":   seller_id,
+                    "platform_seller_name": seller_name,
+                    "product_key":          f"foodspring_{seller_id}_{product_id}",
+                    "product_name":         node2.get("name", ""),
+                    "spec":                 node2.get("standard", ""),
+                    "price_original":       price.get("originalPrice") or None,
+                    "price_sale":           price.get("salePrice") or None,
+                    "discount_rate":        price.get("discountRate") or None,
+                    "unit_price_desc":      node2.get("unit", ""),
+                    "delivery_type":        delivery_type,
+                    "is_free_delivery":     bool(node2.get("isFreeDelivery")),
+                })
+            print(f"  page {page_no}: {len(edges)}개 (누적 {len(seller_records)}개)")
+            if test_mode or not page_info.get("hasNextPage"):
+                break
+            after = page_info.get("endCursor")
+            page_no += 1
+            time.sleep(0.3)
+        yield seller_id, seller_records
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--test",    action="store_true", help="셀러 1개, 1페이지만")
@@ -510,70 +637,74 @@ def main():
         print("TEST MODE: 셀러 1개 / 1페이지만")
     print(f"{'='*60}")
 
-    # --cleanup: 기존 NORMAL_DELIVERY/택배배송 데이터 정리 후 종료
-    if args.cleanup:
-        print("\n[정리] 기존 배민 택배배송(NORMAL_DELIVERY) 데이터 삭제...")
-        try:
-            conn = _get_conn()
-            with conn.cursor() as cur:
-                cur.execute(
-                    f"DELETE FROM {T_SILVER} "
-                    f"WHERE platform='baemin' AND delivery_type='NORMAL_DELIVERY'"
-                )
-                print("  ✓ NORMAL_DELIVERY raw값 삭제 완료")
-                cur.execute(
-                    f"DELETE FROM {T_SILVER} "
-                    f"WHERE platform='baemin' AND delivery_type='택배배송'"
-                )
-                print("  ✓ 택배배송 삭제 완료")
-            conn.close()
-        except Exception as e:
-            print(f"  ✗ 정리 실패: {e}")
-        return
-
-    # 1. 크롤링
-    records = []
-    if not args.food:
-        records += crawl_baemin(test_mode=args.test)
-    if not args.baemin:
-        records += crawl_foodspring(test_mode=args.test)
-
-    print(f"\n총 수집: {len(records)}건")
-    if not records:
-        print("수집 결과 없음. 종료합니다.")
-        return
-
-    # 2. Databricks 저장
-    print(f"\nDatabricks 저장 시작 ({T_SILVER})...")
+    # Databricks 연결 (크롤링 전에 먼저 확인)
+    print(f"\nDatabricks 연결 중...")
     try:
         conn = _get_conn()
-        print("  ✓ Databricks 연결 성공")
+        print("  ✓ 연결 성공")
     except Exception as e:
         print(f"  ✗ 연결 실패: {e}")
-        # 로컬 JSON으로 백업 저장
-        out = f"crawl_result_{today}.json"
-        with open(out, "w", encoding="utf-8") as f:
-            json.dump(records, f, ensure_ascii=False, indent=2)
-        print(f"  → 로컬 백업 저장: {out}")
         return
 
-    with conn:
-        # 테이블 생성 (없으면)
-        print("  테이블 생성 확인...")
-        _exec(conn, DDL_CREATE)
-        print("  ✓ 테이블 준비 완료")
+    # 테이블 생성 확인
+    _exec(conn, DDL_CREATE)
 
-        # 오늘 날짜 데이터 삭제 후 재적재
-        print(f"  기존 {today} 데이터 삭제...")
-        _exec(conn, f"DELETE FROM {T_SILVER} WHERE crawl_date = '{today}'")
-        print("  ✓ 삭제 완료")
+    # --cleanup: 기존 NORMAL_DELIVERY/택배배송 데이터 정리 후 종료
+    if args.cleanup:
+        print("\n[정리] 기존 배민 택배배송 데이터 삭제...")
+        try:
+            with conn.cursor() as cur:
+                cur.execute(f"DELETE FROM {T_SILVER} WHERE platform='baemin' AND delivery_type='NORMAL_DELIVERY'")
+                print("  ✓ NORMAL_DELIVERY raw값 삭제 완료")
+                cur.execute(f"DELETE FROM {T_SILVER} WHERE platform='baemin' AND delivery_type='택배배송'")
+                print("  ✓ 택배배송 삭제 완료")
+        except Exception as e:
+            print(f"  ✗ 정리 실패: {e}")
+        conn.close()
+        return
 
-        # INSERT
-        print(f"  INSERT 시작 ({len(records)}건)...")
-        _batch_insert(conn, records, today)
+    # 오늘 날짜 기존 데이터 삭제
+    print(f"\n기존 {today} 데이터 삭제...")
+    if not args.food:
+        _exec(conn, f"DELETE FROM {T_SILVER} WHERE crawl_date='{today}' AND platform='baemin'")
+    if not args.baemin:
+        _exec(conn, f"DELETE FROM {T_SILVER} WHERE crawl_date='{today}' AND platform='foodspring'")
+    print("  ✓ 삭제 완료")
+
+    # 셀러별 크롤링 + 즉시 저장 (메모리에 쌓지 않음)
+    total_saved = 0
+    failed_sellers = []
+
+    if not args.food:
+        for seller_id, records in _crawl_baemin_per_seller(test_mode=args.test):
+            if not records:
+                continue
+            try:
+                _batch_insert(conn, records, today)
+                total_saved += len(records)
+                print(f"  ✓ 배민 {seller_id}: {len(records)}건 저장 (누적 {total_saved}건)")
+            except Exception as e:
+                print(f"  ✗ 배민 {seller_id} 저장 실패: {e}")
+                failed_sellers.append(f"baemin/{seller_id}")
+
+    if not args.baemin:
+        for seller_id, records in _crawl_food_per_seller(test_mode=args.test):
+            if not records:
+                continue
+            try:
+                _batch_insert(conn, records, today)
+                total_saved += len(records)
+                print(f"  ✓ 식봄 {seller_id}: {len(records)}건 저장 (누적 {total_saved}건)")
+            except Exception as e:
+                print(f"  ✗ 식봄 {seller_id} 저장 실패: {e}")
+                failed_sellers.append(f"foodspring/{seller_id}")
+
+    conn.close()
 
     print(f"\n{'='*60}")
-    print(f"✓ 완료! {len(records)}건 저장 ({today})")
+    print(f"✓ 완료! 총 {total_saved:,}건 저장 ({today})")
+    if failed_sellers:
+        print(f"⚠ 실패 셀러: {', '.join(failed_sellers)}")
     print(f"{'='*60}")
 
 
