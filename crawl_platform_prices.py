@@ -681,7 +681,8 @@ def main():
                 seller_filter.setdefault("foodspring", set()).add(item)
         print(f"[셀러 필터] {seller_filter}")
 
-    today = datetime.date.today().isoformat()
+    _KST = datetime.timezone(datetime.timedelta(hours=9))
+    today = datetime.datetime.now(_KST).date().isoformat()
     print(f"{'='*60}")
     print(f"플랫폼 가격 크롤러 시작 (crawl_date={today})")
     if args.test:

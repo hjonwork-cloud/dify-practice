@@ -12,8 +12,10 @@ import sys
 import logging
 import threading
 import time
-from datetime import date
+from datetime import date, datetime, timezone, timedelta
 from pathlib import Path
+
+_KST = timezone(timedelta(hours=9))
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +43,7 @@ _scheduler_lock = threading.Lock()
 
 def _parse_crawl_output(stdout: str, duration_sec: float) -> dict:
     """크롤러 stdout에서 통계 파싱."""
-    today = date.today().isoformat()
+    today = datetime.now(_KST).date().isoformat()
     total = 0
     baemin_count = 0
     food_count = 0
