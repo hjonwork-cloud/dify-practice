@@ -245,12 +245,24 @@ function _renderTokens(tokens) {
     btn.style.cssText = 'padding:.25rem .65rem;border-radius:999px;border:1.5px solid #3b82f6;'
       + 'background:#eff6ff;color:#1d4ed8;font-size:.78rem;cursor:pointer;transition:all .15s;';
     btn.onclick = () => {
+      const kw = document.getElementById('sm-keyword');
       if (_smSelectedTokens.has(tok)) {
         _smSelectedTokens.delete(tok);
         _applyTokenStyle(btn, false);
+        if (_kwManuallyEdited) {
+          // dirty 모드: 현재 keyword에서 해당 토큰 제거
+          let cur = kw.value.replace(/^\*|\*$/g, '');
+          const parts = cur.split('*').filter(t => t.trim() && t.trim().toLowerCase() !== tok.toLowerCase());
+          kw.value = parts.length ? '*' + parts.join('*') + '*' : '';
+        }
       } else {
         _smSelectedTokens.add(tok);
         _applyTokenStyle(btn, true);
+        if (_kwManuallyEdited) {
+          // dirty 모드: 현재 keyword에 토큰 추가
+          const cur = kw.value.replace(/^\*|\*$/g, '').replace(/\*+$/, '');
+          kw.value = '*' + (cur ? cur + '*' + tok : tok) + '*';
+        }
       }
       _syncKeywordFromTokens();
       searchSuggest();
