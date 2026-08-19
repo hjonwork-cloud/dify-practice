@@ -22,14 +22,14 @@ logger = logging.getLogger(__name__)
 # 로컬: crawl_scheduler.py 기준 상위 폴더
 def _find_crawl_script() -> str:
     candidates = [
-        Path("/home/site/wwwroot/crawl_platform_prices.py"),          # Azure App Service
+        Path(__file__).parent / "crawl_platform_prices.py",           # api/ 안에 복사본 (Azure/로컬 공통)
+        Path("/home/site/wwwroot/crawl_platform_prices.py"),          # Azure App Service 루트
         Path(__file__).parent.parent / "crawl_platform_prices.py",    # 로컬 (api/../)
         Path(os.getcwd()) / "crawl_platform_prices.py",               # cwd 기준
     ]
     for p in candidates:
         if p.exists():
             return str(p)
-    # 못 찾으면 Azure 경로를 기본값으로 (에러 메시지가 명확하게 남도록)
     return str(candidates[0])
 
 _CRAWL_SCRIPT = _find_crawl_script()
