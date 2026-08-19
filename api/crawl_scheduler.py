@@ -104,12 +104,14 @@ def _run_crawl():
             except Exception as e:
                 logger.warning(f"[scheduler] 메일 발송 실패: {e}")
         else:
-            logger.error(f"[scheduler] 크롤러 실패 (code={result.returncode})\n{result.stderr[-500:]}")
+            stderr_tail = result.stderr[-1000:] if result.stderr else "(stderr 없음)"
+            logger.error(f"[scheduler] 크롤러 실패 (code={result.returncode})\n{stderr_tail}")
             # 실패 시에도 메일 발송 시도
             try:
                 from crawl_mailer import send_report
                 report = _parse_crawl_output(result.stdout or "", duration)
                 report["failed_sellers"].append(f"크롤러 비정상 종료 (code={result.returncode})")
+                report["stderr"] = stderr_tail  # 메일에 포함용
                 send_report(report)
             except Exception:
                 pass

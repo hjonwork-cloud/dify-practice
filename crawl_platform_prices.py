@@ -12,7 +12,10 @@
 import sys, os, time, datetime, json, argparse, re
 import requests
 
-sys.stdout.reconfigure(encoding="utf-8")
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+except Exception:
+    pass  # Azure pipe 환경에서 reconfigure 실패 무시
 
 # ── Databricks 연결 설정 ──────────────────────────────────────────────────
 _THIS_DIR  = os.path.dirname(os.path.abspath(__file__))

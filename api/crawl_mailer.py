@@ -38,6 +38,7 @@ def _build_html(report: dict) -> str:
     baemin_cnt   = report.get("baemin_count", 0)
     food_cnt     = report.get("food_count", 0)
     failed       = report.get("failed_sellers", [])
+    stderr_log   = report.get("stderr", "")
     seller_rows  = report.get("seller_summary", [])  # [{platform, seller_id, count}]
     status       = "✅ 성공" if not failed else f"⚠️ 부분 실패 ({len(failed)}개 셀러)"
     status_color = "#10b981" if not failed else "#f59e0b"
@@ -151,6 +152,13 @@ def _build_html(report: dict) -> str:
     <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:14px 18px;margin-bottom:24px;">
       <div style="font-size:13px;font-weight:700;color:#c2410c;margin-bottom:6px;">⚠️ 수집 실패 셀러</div>
       {failed_html}
+    </div>'''}
+
+    <!-- stderr 로그 (오류 시에만) -->
+    {"" if not stderr_log else f'''
+    <div style="background:#1e1e2e;border-radius:10px;padding:14px 18px;margin-bottom:24px;">
+      <div style="font-size:12px;font-weight:700;color:#f38ba8;margin-bottom:8px;">🔴 오류 로그 (stderr)</div>
+      <pre style="margin:0;font-size:11px;color:#cdd6f4;font-family:monospace;white-space:pre-wrap;word-break:break-all;">{stderr_log}</pre>
     </div>'''}
 
   </div>
