@@ -145,8 +145,11 @@
       </div>
       <button onclick="closeSuggest()" style="margin-left:auto;background:none;border:none;font-size:1.4rem;cursor:pointer;color:#94a3b8;">✕</button>
     </div>
-    <div style="display:flex;gap:.5rem;">
-      <input type="text" id="sm-keyword" placeholder="*삼겹* 형태 와일드카드 검색 가능" class="pm-input" style="flex:1;">
+    <!-- 키워드 토큰 버튼 -->
+    <div id="sm-token-bar" style="display:flex;flex-wrap:wrap;gap:.35rem;min-height:.5rem;"></div>
+    <!-- 검색 바 -->
+    <div style="display:flex;gap:.5rem;flex-wrap:wrap;">
+      <input type="text" id="sm-keyword" placeholder="*삼겹* 형태 와일드카드 검색 가능" class="pm-input" style="flex:1;min-width:180px;">
       <select id="sm-platform" class="pm-input" style="width:130px;">
         <option value="">전체 플랫폼</option>
         <option value="baemin">배민상회</option>
