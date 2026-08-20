@@ -1,0 +1,53 @@
+name: Baemin API Test
+
+on:
+  workflow_dispatch:  # 수동 실행으로 즉시 테스트
+
+jobs:
+  test-baemin-api:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Test Baemin API from GitHub Actions IP
+        run: |
+          echo "=== GitHub Actions 아웃바운드 IP ==="
+          curl -s https://api.ipify.org
+          echo ""
+          
+          echo ""
+          echo "=== 배민 셀러 목록 API ==="
+          curl -s -o /dev/null -w "status=%{http_code}\n" \
+            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
+            -H "Accept: application/json" \
+            -H "Referer: https://mart.baemin.com/" \
+            -H "Origin: https://mart.baemin.com" \
+            "https://gw-api-mart.baemin.com/front-api/v1/sellers"
+          
+          echo ""
+          echo "=== 배민 상품 API (seller=907, page=0) ==="
+          RESP=$(curl -s -w "\n__STATUS__%{http_code}" \
+            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
+            -H "Accept: application/json" \
+            -H "Referer: https://mart.baemin.com/" \
+            -H "Origin: https://mart.baemin.com" \
+            "https://gw-api-mart.baemin.com/front-api/v1/sellers/907/goods/paging?page=0&size=5&sortType=RECOMMEND")
+          
+          STATUS=$(echo "$RESP" | grep '__STATUS__' | sed 's/__STATUS__//')
+          BODY=$(echo "$RESP" | grep -v '__STATUS__')
+          
+          echo "HTTP Status: $STATUS"
+          if [ "$STATUS" = "200" ]; then
+            echo "SUCCESS - 배민 API 정상 응답"
+            echo "$BODY" | python3 -c "import sys,json; d=json.load(sys.stdin); print('totalElements:', (d.get('data') or {}).get('goodsList', {}).get('totalElements'))"
+          else
+            echo "BLOCKED or ERROR - 응답 내용:"
+            echo "$BODY" | head -c 300
+          fi
+          
+          echo ""
+          echo "=== 배민 상품 API (seller=1384) ==="
+          curl -s -o /dev/null -w "status=%{http_code}\n" \
+            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
+            -H "Accept: application/json" \
+            -H "Referer: https://mart.baemin.com/" \
+            -H "Origin: https://mart.baemin.com" \
+            "https://gw-api-mart.baemin.com/front-api/v1/sellers/1384/goods/paging?page=0&size=5&sortType=RECOMMEND"
