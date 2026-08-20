@@ -228,6 +228,7 @@ def _get_our_products(plant: str) -> list[dict]:
                 MAX(m.`자재그룹명`)                            AS product_group,
                 MAX(m.`자재그룹`)                              AS material_group,
                 MAX(m.`대분류`)                                AS category,
+                MAX(COALESCE(m.`세금분류명`, '과세'))            AS tax_class,
                 z.`플랜트`                                      AS plant,
                 MAX(COALESCE(z.`사용보류`, ''))                AS use_hold
             FROM {T_ZSDR} z
@@ -881,6 +882,9 @@ async def pm_detail(
         row["crawl_date"] = str(row.get("crawl_date", ""))
         fee = _get_fee(_dt, _pf, _sn)
         row["fee_pct"] = round(fee * 100, 1)
+        # 실판매가 (수수료 제외 쫐정)
+        ps = row.get("price_sale")
+        row["net_price"] = round(ps * (1 - fee), 0) if ps else None
 
     # 중복 제거: (platform, seller_name, spec, price_sale) 동일 행 하나만 표시
     _seen: set = set()
@@ -894,15 +898,25 @@ async def pm_detail(
     today_rows = _deduped
 
     # 시장 통계
+    our_sale = price_info.get("avg_sale_price")
     prices = [r["price_sale"] for r in today_rows if r.get("price_sale")]
+    net_prices = [r["net_price"] for r in today_rows if r.get("net_price")]
     market_min  = min(prices) if prices else None
     market_avg  = round(sum(prices)/len(prices)) if prices else None
+    market_min_net = round(min(net_prices)) if net_prices else None
+    market_avg_net = round(sum(net_prices)/len(net_prices)) if net_prices else None
     market_min_gp = _calc_gp(market_min, buy_price, "직배송") if market_min else None
 
-    # 경쟁등급: 우리 기준가 vs 시장최저가
-    our_sale = price_info.get("avg_sale_price")
-    if our_sale and market_min:
-        ratio = our_sale / market_min
+    # 과세여부 및 VAT 포함 판매가
+    our_products = _get_our_products(plant)
+    product_info_meta = next((p for p in our_products if p["product_code"] == product_code), {})
+    tax_status = product_info_meta.get("tax_class", "과세") or "과세"
+    vat_mult = 1.1 if tax_status == "과세" else 1.0
+    our_sale_vat = round(our_sale * vat_mult) if our_sale else None  # VAT 포함 판매가
+
+    # 경쟁등급: VAT 포함 판매가 vs 시장최저가 (외부 가격은 VAT 포함)
+    if our_sale_vat and market_min:
+        ratio = our_sale_vat / market_min
         if ratio <= 1.0:   grade = "A"
         elif ratio <= 1.05: grade = "B"
         elif ratio <= 1.10: grade = "C"
@@ -968,16 +982,17 @@ async def pm_detail(
         chart_datasets.append(_our_line)
         chart_datasets_platform.append(_our_line)
 
-    our_products = _get_our_products(plant)
-    product_info_meta = next((p for p in our_products if p["product_code"] == product_code), {})
-
     return _render(request, "pm_detail.html",
                    product_code=product_code,
                    product_info=product_info_meta,
                    price_info=price_info,
+                   tax_status=tax_status,
+                   our_sale_vat=our_sale_vat,
                    today_rows=today_rows,
                    market_min=market_min,
                    market_avg=market_avg,
+                   market_min_net=market_min_net,
+                   market_avg_net=market_avg_net,
                    market_min_gp=market_min_gp,
                    grade=grade,
                    chart_dates=_json.dumps(chart_dates),
