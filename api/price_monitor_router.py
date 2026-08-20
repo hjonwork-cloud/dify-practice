@@ -315,20 +315,35 @@ def _get_platform_latest(product_keys: list[str] | None = None,
 # 외부 플랫폼 수수료율 (VAT 포함)
 _FEE_DIRECT   = 0.066   # 직배송: PG 3% + 플랫폼 3% + VAT = 6.6%
 _FEE_SINGSING = 0.171   # 싱싱배송: 직배송 6.6% + 추가 10.5% = 17.1%
+_FEE_CJ       = 0.048   # CJ프레시웨이 예외: 식봄 최대주주로 우대 수수료 4.8%
+
+# CJ프레시웨이 예외 셀러 (식봄 플랫폼 한정)
+_CJ_SELLER_NAMES = {"CJ프레시웨이", "cj프레시웨이", "CJ 프레시웨이"}
+
+
+def _get_fee(delivery_type: str = "직배송", platform: str = "", seller_name: str = "") -> float:
+    """수수료율 반환. CJ프레시웨이(식봄)는 4.8% 우대 적용."""
+    if platform == "foodspring" and seller_name in _CJ_SELLER_NAMES:
+        return _FEE_CJ
+    if delivery_type == "싱싱배송":
+        return _FEE_SINGSING
+    return _FEE_DIRECT
 
 
 def _calc_gp(platform_price: float | None, buy_price: float | None,
-             delivery_type: str = "직배송") -> float | None:
+             delivery_type: str = "직배송",
+             platform: str = "", seller_name: str = "") -> float | None:
     """
     수수료 차감 후 GP율 계산.
-    - 직배송: 외부판매가 × (1 - 0.066) = 수취액 A
-    - 싱싱배송: 외부판매가 × (1 - 0.171) = 수취액 A
+    - 직배송: 외부판매가 × (1 - 0.066) / 1.1 = 수취액 A
+    - 싱싱배송: 외부판매가 × (1 - 0.171) / 1.1 = 수취액 A
+    - CJ프레시웨이(식봄): 외부판매가 × (1 - 0.048) / 1.1 = 수취액 A
     - GP% = (A - 구매단가) / A × 100
     """
     if not platform_price or not buy_price:
         return None
     try:
-        fee = _FEE_SINGSING if delivery_type == "싱싱배송" else _FEE_DIRECT
+        fee = _get_fee(delivery_type, platform, seller_name)
         a = platform_price * (1.0 - fee) / 1.1   # 수수료 차감 후 부가세(10%) 제외
         return round((a - buy_price) / a * 100, 1)
     except Exception:
@@ -391,15 +406,17 @@ async def pm_dashboard(
         buy_price = price_info.get("avg_buy_price")
         sale_price = pf_data.get("price_sale")
         delivery_type = pf_data.get("delivery_type", "직배송")
-        gp = _calc_gp(sale_price, buy_price, delivery_type)
+        _platform    = pf_data.get("platform", "")
+        _seller_name = pf_data.get("platform_seller_name", "")
+        gp = _calc_gp(sale_price, buy_price, delivery_type, _platform, _seller_name)
         status = _gp_status(gp)
         if alert_only and status not in ("alert", "warn"):
             continue
         rows.append({
             "our_product_code":   p_code,
             "product_name":       m.get("product_name") or "",
-            "platform":           pf_data.get("platform", ""),
-            "seller_name":        pf_data.get("platform_seller_name", ""),
+            "platform":           _platform,
+            "seller_name":        _seller_name,
             "ext_product_name":   pf_data.get("product_name", ""),
             "ext_spec":           pf_data.get("spec", ""),
             "avg_sale_price":     price_info.get("avg_sale_price"),
@@ -767,6 +784,8 @@ async def pm_history(
             row.get("price_sale"),
             price_info.get("avg_buy_price"),
             row.get("delivery_type", "직배송"),
+            row.get("platform", ""),
+            row.get("platform_seller_name", ""),
         )
         row["gp_pct"] = gp
         row["gp_status"] = _gp_status(gp)
