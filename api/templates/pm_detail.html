@@ -91,7 +91,7 @@
   </div>
   <div class="detail-kpi-row">
     <div class="detail-kpi">
-      <div class="kpi-label">우리 기준판가 (2주평균)</div>
+      <div class="kpi-label">당사 판매단가 (2주평균)</div>
       <div class="kpi-val" style="color:#1e40af;">
         {% if our_sale %}{{ '{:,.0f}'.format(our_sale) }}원{% else %}—{% endif %}
       </div>
@@ -100,6 +100,14 @@
       <div class="kpi-label">구매단가 (2주평균)</div>
       <div class="kpi-val" style="color:#475569;">
         {% if our_buy %}{{ '{:,.0f}'.format(our_buy) }}원{% else %}—{% endif %}
+      </div>
+    </div>
+    <div class="detail-kpi">
+      <div class="kpi-label">구매단가 대비 당사 GP율</div>
+      <div class="kpi-val" style="color:{% if our_sale and our_buy and ((our_sale - our_buy) / our_sale * 100) < gp_alert_pct %}#b91c1c{% elif our_sale and our_buy and ((our_sale - our_buy) / our_sale * 100) < gp_warn_pct %}#d97706{% else %}#059669{% endif %}">
+        {% if our_sale and our_buy %}
+          {{ '{:.1f}'.format((our_sale - our_buy) / our_sale * 100) }}%
+        {% else %}—{% endif %}
       </div>
     </div>
     <div class="detail-kpi">

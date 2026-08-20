@@ -47,7 +47,7 @@
           <th></th>
         </tr>
       </thead>
-      <tbody>
+      <tbody id="reqTbody">
         {% for r in rows %}
         <tr>
           <td style="color:#94a3b8;font-size:.78rem;">{{ r.request_id }}</td>
@@ -71,7 +71,8 @@
           </td>
           <td>
             <button class="pm-btn pm-btn-ghost pm-btn-sm"
-                    onclick="openDetail({{ r | tojson }})">검토</button>
+                    data-idx="{{ loop.index0 }}"
+                    onclick="openDetailByIdx(this.dataset.idx)">검토</button>
           </td>
         </tr>
         {% endfor %}
@@ -115,7 +116,12 @@
 </div>
 
 <script>
+const PM_REQ_ROWS = {{ rows | tojson }};
 let currentReqId=null;
+
+function openDetailByIdx(idx){
+  openDetail(PM_REQ_ROWS[parseInt(idx,10)]);
+}
 
 function openDetail(r){
   currentReqId=r.request_id;

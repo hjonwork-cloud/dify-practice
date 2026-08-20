@@ -904,7 +904,7 @@ async def pm_detail(
     # 우리 기준가 수평선
     if our_sale:
         chart_datasets.append({
-            "label": "우리 기준판가", "data": [our_sale]*len(chart_dates),
+            "label": "당사 판매단가", "data": [our_sale]*len(chart_dates),
             "borderColor": "#0f172a", "borderDash": [6,3],
             "backgroundColor": "transparent", "pointRadius": 0, "tension": 0
         })
