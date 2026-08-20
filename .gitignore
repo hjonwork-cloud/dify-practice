@@ -21,3 +21,4 @@ api/admin_console.db-wal
 api/.token_cache
 api/action_store.db
 api/$null
+.env.local
