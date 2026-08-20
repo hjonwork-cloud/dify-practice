@@ -49,8 +49,11 @@
 
 /* ── 차트 ── */
 .chart-card { background:#fff; border-radius:12px; padding:1.25rem 1.5rem; box-shadow:0 1px 4px rgba(0,0,0,.07); margin-bottom:1rem; }
-.chart-card .card-title { font-weight:700; font-size:.92rem; margin-bottom:1rem; color:#1e293b; }
-.chart-wrap { position:relative; height:260px; }
+.chart-card .card-title { font-weight:700; font-size:.92rem; margin-bottom:.75rem; color:#1e293b; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:.5rem; }
+.chart-wrap { position:relative; height:400px; }
+.chart-toggle { display:flex; gap:.35rem; }
+.chart-toggle button { font-size:.78rem; padding:.3rem .75rem; border-radius:6px; border:1.5px solid #e2e8f0; background:#fff; cursor:pointer; font-weight:600; color:#64748b; transition:all .12s; }
+.chart-toggle button.active { background:#1d4ed8; border-color:#1d4ed8; color:#fff; }
 
 /* ── 경보 하이라이트 ── */
 .row-alert td { background:#fef2f2 !important; }
@@ -162,7 +165,21 @@
   </div>
 </div>
 
-<!-- ③ 플랫폼별 셀러 비교 테이블 -->
+<!-- ③ 가격 추이 차트 (플랫폼별 / 셀러별 토글) -->
+<div class="chart-card">
+  <div class="card-title">
+    <span>📈 가격 추이 (최근 30일)</span>
+    <div class="chart-toggle">
+      <button id="btnPlatform" class="active" onclick="switchChart('platform')">🏷️ 플랫폼별</button>
+      <button id="btnSeller"            onclick="switchChart('seller')">👤 셀러별</button>
+    </div>
+  </div>
+  <div class="chart-wrap">
+    <canvas id="priceChart"></canvas>
+  </div>
+</div>
+
+<!-- ④ 플랫폼별 셀러 비교 테이블 -->
 <div class="compare-card">
   <div class="card-head">
     <span>🛒 플랫폼 셀러 현황 (최신 수집일 기준)</span>
@@ -245,64 +262,63 @@
   {% endif %}
 </div>
 
-<!-- ④ 가격 추이 차트 -->
-<div class="chart-card">
-  <div class="card-title">📈 가격 추이 (최근 30일)</div>
-  <div class="chart-wrap">
-    <canvas id="priceChart"></canvas>
-  </div>
-</div>
-
 <script>
 (function(){
-  const dates    = {{ chart_dates | safe }};
-  const datasets = {{ chart_datasets | safe }};
+  const dates              = {{ chart_dates | safe }};
+  const datasetsSeller     = {{ chart_datasets | safe }};
+  const datasetsPlatform   = {{ chart_datasets_platform | safe }};
   if (!dates.length) return;
 
-  // GP 마지노선 점선 (buy_price 기반)
+  // GP 마지노선 (직배송 기준)
   {% if our_buy and gp_alert_pct %}
-  const buyPrice = {{ our_buy }};
-  const alertPct = {{ gp_alert_pct }};
-  // price = buy / ((1 - fee/1.1) * (1 - gp/100))  → 직배송 fee=0.066
-  const fee  = 0.066;
-  const minGpPrice = Math.round(buyPrice / ((1 - fee / 1.1) * (1 - alertPct / 100)));
-  datasets.push({
-    label: `GP ${alertPct}% 마지노선`,
-    data: Array(dates.length).fill(minGpPrice),
-    borderColor: '#b91c1c',
-    borderDash: [4, 4],
-    backgroundColor: 'transparent',
-    pointRadius: 0,
-    tension: 0,
-  });
+  const _gpLine = {
+    label: `GP {{ gp_alert_pct }}% 마지노선`,
+    data: Array(dates.length).fill(
+      Math.round({{ our_buy }} / ((1 - 0.066 / 1.1) * (1 - {{ gp_alert_pct }} / 100)))
+    ),
+    borderColor: '#b91c1c', borderDash: [4,4],
+    backgroundColor: 'transparent', pointRadius: 0, tension: 0,
+  };
+  datasetsSeller.push(_gpLine);
+  datasetsPlatform.push(_gpLine);
   {% endif %}
 
-  new Chart(document.getElementById('priceChart'), {
-    type: 'line',
-    data: { labels: dates, datasets },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      interaction: { mode: 'index', intersect: false },
-      plugins: {
-        legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } },
-        tooltip: {
-          callbacks: {
-            label: ctx => ctx.parsed.y != null
-              ? `${ctx.dataset.label}: ${ctx.parsed.y.toLocaleString()}원`
-              : null,
-          }
-        }
-      },
-      scales: {
-        x: { grid: { color: '#f1f5f9' }, ticks: { font: { size: 11 } } },
-        y: {
-          grid: { color: '#f1f5f9' },
-          ticks: { font: { size: 11 }, callback: v => v.toLocaleString() + '원' }
-        }
-      }
+  const CHART_OPTS = {
+    responsive: true,
+    maintainAspectRatio: false,
+    interaction: { mode: 'index', intersect: false },
+    plugins: {
+      legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } },
+      tooltip: { callbacks: {
+        label: ctx => ctx.parsed.y != null
+          ? `${ctx.dataset.label}: ${ctx.parsed.y.toLocaleString()}원` : null
+      }}
+    },
+    scales: {
+      x: { grid: { color: '#f1f5f9' }, ticks: { font: { size: 11 }, maxTicksLimit: 15 } },
+      y: { grid: { color: '#f1f5f9' }, ticks: { font: { size: 11 }, callback: v => v.toLocaleString()+'원' } }
     }
-  });
+  };
+
+  let currentChart = null;
+
+  function buildChart(datasets){
+    if(currentChart) currentChart.destroy();
+    currentChart = new Chart(document.getElementById('priceChart'), {
+      type: 'line',
+      data: { labels: dates, datasets },
+      options: CHART_OPTS,
+    });
+  }
+
+  window.switchChart = function(mode){
+    document.getElementById('btnPlatform').classList.toggle('active', mode==='platform');
+    document.getElementById('btnSeller').classList.toggle('active', mode==='seller');
+    buildChart(mode==='platform' ? datasetsPlatform : datasetsSeller);
+  };
+
+  // 초기: 플랫폼별
+  buildChart(datasetsPlatform);
 })();
 </script>
 {% endblock %}

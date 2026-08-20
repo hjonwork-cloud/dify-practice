@@ -882,6 +882,17 @@ async def pm_detail(
         fee = _get_fee(_dt, _pf, _sn)
         row["fee_pct"] = round(fee * 100, 1)
 
+    # 중복 제거: (platform, seller_name, spec, price_sale) 동일 행 하나만 표시
+    _seen: set = set()
+    _deduped: list[dict] = []
+    for row in today_rows:
+        _key = (row.get("platform"), row.get("platform_seller_name"),
+                row.get("spec"), row.get("price_sale"))
+        if _key not in _seen:
+            _seen.add(_key)
+            _deduped.append(row)
+    today_rows = _deduped
+
     # 시장 통계
     prices = [r["price_sale"] for r in today_rows if r.get("price_sale")]
     market_min  = min(prices) if prices else None
@@ -901,6 +912,7 @@ async def pm_detail(
 
     # Chart.js 데이터 (날짜 × 셀러 라인)
     import json as _json
+    from collections import defaultdict as _defaultdict
     chart_dates: list[str] = sorted({str(r["crawl_date"]) for r in history_rows})
     seller_keys: list[str] = sorted({f"{r['platform']}|{r['platform_seller_name']}" for r in history_rows})
     chart_datasets = []
@@ -916,13 +928,45 @@ async def pm_detail(
                                 "backgroundColor": "transparent",
                                 "tension": 0.3, "spanGaps": True})
 
-    # 우리 기준가 수평선
+    # 플랫폼 집계 차트 (배민 vs 식봄: 최저/평균/최고)
+    _pf_colors = {
+        "baemin":     {"최저": "#1d4ed8", "평균": "#3b82f6", "최고": "#93c5fd"},
+        "foodspring": {"최저": "#065f46", "평균": "#10b981", "최고": "#6ee7b7"},
+    }
+    chart_datasets_platform = []
+    for pf_key in ["baemin", "foodspring"]:
+        pf_label = "배민상회" if pf_key == "baemin" else "식봄"
+        pf_rows  = [r for r in history_rows if r["platform"] == pf_key]
+        if not pf_rows:
+            continue
+        _by_date: dict = _defaultdict(list)
+        for r in pf_rows:
+            if r["min_price"] is not None:
+                _by_date[str(r["crawl_date"])].append(float(r["min_price"]))
+        for stat, fn, dash in [("최저", min, None), ("평균", lambda v: sum(v)/len(v), [5,3]), ("최고", max, [2,2])]:
+            data = [round(fn(_by_date[d]), 0) if _by_date.get(d) else None for d in chart_dates]
+            ds: dict = {
+                "label": f"{pf_label} {stat}",
+                "data": data,
+                "borderColor": _pf_colors[pf_key][stat],
+                "backgroundColor": "transparent",
+                "tension": 0.3,
+                "spanGaps": True,
+            }
+            if dash:
+                ds["borderDash"] = dash
+            chart_datasets_platform.append(ds)
+
+    # 당사 판매단가 수평선 (공통)
     if our_sale:
-        chart_datasets.append({
-            "label": "당사 판매단가", "data": [our_sale]*len(chart_dates),
-            "borderColor": "#0f172a", "borderDash": [6,3],
-            "backgroundColor": "transparent", "pointRadius": 0, "tension": 0
-        })
+        _our_line = {
+            "label": "당사 판매단가",
+            "data": [our_sale] * len(chart_dates),
+            "borderColor": "#0f172a", "borderDash": [6, 3],
+            "backgroundColor": "transparent", "pointRadius": 0, "tension": 0,
+        }
+        chart_datasets.append(_our_line)
+        chart_datasets_platform.append(_our_line)
 
     our_products = _get_our_products(plant)
     product_info_meta = next((p for p in our_products if p["product_code"] == product_code), {})
@@ -938,6 +982,7 @@ async def pm_detail(
                    grade=grade,
                    chart_dates=_json.dumps(chart_dates),
                    chart_datasets=_json.dumps(chart_datasets),
+                   chart_datasets_platform=_json.dumps(chart_datasets_platform),
                    gp_alert_pct=GP_ALERT_PCT,
                    gp_warn_pct=GP_WARN_PCT,
                    plant=plant, plants=PLANTS)
