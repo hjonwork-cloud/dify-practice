@@ -154,7 +154,7 @@ for(const r of PM_ROWS){
 }
 
 function fmtN(n){ return n!=null ? Math.round(n).toLocaleString('ko-KR')+'원' : '-'; }
-function fmtM(n){ return n!=null ? (n/1e6).toFixed(1)+'만' : '-'; }
+function fmtM(n){ return n!=null ? (n*100/1e6).toFixed(1)+'만' : '-'; }
 function fmtQ(n){ return n!=null ? Math.round(n).toLocaleString('ko-KR')+'EA' : '-'; }
 function avg(a){ return a.length ? a.reduce((x,y)=>x+y,0)/a.length : null; }
 function gpStatus(pct){ return pct==null?'ok':pct<GP_ALERT?'alert':pct<GP_WARN?'warn':'ok'; }
