@@ -226,9 +226,11 @@ def _get_our_products(plant: str) -> list[dict]:
         if plant == 'ALL':
             plant_cond_op = f"z.`플랜트` IN ({', '.join(repr(p) for p in PLANTS_REAL)})"
             batch_filter = "AND z.`배치` IN ('01','03')"
+            group_by = "z.`상품코드`"  # ALL: 플랜트 무관, 상품코드 기준
         else:
             plant_cond_op = f"z.`플랜트` = '{plant}'"
             batch_filter = "AND z.`배치` = '01'" if plant == '4120' else "AND z.`배치` IN ('01','03')"
+            group_by = "z.`상품코드`, z.`플랜트`"
         rows = _q(f"""
             SELECT
                 z.`상품코드`                                    AS product_code,
@@ -239,14 +241,14 @@ def _get_our_products(plant: str) -> list[dict]:
                 MAX(m.`자재그룹`)                              AS material_group,
                 MAX(m.`대분류`)                                AS category,
                 MAX(COALESCE(m.`세금분류명`, '과세'))            AS tax_class,
-                z.`플랜트`                                      AS plant,
+                MIN(z.`플랜트`)                                AS plant,
                 MAX(COALESCE(z.`사용보류`, ''))                AS use_hold
             FROM {T_ZSDR} z
             LEFT JOIN {T_ZMM60} m ON z.`상품코드` = m.`상품코드`
             WHERE {plant_cond_op}
               {batch_filter}
               AND COALESCE(m.`자재그룹`, '') != '5140'
-            GROUP BY z.`상품코드`, z.`플랜트`
+            GROUP BY {group_by}
             ORDER BY COALESCE(MAX(m.`상품명`), z.`상품코드`)
             LIMIT 30000
         """)
@@ -268,9 +270,11 @@ def _get_our_products_with_batch(plant: str) -> list[dict]:
         if plant == 'ALL':
             plant_cond_wb = f"z.`플랜트` IN ({', '.join(repr(p) for p in PLANTS_REAL)})"
             batch_filter = "AND z.`배치` IN ('01','03')"
+            group_by_wb = "z.`상품코드`, z.`배치`"
         else:
             plant_cond_wb = f"z.`플랜트` = '{plant}'"
             batch_filter = "AND z.`배치` = '01'" if plant == '4120' else "AND z.`배치` IN ('01','03')"
+            group_by_wb = "z.`상품코드`, z.`배치`, z.`플랜트`"
         rows = _q(f"""
             SELECT
                 z.`상품코드`                                    AS product_code,
@@ -281,14 +285,14 @@ def _get_our_products_with_batch(plant: str) -> list[dict]:
                 MAX(m.`자재그룹명`)                            AS product_group,
                 MAX(m.`자재그룹`)                              AS material_group,
                 MAX(m.`대분류`)                                AS category,
-                z.`플랜트`                                      AS plant,
+                MIN(z.`플랜트`)                                AS plant,
                 MAX(COALESCE(z.`사용보류`, ''))                AS use_hold
             FROM {T_ZSDR} z
             LEFT JOIN {T_ZMM60} m ON z.`상품코드` = m.`상품코드`
             WHERE {plant_cond_wb}
               {batch_filter}
               AND COALESCE(m.`자재그룹`, '') != '5140'
-            GROUP BY z.`상품코드`, z.`배치`, z.`플랜트`
+            GROUP BY {group_by_wb}
             ORDER BY COALESCE(MAX(m.`상품명`), z.`상품코드`), z.`배치`
             LIMIT 30000
         """)
@@ -440,7 +444,7 @@ async def pm_dashboard(
             continue
         rows.append({
             "our_product_code":   p_code,
-            "product_name":       our_name_map.get(p_code) or m.get("product_name") or "",
+            "product_name":       our_name_map.get(p_code) or p_code,
             "platform":           _platform,
             "seller_name":        _seller_name,
             "ext_product_name":   pf_data.get("product_name", ""),
