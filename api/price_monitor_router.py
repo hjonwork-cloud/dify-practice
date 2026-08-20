@@ -942,3 +942,48 @@ async def api_scheduler_run_now(request: Request):
     t = threading.Thread(target=crawl_scheduler._run_crawl, daemon=True, name="crawl-manual")
     t.start()
     return JSONResponse({"ok": True, "message": "크롤링 백그라운드 실행 시작됨"})
+
+
+@router.get("/api/debug/baemin")
+async def api_debug_baemin(request: Request):
+    """Azure 서버에서 배민 API 직접 호출 테스트."""
+    _check_scheduler_auth(request)
+    import requests as _req
+    BAEMIN_API = "https://gw-api-mart.baemin.com/front-api/v1/sellers"
+    BAEMIN_HEADERS = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "application/json",
+        "Referer": "https://mart.baemin.com/",
+        "Origin": "https://mart.baemin.com",
+    }
+    results = {}
+
+    # 1) 셀러 목록 API
+    try:
+        r = _req.get(BAEMIN_API, headers=BAEMIN_HEADERS, timeout=10)
+        results["sellers_api"] = {"status": r.status_code, "body": r.text[:300]}
+    except Exception as e:
+        results["sellers_api"] = {"error": str(e)}
+
+    # 2) 상품 페이지 API (셀러 907 테스트)
+    test_sellers = ["907", "2090", "2089"]
+    results["product_api"] = {}
+    for sid in test_sellers:
+        try:
+            url = f"https://gw-api-mart.baemin.com/front-api/v1/sellers/{sid}/goods/paging"
+            r = _req.get(url, headers=BAEMIN_HEADERS,
+                         params={"page": 0, "size": 5, "sortType": "RECOMMEND"},
+                         timeout=10)
+            body = r.json() if r.status_code == 200 else r.text[:200]
+            total = None
+            if r.status_code == 200 and isinstance(body, dict):
+                total = (body.get("data") or {}).get("goodsList", {}).get("totalElements")
+            results["product_api"][sid] = {
+                "status": r.status_code,
+                "totalElements": total,
+                "success": (body.get("success") if isinstance(body, dict) else None),
+            }
+        except Exception as e:
+            results["product_api"][sid] = {"error": str(e)}
+
+    return JSONResponse({"ok": True, "results": results})
