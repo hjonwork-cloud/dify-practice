@@ -31,6 +31,10 @@
 .stat-box .stat-label{font-size:.72rem;color:#94a3b8;font-weight:700;text-transform:uppercase;letter-spacing:.04em;}
 .stat-box .stat-val{font-size:1.4rem;font-weight:800;margin-top:.1rem;}
 .filter-row{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:1rem;}
+.th-sort{cursor:pointer;user-select:none;}
+.th-sort:hover{color:#1e293b;}
+.sort-icon{margin-left:.25rem;color:#cbd5e1;font-size:.7rem;}
+.sort-icon.active{color:#3b82f6;}
 </style>
 {% endblock %}
 
@@ -96,10 +100,12 @@
           <th style="width:20px;"></th>
           <th>상품코드</th>
           <th>상품명</th>
-          <th style="text-align:right;">당사 판매단가<br><span style="font-weight:400;font-size:.67rem;color:#94a3b8;">(2주평균)</span></th>
-          <th style="text-align:right;">구매단가<br><span style="font-weight:400;font-size:.67rem;color:#94a3b8;">(추정)</span></th>
-          <th style="text-align:right;">외부판매가<br><span style="font-weight:400;font-size:.67rem;color:#94a3b8;">(평균)</span></th>
-          <th style="text-align:center;">외부 GP율<br><span style="font-weight:400;font-size:.67rem;color:#94a3b8;">(평균)</span></th>
+          <th class="th-sort" style="text-align:right;" onclick="sortBy('sale')">당사 판매단가<br><span style="font-weight:400;font-size:.67rem;color:#94a3b8;">(2주평균)</span> <span class="sort-icon" id="si_sale">⇅</span></th>
+          <th class="th-sort" style="text-align:right;" onclick="sortBy('buy')">구매단가<br><span style="font-weight:400;font-size:.67rem;color:#94a3b8;">(추정)</span> <span class="sort-icon" id="si_buy">⇅</span></th>
+          <th class="th-sort" style="text-align:right;" onclick="sortBy('ext')">외부판매가<br><span style="font-weight:400;font-size:.67rem;color:#94a3b8;">(평균)</span> <span class="sort-icon" id="si_ext">⇅</span></th>
+          <th class="th-sort" style="text-align:center;" onclick="sortBy('gp')">외부 GP율<br><span style="font-weight:400;font-size:.67rem;color:#94a3b8;">(평균)</span> <span class="sort-icon" id="si_gp">⇅</span></th>
+          <th class="th-sort" style="text-align:right;" onclick="sortBy('sales_amt')">전월 매출액 <span class="sort-icon active" id="si_sales_amt">↓</span></th>
+          <th class="th-sort" style="text-align:right;" onclick="sortBy('sales_qty')">전월 판매수량 <span class="sort-icon" id="si_sales_qty">⇅</span></th>
           <th>최신 수집일</th>
           <th></th>
         </tr>
@@ -134,6 +140,8 @@ for(const r of PM_ROWS){
       sale: r.avg_sale_price, buy: r.avg_buy_price,
       sellers: [], ext_prices: [], gp_pcts: [],
       worst_status: 'ok', crawl_date: '',
+      prev_amt: r.prev_sales_amt || null,
+      prev_qty: r.prev_sales_qty || null,
     });
   }
   const g = groupMap.get(k);
@@ -146,6 +154,8 @@ for(const r of PM_ROWS){
 }
 
 function fmtN(n){ return n!=null ? Math.round(n).toLocaleString('ko-KR')+'원' : '-'; }
+function fmtM(n){ return n!=null ? (n/1e6).toFixed(1)+'만' : '-'; }
+function fmtQ(n){ return n!=null ? Math.round(n).toLocaleString('ko-KR')+'EA' : '-'; }
 function avg(a){ return a.length ? a.reduce((x,y)=>x+y,0)/a.length : null; }
 function gpStatus(pct){ return pct==null?'ok':pct<GP_ALERT?'alert':pct<GP_WARN?'warn':'ok'; }
 function gpBadge(st,pct){
@@ -161,56 +171,102 @@ function pfBadge(p){
 }
 
 const tbody = document.getElementById('groupTbody');
-let idx=0;
-for(const [code,g] of groupMap){
-  const avgExt = avg(g.ext_prices);
-  const avgGp  = avg(g.gp_pcts);
-  const avgSt  = gpStatus(avgGp);
-  const rowCls = g.worst_status==='alert'?'row-alert':g.worst_status==='warn'?'row-warn':'';
-  const gid = 'g_'+idx;
 
-  /* 부모 행 */
-  const tr = document.createElement('tr');
-  tr.className = `group-parent ${rowCls}`;
-  tr.dataset.group = gid;
-  tr.innerHTML = `
-    <td><span class="expand-icon">▶</span></td>
-    <td><code style="font-size:.78rem;">${code}</code></td>
-    <td style="font-weight:700;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${g.name}">${g.name||'-'}</td>
-    <td style="text-align:right;">${fmtN(g.sale)}</td>
-    <td style="text-align:right;color:#475569;">${fmtN(g.buy)}</td>
-    <td style="text-align:right;font-weight:700;">${fmtN(avgExt!=null?avgExt:null)}</td>
-    <td style="text-align:center;">${gpBadge(avgSt, avgGp!=null?avgGp:null)}</td>
-    <td style="font-size:.78rem;color:#94a3b8;">${g.crawl_date}</td>
-    <td><a href="/portal/price-monitor/detail/${code}?plant=${PM_PLANT}"
-           class="pm-btn pm-btn-primary pm-btn-sm"
-           onclick="event.stopPropagation()">세부내역</a></td>`;
-  tbody.appendChild(tr);
+// groupMap → array for sorting
+const groups = [...groupMap.values()].map(g => {
+  g.avgExt = avg(g.ext_prices);
+  g.avgGp  = avg(g.gp_pcts);
+  return g;
+});
 
-  /* 자식 행들 (숨김 상태로 바로 뒤에 추가) */
-  for(const r of g.sellers){
-    const cr = document.createElement('tr');
-    cr.className = `child-row ${r.gp_status==='alert'?'child-alert':r.gp_status==='warn'?'child-warn':''}`;
-    cr.dataset.parent = gid;
-    cr.style.display = 'none';
-    cr.innerHTML = `
-      <td></td>
-      <td colspan="2">${pfBadge(r.platform)} <span style="margin-left:.4rem;font-size:.79rem;color:#475569;">${r.seller_name||''}</span></td>
-      <td colspan="2" style="font-size:.79rem;color:#64748b;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${r.ext_product_name||''}">${r.ext_product_name||'-'} <span style="color:#94a3b8;">${r.ext_spec||''}</span></td>
-      <td style="text-align:right;font-weight:700;">${fmtN(r.ext_price)}</td>
-      <td style="text-align:center;">${gpBadge(r.gp_status, r.gp_pct)}</td>
-      <td style="font-size:.74rem;color:#94a3b8;">${r.crawl_date}</td>
-      <td><span class="badge badge-gray" style="font-size:.7rem;">${r.delivery_type||'-'}</span>${r.is_free_delivery?'<span class="badge badge-ok" style="font-size:.68rem;margin-left:.2rem;">무료</span>':''}</td>`;
-    tbody.appendChild(cr);
-  }
+let _sortKey = 'sales_amt', _sortDir = -1;  // 기본: 전월매출액 내림차순
 
-  /* 클릭 토글 */
-  tr.addEventListener('click',()=>{
-    const open = tr.classList.toggle('is-open');
-    tbody.querySelectorAll(`[data-parent="${gid}"]`)
-         .forEach(c => c.style.display = open ? '' : 'none');
+function renderTable(){
+  tbody.innerHTML = '';
+  const sorted = [...groups].sort((a,b) => {
+    let av, bv;
+    if(_sortKey==='sale')      { av=a.sale;     bv=b.sale; }
+    else if(_sortKey==='buy')  { av=a.buy;      bv=b.buy; }
+    else if(_sortKey==='ext')  { av=a.avgExt;   bv=b.avgExt; }
+    else if(_sortKey==='gp')   { av=a.avgGp;    bv=b.avgGp; }
+    else if(_sortKey==='sales_amt') { av=a.prev_amt; bv=b.prev_amt; }
+    else if(_sortKey==='sales_qty') { av=a.prev_qty; bv=b.prev_qty; }
+    if(av==null && bv==null) return 0;
+    if(av==null) return 1;
+    if(bv==null) return -1;
+    return (av - bv) * _sortDir;
   });
-  idx++;
+
+  let idx = 0;
+  for(const g of sorted){
+    const avgExt = g.avgExt, avgGp = g.avgGp;
+    const avgSt  = gpStatus(avgGp);
+    const rowCls = g.worst_status==='alert'?'row-alert':g.worst_status==='warn'?'row-warn':'';
+    const gid = 'g_'+idx;
+    const code = g.code;
+
+    const tr = document.createElement('tr');
+    tr.className = `group-parent ${rowCls}`;
+    tr.dataset.group = gid;
+    tr.innerHTML = `
+      <td><span class="expand-icon">▶</span></td>
+      <td><code style="font-size:.78rem;">${code}</code></td>
+      <td style="font-weight:700;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${g.name}">${g.name||'-'}</td>
+      <td style="text-align:right;">${fmtN(g.sale)}</td>
+      <td style="text-align:right;color:#475569;">${fmtN(g.buy)}</td>
+      <td style="text-align:right;font-weight:700;">${fmtN(avgExt!=null?avgExt:null)}</td>
+      <td style="text-align:center;">${gpBadge(avgSt, avgGp!=null?avgGp:null)}</td>
+      <td style="text-align:right;font-weight:600;color:#1d4ed8;">${fmtM(g.prev_amt)}</td>
+      <td style="text-align:right;color:#475569;">${fmtQ(g.prev_qty)}</td>
+      <td style="font-size:.78rem;color:#94a3b8;">${g.crawl_date}</td>
+      <td><a href="/portal/price-monitor/detail/${code}?plant=${PM_PLANT}"
+             class="pm-btn pm-btn-primary pm-btn-sm"
+             onclick="event.stopPropagation()">세부내역</a></td>`;
+    tbody.appendChild(tr);
+
+    for(const r of g.sellers){
+      const cr = document.createElement('tr');
+      cr.className = `child-row ${r.gp_status==='alert'?'child-alert':r.gp_status==='warn'?'child-warn':''}`;
+      cr.dataset.parent = gid;
+      cr.style.display = 'none';
+      cr.innerHTML = `
+        <td></td>
+        <td colspan="2">${pfBadge(r.platform)} <span style="margin-left:.4rem;font-size:.79rem;color:#475569;">${r.seller_name||''}</span></td>
+        <td colspan="2" style="font-size:.79rem;color:#64748b;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${r.ext_product_name||''}">${r.ext_product_name||'-'} <span style="color:#94a3b8;">${r.ext_spec||''}</span></td>
+        <td style="text-align:right;font-weight:700;">${fmtN(r.ext_price)}</td>
+        <td style="text-align:center;">${gpBadge(r.gp_status, r.gp_pct)}</td>
+        <td colspan="2"></td>
+        <td style="font-size:.74rem;color:#94a3b8;">${r.crawl_date}</td>
+        <td><span class="badge badge-gray" style="font-size:.7rem;">${r.delivery_type||'-'}</span>${r.is_free_delivery?'<span class="badge badge-ok" style="font-size:.68rem;margin-left:.2rem;">무료</span>':''}</td>`;
+      tbody.appendChild(cr);
+    }
+
+    tr.addEventListener('click',()=>{
+      const open = tr.classList.toggle('is-open');
+      tbody.querySelectorAll(`[data-parent="${gid}"]`)
+           .forEach(c => c.style.display = open ? '' : 'none');
+    });
+    idx++;
+  }
 }
+
+function sortBy(key){
+  if(_sortKey === key){
+    _sortDir *= -1;
+  } else {
+    _sortKey = key;
+    _sortDir = -1;  // 새 컬럼은 내림차순 우선
+  }
+  // 아이콘 갱신
+  ['sale','buy','ext','gp','sales_amt','sales_qty'].forEach(k => {
+    const el = document.getElementById('si_'+k);
+    if(!el) return;
+    el.textContent = k===_sortKey ? (_sortDir===-1 ? '↓' : '↑') : '⇅';
+    el.classList.toggle('active', k===_sortKey);
+  });
+  renderTable();
+}
+
+renderTable();
 </script>
 {% endblock %}

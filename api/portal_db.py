@@ -1161,30 +1161,43 @@ def pm_review_change_request(request_id: int, action: str,
         req = dict(row)
         now = _now()
         if action == "APPROVE":
-            # 삭제 대상 비활성화
+            # 삭제 대상 비활성화 (plant='ALL' 매핑도 함께 처리)
             del_keys = json.loads(req.get("delete_product_keys") or "[]")
             for pk in del_keys:
                 conn.execute(
-                    "UPDATE price_map_product_link SET is_active=0 WHERE our_product_code=? AND plant=? AND product_key=?",
-                    (req["our_product_code"], req["plant"], pk),
+                    """UPDATE price_map_product_link SET is_active=0
+                       WHERE our_product_code=? AND product_key=?
+                         AND (plant=? OR plant='ALL')""",
+                    (req["our_product_code"], pk, req["plant"]),
                 )
-            # 추가 대상 insert
+            # 추가 대상 UPSERT (이미 존재하면 재활성화)
             add_keys_raw = json.loads(req.get("add_product_keys") or "[]")
             for item in add_keys_raw:
                 if isinstance(item, dict):
                     pk = item.get("product_key", "")
-                    conn.execute(
-                        """INSERT OR IGNORE INTO price_map_product_link
-                           (our_product_code, plant, product_key, platform,
-                            platform_seller_id, platform_product_id,
-                            product_name, seller_name, created_by)
-                           VALUES (?,?,?,?,?,?,?,?,?)""",
-                        (req["our_product_code"], req["plant"], pk,
-                         item.get("platform", ""), item.get("platform_seller_id", ""),
-                         item.get("platform_product_id", ""),
-                         item.get("product_name", ""), item.get("seller_name", ""),
-                         reviewed_by),
-                    )
+                    # 기존 레코드 여부
+                    existing = conn.execute(
+                        "SELECT mapping_id FROM price_map_product_link WHERE our_product_code=? AND plant=? AND product_key=?",
+                        (req["our_product_code"], req["plant"], pk),
+                    ).fetchone()
+                    if existing:
+                        conn.execute(
+                            "UPDATE price_map_product_link SET is_active=1, created_by=?, created_at=datetime('now','localtime') WHERE mapping_id=?",
+                            (reviewed_by, existing["mapping_id"]),
+                        )
+                    else:
+                        conn.execute(
+                            """INSERT INTO price_map_product_link
+                               (our_product_code, plant, product_key, platform,
+                                platform_seller_id, platform_product_id,
+                                product_name, seller_name, created_by)
+                               VALUES (?,?,?,?,?,?,?,?,?)""",
+                            (req["our_product_code"], req["plant"], pk,
+                             item.get("platform", ""), item.get("platform_seller_id", ""),
+                             item.get("platform_product_id", ""),
+                             item.get("product_name", ""), item.get("seller_name", ""),
+                             reviewed_by),
+                        )
             conn.execute(
                 "UPDATE price_map_change_request SET status='APPROVED', reviewed_by=?, reviewed_at=?, admin_memo=? WHERE request_id=?",
                 (reviewed_by, now, admin_memo, request_id),

@@ -386,6 +386,9 @@ async def pm_dashboard(
         if p.get("product_name")
     }
 
+    # 전월 매출 데이터
+    prev_sales_map = _get_prev_month_sales(plant)
+
     # 전체 매핑 목록
     all_mappings = portal_db.pm_list_all_mappings(plant)
     if not all_mappings:
@@ -435,6 +438,8 @@ async def pm_dashboard(
             "is_free_delivery":   pf_data.get("is_free_delivery"),
             "crawl_date":         str(pf_data.get("crawl_date", "")),
             "product_key":        pk,
+            "prev_sales_amt":     prev_sales_map.get(p_code, {}).get("prev_sales_amt"),
+            "prev_sales_qty":     prev_sales_map.get(p_code, {}).get("prev_sales_qty"),
         })
 
     # GP 오름차순 (경보 최상단)
