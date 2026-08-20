@@ -1,4 +1,4 @@
-"""외부 플랫폼 가격 모니터링 라우터 (배민상회/식봄 vs 우리 상품)."""
+﻿"""외부 플랫폼 가격 모니터링 라우터 (배민상회/식봄 vs 우리 상품)."""
 from __future__ import annotations
 
 import os
@@ -30,7 +30,9 @@ _SESSION_SECRET = os.getenv("PORTAL_SESSION_SECRET", "dongwon-portal-dev-secret-
 # 테스트 기간 중 관리자 전용
 _ALLOWED_EMP_CODES: set[str] = {access_control.ADMIN_EMP_CODE}
 
-PLANTS = ["4120", "4123"]
+PLANTS = ["ALL", "4120", "4123", "4121"]
+PLANT_LABELS = {"ALL": "전체센터", "4120": "4120(시화)", "4123": "4123(화성)", "4121": "4121(화성3배치)"}
+PLANTS_REAL = ["4120", "4123", "4121"]  # ALL 제외 실제 플랜트
 GP_ALERT_PCT = 10.0   # GP < 10% → 경보
 GP_WARN_PCT  = 20.0   # GP < 20% → 주의
 
@@ -109,6 +111,8 @@ def _get_base_prices(plant: str) -> list[dict]:
             return data
     try:
         import main as _main
+        plant_cond_bp = (f"`플랜트` IN ({', '.join(repr(p) for p in PLANTS_REAL)})"
+                         if plant == 'ALL' else f"`플랜트` = '{plant}'")
         rows = _q(f"""
             SELECT
                 `자재`                                                        AS product_code,
@@ -121,7 +125,7 @@ def _get_base_prices(plant: str) -> list[dict]:
                     NULLIF(SUM(CAST(`매출수량` AS DOUBLE)), 0) * 100
                 , 2)                                                          AS avg_buy_price
             FROM {_main.T_MAIN}
-            WHERE `플랜트` = '{plant}'
+            WHERE {plant_cond_bp}
               AND CAST(`년월` AS INT) >= YEAR(DATE_SUB(CURRENT_DATE(), 14)) * 100 + MONTH(DATE_SUB(CURRENT_DATE(), 14))
               AND `자재` IS NOT NULL
               AND `매출수량` > 0
@@ -148,13 +152,15 @@ def _get_prev_month_sales(plant: str) -> dict[str, dict]:
             return data
     try:
         import main as _main
+        plant_cond_ps = (f"`플랜트` IN ({', '.join(repr(p) for p in PLANTS_REAL)})"
+                         if plant == 'ALL' else f"`플랜트` = '{plant}'")
         rows = _q(f"""
             SELECT
                 `자재`                                   AS product_code,
                 SUM(CAST(`매출액`   AS DOUBLE)) * 100    AS prev_sales_amt,
                 SUM(CAST(`매출수량` AS DOUBLE))          AS prev_sales_qty
             FROM {_main.T_MAIN}
-            WHERE `플랜트` = '{plant}'
+            WHERE {plant_cond_ps}
               AND CAST(`년월` AS INT) = CAST(DATE_FORMAT(ADD_MONTHS(CURRENT_DATE(), -1), 'yyyyMM') AS INT)
               AND `자재` IS NOT NULL
               AND `매출수량` > 0
@@ -217,8 +223,12 @@ def _get_our_products(plant: str) -> list[dict]:
         if time.time() - ts < _PRODUCT_CACHE_TTL:
             return data
     try:
-        # 대상 배치 필터: 4120→01, 4123→01·03
-        batch_filter = "AND z.`배치` = '01'" if plant == "4120" else "AND z.`배치` IN ('01','03')"
+        if plant == 'ALL':
+            plant_cond_op = f"z.`플랜트` IN ({', '.join(repr(p) for p in PLANTS_REAL)})"
+            batch_filter = "AND z.`배치` IN ('01','03')"
+        else:
+            plant_cond_op = f"z.`플랜트` = '{plant}'"
+            batch_filter = "AND z.`배치` = '01'" if plant == '4120' else "AND z.`배치` IN ('01','03')"
         rows = _q(f"""
             SELECT
                 z.`상품코드`                                    AS product_code,
@@ -233,7 +243,7 @@ def _get_our_products(plant: str) -> list[dict]:
                 MAX(COALESCE(z.`사용보류`, ''))                AS use_hold
             FROM {T_ZSDR} z
             LEFT JOIN {T_ZMM60} m ON z.`상품코드` = m.`상품코드`
-            WHERE z.`플랜트` = '{plant}'
+            WHERE {plant_cond_op}
               {batch_filter}
               AND COALESCE(m.`자재그룹`, '') != '5140'
             GROUP BY z.`상품코드`, z.`플랜트`
@@ -255,7 +265,12 @@ def _get_our_products_with_batch(plant: str) -> list[dict]:
         if time.time() - ts < _PRODUCT_CACHE_TTL:
             return data
     try:
-        batch_filter = "AND z.`배치` = '01'" if plant == "4120" else "AND z.`배치` IN ('01','03')"
+        if plant == 'ALL':
+            plant_cond_wb = f"z.`플랜트` IN ({', '.join(repr(p) for p in PLANTS_REAL)})"
+            batch_filter = "AND z.`배치` IN ('01','03')"
+        else:
+            plant_cond_wb = f"z.`플랜트` = '{plant}'"
+            batch_filter = "AND z.`배치` = '01'" if plant == '4120' else "AND z.`배치` IN ('01','03')"
         rows = _q(f"""
             SELECT
                 z.`상품코드`                                    AS product_code,
@@ -270,7 +285,7 @@ def _get_our_products_with_batch(plant: str) -> list[dict]:
                 MAX(COALESCE(z.`사용보류`, ''))                AS use_hold
             FROM {T_ZSDR} z
             LEFT JOIN {T_ZMM60} m ON z.`상품코드` = m.`상품코드`
-            WHERE z.`플랜트` = '{plant}'
+            WHERE {plant_cond_wb}
               {batch_filter}
               AND COALESCE(m.`자재그룹`, '') != '5140'
             GROUP BY z.`상품코드`, z.`배치`, z.`플랜트`
@@ -366,13 +381,13 @@ def _gp_status(gp: float | None) -> str:
 @router.get("/", response_class=HTMLResponse)
 async def pm_dashboard(
     request: Request,
-    plant: str = "4120",
+    plant: str = "ALL",
     platform: str = "",
     alert_only: str = "",
 ):
     _require_pm_access(request)
     if plant not in PLANTS:
-        plant = "4120"
+        plant = "ALL"
 
     # 기준가/구매가
     price_rows = _get_base_prices(plant)
@@ -460,7 +475,7 @@ async def pm_dashboard(
 @router.get("/products", response_class=HTMLResponse)
 async def pm_products(
     request: Request,
-    plant: str = "4120",
+    plant: str = "ALL",
     keyword: str = "",
     map_filter: str = "",       # "mapped" | "unmapped" | ""
     category: str = "",         # 대분류 필터
@@ -470,7 +485,7 @@ async def pm_products(
 ):
     _require_pm_access(request)
     if plant not in PLANTS:
-        plant = "4120"
+        plant = "ALL"
     PAGE_SIZE = 20
 
     products    = _get_our_products_with_batch(plant)
@@ -554,10 +569,10 @@ async def pm_products(
 # ── 화면 3: 매핑 등록 ───────────────────────────────────────────────────────
 
 @router.get("/mapping", response_class=HTMLResponse)
-async def pm_mapping_page(request: Request, plant: str = "4120"):
+async def pm_mapping_page(request: Request, plant: str = "ALL"):
     _require_pm_access(request)
     if plant not in PLANTS:
-        plant = "4120"
+        plant = "ALL"
     return _render(request, "pm_mapping.html", plant=plant, plants=PLANTS)
 
 
@@ -639,7 +654,7 @@ async def api_debug(request: Request):
 # ── API: 우리 상품 검색 (AJAX) ────────────────────────────────────────────
 
 @router.get("/api/our-products")
-async def api_our_products(request: Request, plant: str = "4120", keyword: str = ""):
+async def api_our_products(request: Request, plant: str = "ALL", keyword: str = ""):
     _require_pm_access(request)
     error_msg = None
     try:
@@ -734,7 +749,7 @@ async def api_mapping_add(request: Request):
 # ── API: 매핑 목록 조회 (AJAX) ────────────────────────────────────────────
 
 @router.get("/api/mapping/{our_product_code}")
-async def api_mapping_list(request: Request, our_product_code: str, plant: str = "4120"):
+async def api_mapping_list(request: Request, our_product_code: str, plant: str = "ALL"):
     _require_pm_access(request)
     rows = portal_db.pm_list_mappings(our_product_code, plant)
     return JSONResponse(rows)
@@ -759,12 +774,12 @@ async def api_mapping_remove(request: Request):
 async def pm_history(
     request: Request,
     product_code: str,
-    plant: str = "4120",
+    plant: str = "ALL",
     days: int = 30,
 ):
     _require_pm_access(request)
     if plant not in PLANTS:
-        plant = "4120"
+        plant = "ALL"
 
     mappings = portal_db.pm_list_mappings(product_code, plant)
     product_keys = [m["product_key"] for m in mappings]
@@ -822,11 +837,11 @@ async def pm_history(
 async def pm_detail(
     request: Request,
     product_code: str,
-    plant: str = "4120",
+    plant: str = "ALL",
 ):
     _require_pm_access(request)
     if plant not in PLANTS:
-        plant = "4120"
+        plant = "ALL"
 
     # 기준가
     price_rows = _get_base_prices(plant)
@@ -1009,7 +1024,7 @@ async def pm_detail(
 async def pm_change_request_page(
     request: Request,
     product_code: str,
-    plant: str = "4120",
+    plant: str = "ALL",
 ):
     _require_pm_access(request)
     mappings = portal_db.pm_list_mappings(product_code, plant)
@@ -1187,3 +1202,7 @@ async def api_debug_baemin(request: Request):
             results["product_api"][sid] = {"error": str(e)}
 
     return JSONResponse({"ok": True, "results": results})
+
+
+
+

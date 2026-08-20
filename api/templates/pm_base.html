@@ -108,11 +108,12 @@
       <h1>{% block page_title %}가격 모니터링{% endblock %}</h1>
       <div style="display:flex;align-items:center;gap:1rem;">
         {% if plants is defined %}
+        {% set _pl = {"ALL": "전체센터", "4120": "4120(시화)", "4123": "4123(화성)", "4121": "4121(화성3배치)"} %}
         <div class="plant-toggle">
           {% for p in plants %}
           <a href="javascript:void(0)"
              onclick="switchPlant('{{ p }}')"
-             class="{% if plant is defined and plant==p %}active{% endif %}">{{ p }} 플랜트</a>
+             class="{% if plant is defined and plant==p %}active{% endif %}">{{ _pl[p] if p in _pl else p }}</a>
           {% endfor %}
         </div>
         {% endif %}

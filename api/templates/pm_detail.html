@@ -52,10 +52,6 @@
   border-radius:20px;border:1.5px solid #e2e8f0;font-size:.75rem;cursor:pointer;
   background:#fff;font-weight:600;color:#64748b;transition:all .12s;}
 .s-chip.on{background:#eff6ff;border-color:#93c5fd;color:#1d4ed8;}
-/* C: 서브탭 */
-.chart-subtab{display:flex;gap:.3rem;margin-bottom:.6rem;}
-.chart-subtab button{font-size:.74rem;padding:.22rem .65rem;border-radius:5px;border:1px solid #e2e8f0;background:#fff;cursor:pointer;font-weight:600;color:#64748b;}
-.chart-subtab button.active{background:#e0f2fe;border-color:#7dd3fc;color:#0369a1;}
 
 /* ── 비교 테이블 ── */
 .compare-card{background:#fff;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,.07);margin-bottom:1rem;overflow:hidden;}
@@ -197,7 +193,6 @@
     <div class="chart-abc">
       <button id="tabA" class="active" onclick="setChartMode('A')">A 플랫폼 분할</button>
       <button id="tabB" onclick="setChartMode('B')">B 셀러 선택</button>
-      <button id="tabC" onclick="setChartMode('C')">C 막대 비교</button>
     </div>
   </div>
 
@@ -221,14 +216,7 @@
     <div class="chart-wrap"><canvas id="chartB"></canvas></div>
   </div>
 
-  <!-- C: 현재가 막대 / 추이 라인 -->
-  <div id="panelC" style="display:none;">
-    <div class="chart-subtab">
-      <button id="cTabBar" class="active" onclick="setCSubTab('bar')">📊 현재가 비교</button>
-      <button id="cTabLine" onclick="setCSubTab('line')">📈 30일 추이</button>
-    </div>
-    <div class="chart-wrap"><canvas id="chartC"></canvas></div>
-  </div>
+
 </div>
 
 <!-- ④ 플랫폼 셀러 현황 테이블 -->
@@ -398,38 +386,13 @@ function rebuildB(){
 }
 function buildB(){ buildBChips(); rebuildB(); }
 
-/* ══════════ 옵션 C ══════════ */
-let cTab='bar';
-function buildCBar(){
-  const labels = TODAY.map(r=>`${r.platform==='baemin'?'배민':'식봄'} ${(r.platform_seller_name||'').substring(0,8)}`);
-  const ref = TAX==='과세'&&OUR_VAT ? OUR_VAT : OUR_SALE;
-  const bgColors = TODAY.map(r=>r.gp_status==='alert'?'rgba(252,165,165,.8)':r.gp_status==='warn'?'rgba(253,230,138,.8)':'rgba(134,239,172,.8)');
-  const ds = [
-    {label:'외부 표시가', data:TODAY.map(r=>r.price_sale||null), backgroundColor:bgColors, borderRadius:4},
-    {label:'실판매가(수수료제외)', data:TODAY.map(r=>r.net_price||null), backgroundColor:'rgba(147,197,253,.8)', borderRadius:4},
-  ];
-  if(ref) ds.push({label:ourLine.label, data:Array(labels.length).fill(ref), type:'line',
-    borderColor:'#0f172a', borderDash:[6,3], backgroundColor:'transparent', pointRadius:0, tension:0});
-  mkBar('chartC', labels, ds);
-}
-function buildCLine(){
-  mkLine('chartC', gpLine ? [...DS_SEL, gpLine] : DS_SEL);
-}
-function buildC(){ cTab==='bar'?buildCBar():buildCLine(); }
-window.setCSubTab=function(tab){
-  cTab=tab;
-  document.getElementById('cTabBar').classList.toggle('active',tab==='bar');
-  document.getElementById('cTabLine').classList.toggle('active',tab==='line');
-  buildC();
-};
-
 /* ══════════ 탭 전환 ══════════ */
 window.setChartMode=function(m){
-  ['A','B','C'].forEach(x=>{
+  ['A','B'].forEach(x=>{
     document.getElementById('panel'+x).style.display=x===m?'':'none';
     document.getElementById('tab'+x).classList.toggle('active',x===m);
   });
-  if(m==='A') buildA(); else if(m==='B') buildB(); else buildC();
+  if(m==='A') buildA(); else buildB();
 };
 if(DATES.length) buildA();
 
