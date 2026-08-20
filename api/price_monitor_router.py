@@ -803,6 +803,131 @@ async def pm_history(
                    plant=plant, plants=PLANTS, days=days)
 
 
+# ── 화면 4-2: 상품 상세 (와이어프레임) ────────────────────────────────────
+
+@router.get("/detail/{product_code}", response_class=HTMLResponse)
+async def pm_detail(
+    request: Request,
+    product_code: str,
+    plant: str = "4120",
+):
+    _require_pm_access(request)
+    if plant not in PLANTS:
+        plant = "4120"
+
+    # 기준가
+    price_rows = _get_base_prices(plant)
+    price_map  = {r["product_code"]: r for r in price_rows}
+    price_info = price_map.get(product_code, {})
+    buy_price  = price_info.get("avg_buy_price")
+
+    # 매핑된 product_keys
+    mappings     = portal_db.pm_list_mappings(product_code, plant)
+    product_keys = [m["product_key"] for m in mappings]
+
+    # 오늘(최신) 플랫폼 가격 – 셀러별
+    today_rows: list[dict] = []
+    history_rows: list[dict] = []
+    if product_keys:
+        keys_str = ", ".join(f"'{k}'" for k in product_keys)
+        try:
+            today_rows = _q(f"""
+                SELECT p.product_key, p.platform, p.platform_seller_name,
+                       p.product_name, p.spec,
+                       p.price_sale, p.price_original, p.discount_rate,
+                       p.delivery_type, p.is_free_delivery, p.crawl_date
+                FROM {T_SILVER} p
+                CROSS JOIN (SELECT MAX(crawl_date) AS max_date FROM {T_SILVER}
+                            WHERE product_key IN ({keys_str})) md
+                WHERE p.product_key IN ({keys_str})
+                  AND p.crawl_date = md.max_date
+                ORDER BY p.platform, p.platform_seller_name
+            """)
+            history_rows = _q(f"""
+                SELECT crawl_date, platform, platform_seller_name,
+                       MIN(price_sale) AS min_price,
+                       AVG(price_sale) AS avg_price,
+                       COUNT(*) AS cnt
+                FROM {T_SILVER}
+                WHERE product_key IN ({keys_str})
+                  AND crawl_date >= DATE_SUB(CURRENT_DATE(), 30)
+                  AND price_sale IS NOT NULL
+                GROUP BY crawl_date, platform, platform_seller_name
+                ORDER BY crawl_date, platform, platform_seller_name
+            """)
+        except Exception as e:
+            logger.exception(f"[detail] 조회 실패: {e}")
+
+    # GP 계산
+    for row in today_rows:
+        gp = _calc_gp(row.get("price_sale"), buy_price,
+                      row.get("delivery_type","직배송"),
+                      row.get("platform",""), row.get("platform_seller_name",""))
+        row["gp_pct"]    = gp
+        row["gp_status"] = _gp_status(gp)
+        row["crawl_date"] = str(row.get("crawl_date",""))
+
+    # 시장 통계
+    prices = [r["price_sale"] for r in today_rows if r.get("price_sale")]
+    market_min  = min(prices) if prices else None
+    market_avg  = round(sum(prices)/len(prices)) if prices else None
+    market_min_gp = _calc_gp(market_min, buy_price, "직배송") if market_min else None
+
+    # 경쟁등급: 우리 기준가 vs 시장최저가
+    our_sale = price_info.get("avg_sale_price")
+    if our_sale and market_min:
+        ratio = our_sale / market_min
+        if ratio <= 1.0:   grade = "A"
+        elif ratio <= 1.05: grade = "B"
+        elif ratio <= 1.10: grade = "C"
+        else:               grade = "D"
+    else:
+        grade = "-"
+
+    # Chart.js 데이터 (날짜 × 셀러 라인)
+    import json as _json
+    chart_dates: list[str] = sorted({str(r["crawl_date"]) for r in history_rows})
+    seller_keys: list[str] = sorted({f"{r['platform']}|{r['platform_seller_name']}" for r in history_rows})
+    chart_datasets = []
+    COLORS = ["#3b82f6","#10b981","#f59e0b","#ef4444","#8b5cf6","#06b6d4","#f97316","#84cc16"]
+    for i, sk in enumerate(seller_keys):
+        pf, sn = sk.split("|", 1)
+        date_price = {str(r["crawl_date"]): r["min_price"] for r in history_rows
+                      if f"{r['platform']}|{r['platform_seller_name']}" == sk}
+        data = [date_price.get(d) for d in chart_dates]
+        label = f"{'배민' if pf=='baemin' else '식봄'} {sn}"
+        chart_datasets.append({"label": label, "data": data,
+                                "borderColor": COLORS[i % len(COLORS)],
+                                "backgroundColor": "transparent",
+                                "tension": 0.3, "spanGaps": True})
+
+    # 우리 기준가 수평선
+    if our_sale:
+        chart_datasets.append({
+            "label": "우리 기준판가", "data": [our_sale]*len(chart_dates),
+            "borderColor": "#0f172a", "borderDash": [6,3],
+            "backgroundColor": "transparent", "pointRadius": 0, "tension": 0
+        })
+
+    our_products = _get_our_products(plant)
+    product_info_meta = next((p for p in our_products if p["product_code"] == product_code), {})
+
+    return _render(request, "pm_detail.html",
+                   product_code=product_code,
+                   product_info=product_info_meta,
+                   price_info=price_info,
+                   today_rows=today_rows,
+                   market_min=market_min,
+                   market_avg=market_avg,
+                   market_min_gp=market_min_gp,
+                   grade=grade,
+                   chart_dates=_json.dumps(chart_dates),
+                   chart_datasets=_json.dumps(chart_datasets),
+                   gp_alert_pct=GP_ALERT_PCT,
+                   gp_warn_pct=GP_WARN_PCT,
+                   plant=plant, plants=PLANTS)
+
+
 # ── 화면 5: 매핑 수정요청 (DELETE/REPLACE) ────────────────────────────────
 
 @router.get("/change-request/{product_code}", response_class=HTMLResponse)

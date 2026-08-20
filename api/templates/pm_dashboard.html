@@ -91,7 +91,9 @@
       </thead>
       <tbody>
         {% for r in rows %}
-        <tr class="{% if r.gp_status=='alert' %}row-alert{% elif r.gp_status=='warn' %}row-warn{% endif %}">
+        <tr class="{% if r.gp_status=='alert' %}row-alert{% elif r.gp_status=='warn' %}row-warn{% endif %}"
+            style="cursor:pointer;"
+            onclick="location.href='/portal/price-monitor/detail/{{ r.our_product_code }}?plant={{ plant }}'">
           <td><code style="font-size:.78rem;">{{ r.our_product_code }}</code></td>
           <td style="font-weight:600;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ r.product_name }}">
             {{ r.product_name or '-' }}
