@@ -267,11 +267,15 @@ def _baemin_fetch_page(seller_id: str, page: int) -> dict | None:
             params={"page": page, "size": 40, "sortType": "RECOMMEND"},
             timeout=15,
         )
+        print(f"  [배민 HTTP] seller={seller_id} page={page} status={resp.status_code}")
         resp.raise_for_status()
         data = resp.json()
-        return data["data"]["goodsList"] if data.get("success") else None
+        if not data.get("success"):
+            print(f"  [배민 API] success=False: {str(data)[:200]}")
+            return None
+        return data["data"]["goodsList"]
     except Exception as e:
-        print(f"  ⚠ 배민 요청 실패 (seller={seller_id} page={page}): {e}")
+        print(f"  ⚠ 배민 요청 실패 (seller={seller_id} page={page}): {type(e).__name__}: {e}")
         return None
 
 
