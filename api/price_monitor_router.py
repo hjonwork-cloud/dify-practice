@@ -379,6 +379,13 @@ async def pm_dashboard(
         r["product_code"]: r for r in price_rows
     }
 
+    # 우리 상품명 맵 (T_ZMM60 기준)
+    our_name_map: dict[str, str] = {
+        p["product_code"]: p["product_name"]
+        for p in _get_our_products(plant)
+        if p.get("product_name")
+    }
+
     # 전체 매핑 목록
     all_mappings = portal_db.pm_list_all_mappings(plant)
     if not all_mappings:
@@ -414,7 +421,7 @@ async def pm_dashboard(
             continue
         rows.append({
             "our_product_code":   p_code,
-            "product_name":       m.get("product_name") or "",
+            "product_name":       our_name_map.get(p_code) or m.get("product_name") or "",
             "platform":           _platform,
             "seller_name":        _seller_name,
             "ext_product_name":   pf_data.get("product_name", ""),
@@ -860,12 +867,15 @@ async def pm_detail(
 
     # GP 계산
     for row in today_rows:
-        gp = _calc_gp(row.get("price_sale"), buy_price,
-                      row.get("delivery_type","직배송"),
-                      row.get("platform",""), row.get("platform_seller_name",""))
+        _pf  = row.get("platform", "")
+        _sn  = row.get("platform_seller_name", "")
+        _dt  = row.get("delivery_type", "직배송")
+        gp = _calc_gp(row.get("price_sale"), buy_price, _dt, _pf, _sn)
         row["gp_pct"]    = gp
         row["gp_status"] = _gp_status(gp)
-        row["crawl_date"] = str(row.get("crawl_date",""))
+        row["crawl_date"] = str(row.get("crawl_date", ""))
+        fee = _get_fee(_dt, _pf, _sn)
+        row["fee_pct"] = round(fee * 100, 1)
 
     # 시장 통계
     prices = [r["price_sale"] for r in today_rows if r.get("price_sale")]

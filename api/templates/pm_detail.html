@@ -186,7 +186,6 @@
       </thead>
       <tbody>
         {% for r in today_rows %}
-        {% set fee = 0.066 if r.delivery_type == '직배송' else 0.171 %}
         {% set vs_diff = (r.price_sale - our_sale) if (r.price_sale and our_sale) else none %}
         <tr class="{% if r.gp_status=='alert' %}row-alert{% elif r.gp_status=='warn' %}row-warn{% endif %}">
           <td>
@@ -216,7 +215,7 @@
             {% else %}—{% endif %}
           </td>
           <td style="text-align:right;font-size:.8rem;color:#64748b;">
-            {{ (fee * 100)|round(1) }}%
+            {{ r.fee_pct }}%
           </td>
           <td style="text-align:center;">
             {% if r.gp_pct is not none %}

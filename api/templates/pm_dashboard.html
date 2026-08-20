@@ -160,7 +160,6 @@ function pfBadge(p){
     : '<span class="badge badge-foodspring">식봄</span>';
 }
 
-const container = document.getElementById('groupTbody').parentElement;
 const tbody = document.getElementById('groupTbody');
 let idx=0;
 for(const [code,g] of groupMap){
@@ -168,11 +167,12 @@ for(const [code,g] of groupMap){
   const avgGp  = avg(g.gp_pcts);
   const avgSt  = gpStatus(avgGp);
   const rowCls = g.worst_status==='alert'?'row-alert':g.worst_status==='warn'?'row-warn':'';
-  const childId = 'cg_'+idx;
+  const gid = 'g_'+idx;
 
   /* 부모 행 */
   const tr = document.createElement('tr');
   tr.className = `group-parent ${rowCls}`;
+  tr.dataset.group = gid;
   tr.innerHTML = `
     <td><span class="expand-icon">▶</span></td>
     <td><code style="font-size:.78rem;">${code}</code></td>
@@ -187,13 +187,12 @@ for(const [code,g] of groupMap){
            onclick="event.stopPropagation()">세부내역</a></td>`;
   tbody.appendChild(tr);
 
-  /* 자식 tbody */
-  const childGroup = document.createElement('tbody');
-  childGroup.className = 'child-rows';
-  childGroup.id = childId;
+  /* 자식 행들 (숨김 상태로 바로 뒤에 추가) */
   for(const r of g.sellers){
     const cr = document.createElement('tr');
     cr.className = `child-row ${r.gp_status==='alert'?'child-alert':r.gp_status==='warn'?'child-warn':''}`;
+    cr.dataset.parent = gid;
+    cr.style.display = 'none';
     cr.innerHTML = `
       <td></td>
       <td colspan="2">${pfBadge(r.platform)} <span style="margin-left:.4rem;font-size:.79rem;color:#475569;">${r.seller_name||''}</span></td>
@@ -202,13 +201,14 @@ for(const [code,g] of groupMap){
       <td style="text-align:center;">${gpBadge(r.gp_status, r.gp_pct)}</td>
       <td style="font-size:.74rem;color:#94a3b8;">${r.crawl_date}</td>
       <td><span class="badge badge-gray" style="font-size:.7rem;">${r.delivery_type||'-'}</span>${r.is_free_delivery?'<span class="badge badge-ok" style="font-size:.68rem;margin-left:.2rem;">무료</span>':''}</td>`;
-    childGroup.appendChild(cr);
+    tbody.appendChild(cr);
   }
-  container.appendChild(childGroup);
 
+  /* 클릭 토글 */
   tr.addEventListener('click',()=>{
-    const open=tr.classList.toggle('is-open');
-    childGroup.classList.toggle('is-open',open);
+    const open = tr.classList.toggle('is-open');
+    tbody.querySelectorAll(`[data-parent="${gid}"]`)
+         .forEach(c => c.style.display = open ? '' : 'none');
   });
   idx++;
 }
