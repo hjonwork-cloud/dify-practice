@@ -1229,12 +1229,31 @@ function renderMapOurResults(data) {
     el.innerHTML = '<div style="text-align:center;padding:1.5rem;color:#94a3b8;font-size:.82rem;">검색 결과 없음</div>';
     return;
   }
-  el.innerHTML = data.slice(0, 60).map(p => `
+  // _products(시뮬레이션 로드 데이터)에서 매출/수량 빠르게 조회
+  const salesMap = {};
+  (_products || []).forEach(p => { salesMap[p.our_product_code] = p; });
+
+  el.innerHTML = data.slice(0, 60).map(p => {
+    const sim = salesMap[p.product_code];
+    const salesAmt = sim?.prev_sales_amt > 0 ? '₩' + sim.prev_sales_amt.toLocaleString() : '-';
+    const salesQty = sim?.prev_sales_qty > 0 ? sim.prev_sales_qty.toLocaleString() + '건' : '-';
+    const holdVal  = (p.use_hold || '').trim();
+    const isActive = !holdVal;
+    const opBadge  = isActive
+      ? '<span style="background:#dcfce7;color:#15803d;border-radius:4px;padding:.1rem .35rem;font-size:.67rem;font-weight:700;">운영중</span>'
+      : `<span style="background:#fee2e2;color:#b91c1c;border-radius:4px;padding:.1rem .35rem;font-size:.67rem;font-weight:700;">보류</span>`;
+    return `
     <div class="map-our-item${_mapSelectedOur && _mapSelectedOur.product_code === p.product_code ? ' selected' : ''}"
          onclick='selectOurForMap(${JSON.stringify(p)})'>
       <div class="oi-name">${escHtml(p.product_name || p.product_code)}</div>
       <div class="oi-meta">${escHtml(p.product_code)} · ${escHtml(p.brand || '')} · ${escHtml(p.unit || '')}</div>
-    </div>`).join('');
+      <div style="display:flex;gap:.5rem;align-items:center;margin-top:.25rem;flex-wrap:wrap;">
+        ${opBadge}
+        <span style="font-size:.7rem;color:#6b7280;">전월매출 <b style="color:#374151;">${salesAmt}</b></span>
+        <span style="font-size:.7rem;color:#6b7280;">전월수량 <b style="color:#374151;">${salesQty}</b></span>
+      </div>
+    </div>`;
+  }).join('');
 }
 
 function selectOurForMap(p) {
