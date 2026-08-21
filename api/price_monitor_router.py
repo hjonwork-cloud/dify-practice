@@ -1265,40 +1265,60 @@ async def api_competition(request: Request, plant: str = "ALL"):
             continue
 
         p_code        = m["our_product_code"]
-        our_price     = (price_map.get(p_code) or {}).get("avg_sale_price")
-        comp_price    = pf_data.get("price_sale")
+        price_info    = price_map.get(p_code) or {}
+        our_price     = price_info.get("avg_sale_price")   # 우리 공급가 (VAT 제외)
+        buy_price     = price_info.get("avg_buy_price")    # 우리 구매가
+        comp_price    = pf_data.get("price_sale")          # 경쟁사 소비자가 (VAT+수수료 포함)
         seller_name   = pf_data.get("platform_seller_name") or m.get("seller_name") or ""
         seller_id     = m.get("platform_seller_id") or ""
         platform      = pf_data.get("platform") or m.get("platform") or ""
+        delivery_type = pf_data.get("delivery_type", "직배송")
 
         if not crawl_date:
             crawl_date = str(pf_data.get("crawl_date", ""))
 
-        # 판정
-        if our_price and comp_price:
-            diff     = round(float(our_price) - float(comp_price), 0)
-            diff_pct = round((float(our_price) - float(comp_price)) / float(comp_price) * 100, 1)
-            if diff < -0.5:
-                status = "win"   # 우리가 더 쌈 → 우위
-            elif diff > 0.5:
-                status = "lose"  # 경쟁사가 더 쌈 → 열세
-            else:
-                status = "tie"
+        # ── 경쟁사 실수취가: 소비자가에서 수수료·VAT 제거 ──
+        # comp_net = price_sale × (1 − fee) / 1.1
+        fee = _get_fee(delivery_type, platform, seller_name)
+        if comp_price:
+            comp_net = round(float(comp_price) * (1.0 - fee) / 1.1, 0)
         else:
-            diff = diff_pct = None
+            comp_net = None
+
+        # ── 맞출 시 이익률: 우리가 comp_net 가격에 팔 때 GP ──
+        if comp_net and buy_price:
+            match_margin = round((float(comp_net) - float(buy_price)) / float(comp_net) * 100, 1)
+        else:
+            match_margin = None
+
+        # ── 판정 기준 (match_margin 기반) ──
+        if match_margin is not None:
+            status = "win" if match_margin >= 10.0 else "lose"
+        else:
             status = "unknown"
 
+        # ── 차이: 우리 공급가 vs 경쟁사 실수취가 (동일 단위) ──
+        if our_price and comp_net:
+            diff     = round(float(our_price) - float(comp_net), 0)
+            diff_pct = round((float(our_price) - float(comp_net)) / float(comp_net) * 100, 1)
+        else:
+            diff = diff_pct = None
+
         seller_groups[(platform, seller_name, seller_id)].append({
-            "our_product_code": p_code,
-            "product_name":     _resolve(p_code),
-            "our_price":        int(our_price)  if our_price  else None,
-            "competitor_price": int(comp_price) if comp_price else None,
-            "diff":             int(diff)        if diff is not None else None,
-            "diff_pct":         diff_pct,
-            "status":           status,
-            "product_key":      pk,
-            "ext_product_name": pf_data.get("product_name", ""),
-            "delivery_type":    pf_data.get("delivery_type", ""),
+            "our_product_code":  p_code,
+            "product_name":      _resolve(p_code),
+            "our_price":         int(our_price)   if our_price   else None,  # 우리 공급가
+            "buy_price":         int(buy_price)   if buy_price   else None,  # 우리 구매가
+            "competitor_price":  int(comp_price)  if comp_price  else None,  # 경쟁사 소비자가
+            "comp_net_price":    int(comp_net)     if comp_net    else None,  # 경쟁사 실수취가
+            "fee_pct":           round(fee * 100, 1),
+            "match_margin":      match_margin,                               # 맞출 시 이익률
+            "diff":              int(diff)         if diff is not None else None,
+            "diff_pct":          diff_pct,
+            "status":            status,
+            "product_key":       pk,
+            "ext_product_name":  pf_data.get("product_name", ""),
+            "delivery_type":     delivery_type,
         })
 
     # ── 셀러 요약 빌드 ──

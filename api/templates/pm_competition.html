@@ -185,6 +185,13 @@
 .status-badge-lose { background: #fee2e2; color: #b91c1c; }
 .status-badge-tie  { background: #f3f4f6; color: #6b7280; }
 .status-badge-unknown { background: #f3f4f6; color: #9ca3af; }
+/* 이익률 강조 */
+.margin-danger  { color: #dc2626; font-weight: 700; }
+.margin-warn    { color: #f59e0b; font-weight: 700; }
+.margin-ok      { color: #16a34a; font-weight: 600; }
+.margin-na      { color: #9ca3af; }
+/* 실수취가 컬럼 */
+.col-net { background: #fffbeb; }
 
 /* 로딩/에러 */
 .comp-loading { text-align: center; padding: 3rem; color: #6b7280; }
@@ -427,27 +434,49 @@ function renderSellers(sellers) {
 function renderSkuTable(items) {
   if (!items || !items.length) return '<div class="comp-empty" style="padding:1rem;">매핑 상품 없음</div>';
   const rows = items.map(it => {
-    const rowClass = it.status === 'win' ? 'sku-win' : it.status === 'lose' ? 'sku-lose' : 'sku-tie';
+    const rowClass = it.status === 'win' ? 'sku-win' : it.status === 'lose' ? 'sku-lose' : '';
     const badgeClass = `status-badge-${it.status}`;
-    const statusLabel = it.status === 'win' ? '↑ 우위' : it.status === 'lose' ? '↓ 열세' : it.status === 'tie' ? '= 동일' : '-';
+    const statusLabel = it.status === 'win' ? '↑ 우위' : it.status === 'lose' ? '↓ 열세' : '-';
+
+    const ourP    = it.our_price        != null ? Number(it.our_price).toLocaleString()        + '원' : '-';
+    const compP   = it.competitor_price != null ? Number(it.competitor_price).toLocaleString() + '원' : '-';
+    const netP    = it.comp_net_price   != null ? Number(it.comp_net_price).toLocaleString()   + '원' : '-';
+    const feeStr  = it.fee_pct          != null ? it.fee_pct + '%' : '';
+
+    // 차이: 우리 공급가 vs 경쟁사 실수취가
     const diffClass = it.status === 'win' ? 'diff-win' : it.status === 'lose' ? 'diff-lose' : 'diff-tie';
-    const ourP  = it.our_price  != null ? Number(it.our_price).toLocaleString()  + '원' : '-';
-    const compP = it.competitor_price != null ? Number(it.competitor_price).toLocaleString() + '원' : '-';
     const diffStr = it.diff != null
       ? (it.diff > 0 ? '+' : '') + Number(it.diff).toLocaleString() + '원'
       : '-';
     const diffPctStr = it.diff_pct != null
       ? (it.diff_pct > 0 ? '+' : '') + it.diff_pct + '%'
       : '';
+
+    // 맞출 시 이익률
+    let marginHtml = '<span class="margin-na">-</span>';
+    if (it.match_margin != null) {
+      const mc = it.match_margin < 0 ? 'margin-danger'
+               : it.match_margin < 10 ? 'margin-danger'
+               : it.match_margin < 15 ? 'margin-warn'
+               : 'margin-ok';
+      const warn = it.match_margin < 10 ? ' 🔴' : it.match_margin < 15 ? ' ⚠️' : '';
+      marginHtml = `<span class="${mc}">${it.match_margin}%${warn}</span>`;
+    }
+
     return `<tr class="${rowClass}">
       <td><span style="font-size:.72rem;color:#9ca3af;">${escHtml(it.our_product_code)}</span></td>
       <td><span style="font-weight:600;">${escHtml(it.product_name)}</span>
           ${it.ext_product_name && it.ext_product_name !== it.product_name
             ? `<br><span style="font-size:.72rem;color:#9ca3af;">${escHtml(it.ext_product_name)}</span>` : ''}
       </td>
-      <td style="text-align:right;font-weight:600;">${ourP}</td>
-      <td style="text-align:right;font-weight:600;">${compP}</td>
-      <td style="text-align:right;" class="${diffClass}">${diffStr} ${diffPctStr ? `<span style="font-size:.72rem;">(${diffPctStr})</span>` : ''}</td>
+      <td style="text-align:right;">${ourP}</td>
+      <td style="text-align:right;">${compP}<br><span style="font-size:.68rem;color:#9ca3af;">소비자가</span></td>
+      <td style="text-align:right;" class="col-net">${netP}<br><span style="font-size:.68rem;color:#92400e;">실수취(수수료${feeStr}·VAT제외)</span></td>
+      <td style="text-align:right;" class="${diffClass}">${diffStr}
+          ${diffPctStr ? `<span style="font-size:.72rem;">(${diffPctStr})</span>` : ''}
+          <br><span style="font-size:.68rem;font-weight:400;color:#6b7280;">공급가↔실수취 차이</span>
+      </td>
+      <td style="text-align:center;">${marginHtml}</td>
       <td>${it.delivery_type ? `<span class="badge badge-gray" style="font-size:.68rem;">${escHtml(it.delivery_type)}</span>` : ''}</td>
       <td><span class="badge ${badgeClass}">${statusLabel}</span></td>
     </tr>`;
@@ -456,13 +485,15 @@ function renderSkuTable(items) {
   return `<table class="sku-table">
     <thead>
       <tr>
-        <th style="width:80px;">자재코드</th>
+        <th style="width:76px;">자재코드</th>
         <th>상품명</th>
-        <th style="text-align:right;width:100px;">우리 단가</th>
-        <th style="text-align:right;width:100px;">경쟁사 단가</th>
-        <th style="text-align:right;width:110px;">차이</th>
-        <th style="width:80px;">배송유형</th>
-        <th style="width:72px;">판정</th>
+        <th style="text-align:right;width:90px;">우리 공급가</th>
+        <th style="text-align:right;width:96px;">경쟁사 소비자가</th>
+        <th style="text-align:right;width:110px;background:#fffbeb;">경쟁사 실수취가</th>
+        <th style="text-align:right;width:108px;">공급가↔실수취 차이</th>
+        <th style="text-align:center;width:90px;">맞출 시 이익률</th>
+        <th style="width:72px;">배송유형</th>
+        <th style="width:66px;">판정</th>
       </tr>
     </thead>
     <tbody>${rows}</tbody>
@@ -524,7 +555,7 @@ function downloadSellerCSV() {
 
 function downloadSkuCSV() {
   if (!_filteredSellers.length) return alert('데이터가 없습니다.');
-  const header = ['플랫폼', '셀러명', '자재코드', '우리상품명', '경쟁사상품명', '우리단가', '경쟁사단가', '차이', '차이율(%)', '배송유형', '판정'];
+  const header = ['플랫폼','셀러명','자재코드','우리상품명','경쟁사상품명','우리공급가','경쟁사소비자가','경쟁사실수취가','수수료율(%)','공급가↔실수취차이','차이율(%)','맞출시이익률(%)','배송유형','판정'];
   const rows = [];
   _filteredSellers.forEach(s => {
     (s.items || []).forEach(it => {
@@ -534,12 +565,15 @@ function downloadSkuCSV() {
         it.our_product_code,
         it.product_name,
         it.ext_product_name || '',
-        it.our_price  != null ? it.our_price  : '',
+        it.our_price        != null ? it.our_price        : '',
         it.competitor_price != null ? it.competitor_price : '',
-        it.diff     != null ? it.diff     : '',
-        it.diff_pct != null ? it.diff_pct : '',
+        it.comp_net_price   != null ? it.comp_net_price   : '',
+        it.fee_pct          != null ? it.fee_pct          : '',
+        it.diff             != null ? it.diff             : '',
+        it.diff_pct         != null ? it.diff_pct         : '',
+        it.match_margin     != null ? it.match_margin     : '',
         it.delivery_type || '',
-        it.status === 'win' ? '우위' : it.status === 'lose' ? '열세' : it.status === 'tie' ? '동일' : '-',
+        it.status === 'win' ? '우위' : it.status === 'lose' ? '열세' : '-',
       ].map(csvEscape).join(','));
     });
   });
