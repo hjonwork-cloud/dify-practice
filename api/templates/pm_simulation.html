@@ -210,6 +210,96 @@
 .unmapped-badge { background: #f3f4f6; color: #6b7280; }
 @media(max-width:768px){.sku-kpi-row{grid-template-columns:repeat(2,1fr);}}
 
+/* ── SKU 매핑하기 버튼 ── */
+.sku-map-btn {
+  padding: .25rem .55rem; border-radius: 6px;
+  border: 1.5px solid #7c3aed; background: #faf5ff;
+  color: #7c3aed; font-size: .72rem; font-weight: 700;
+  cursor: pointer; font-family: inherit;
+  transition: all .12s; white-space: nowrap;
+}
+.sku-map-btn:hover { background: #7c3aed; color: #fff; }
+
+/* ── 매핑 모달 ── */
+.map-modal-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.55);
+  z-index: 9000; display: flex; align-items: center; justify-content: center;
+  padding: 1rem;
+}
+.map-modal-overlay.hidden { display: none; }
+.map-modal {
+  background: #fff; border-radius: 16px;
+  width: 100%; max-width: 820px; max-height: 88vh;
+  overflow: hidden; display: flex; flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0,0,0,.3);
+}
+.map-modal-head {
+  background: linear-gradient(135deg,#1e1b4b,#312e81);
+  color: #fff; padding: 1rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.map-modal-head h3 { font-size: .97rem; font-weight: 800; margin: 0; }
+.map-modal-close {
+  background: rgba(255,255,255,.15); border: none; color: #fff;
+  width: 28px; height: 28px; border-radius: 50%; font-size: 1rem;
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.map-modal-close:hover { background: rgba(255,255,255,.3); }
+.map-modal-body {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 0;
+  overflow: hidden; flex: 1;
+}
+.map-modal-left {
+  background: #f8fafc; border-right: 1px solid #e2e8f0;
+  padding: 1rem 1.1rem; overflow-y: auto;
+  display: flex; flex-direction: column; gap: .75rem;
+}
+.map-modal-right {
+  padding: 1rem 1.1rem; overflow-y: auto;
+  display: flex; flex-direction: column; gap: .6rem;
+}
+.map-plat-card {
+  background: #fff; border: 1.5px solid #c4b5fd;
+  border-radius: 10px; padding: .75rem .9rem;
+}
+.map-plat-card .pc-name { font-weight: 700; font-size: .88rem; color: #1e293b; margin-bottom: .3rem; }
+.map-plat-card .pc-meta { font-size: .75rem; color: #6b7280; line-height: 1.6; }
+.map-plat-card .pc-price { font-size: 1rem; font-weight: 800; color: #7c3aed; margin-top: .3rem; }
+.map-section-label { font-size: .78rem; font-weight: 700; color: #475569; }
+.map-search-input {
+  width: 100%; box-sizing: border-box;
+  border: 1.5px solid #cbd5e1; border-radius: 8px;
+  padding: .4rem .75rem; font-size: .82rem; font-family: inherit;
+  outline: none;
+}
+.map-search-input:focus { border-color: #7c3aed; }
+.map-our-results { display: flex; flex-direction: column; gap: .3rem; max-height: 260px; overflow-y: auto; }
+.map-our-item {
+  padding: .5rem .75rem; border-radius: 8px;
+  border: 1.5px solid #e2e8f0; background: #fafafa;
+  cursor: pointer; transition: all .12s;
+}
+.map-our-item:hover { border-color: #7c3aed; background: #faf5ff; }
+.map-our-item.selected { border-color: #7c3aed; background: #faf5ff; }
+.map-our-item .oi-name { font-weight: 600; font-size: .83rem; color: #1e293b; }
+.map-our-item .oi-meta { font-size: .73rem; color: #6b7280; margin-top: .15rem; }
+.map-modal-foot {
+  padding: .9rem 1.25rem; border-top: 1px solid #e2e8f0;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: .75rem; flex-wrap: wrap; background: #f8fafc;
+}
+.map-preview-text { font-size: .8rem; color: #374151; flex: 1; }
+.map-submit-btn {
+  padding: .45rem 1.2rem; border-radius: 9px;
+  background: #7c3aed; color: #fff; border: none;
+  font-size: .88rem; font-weight: 700; cursor: pointer;
+  font-family: inherit; transition: opacity .12s;
+}
+.map-submit-btn:hover { opacity: .88; }
+.map-submit-btn:disabled { opacity: .4; cursor: not-allowed; }
+@media(max-width:640px){ .map-modal-body { grid-template-columns: 1fr; } }
+
 /* ── 상품 선택 테이블 ── */
 .sim-table-wrap { overflow-x: auto; margin-bottom: 1.25rem; }
 .sim-table {
@@ -410,6 +500,7 @@
           <th style="text-align:right;width:90px;">판매가</th>
           <th style="width:72px;">배송유형</th>
           <th style="text-align:center;width:72px;">매핑여부</th>
+          <th style="text-align:center;width:76px;"></th>
         </tr>
       </thead>
       <tbody id="skuTableBody"></tbody>
@@ -500,6 +591,41 @@
   </div>
   <div class="sim-result-actions">
     <button class="sim-csv-btn" onclick="downloadResultCSV()">📥 결과 CSV 다운로드</button>
+  </div>
+</div>
+
+<!-- 매핑 모달 -->
+<div class="map-modal-overlay hidden" id="mapModalOverlay" onclick="if(event.target===this)closeMapModal()">
+  <div class="map-modal">
+    <div class="map-modal-head">
+      <h3>🔗 플랫폼 상품 매핑 등록</h3>
+      <button class="map-modal-close" onclick="closeMapModal()">✕</button>
+    </div>
+    <div class="map-modal-body">
+      <!-- 왼쪽: 플랫폼 상품 (고정) -->
+      <div class="map-modal-left">
+        <div class="map-section-label">① 플랫폼 상품 <span style="font-size:.7rem;color:#7c3aed;font-weight:600;">(선택됨 · 고정)</span></div>
+        <div class="map-plat-card" id="mapPlatCard"></div>
+        <div style="font-size:.74rem;color:#6b7280;line-height:1.6;background:#f1f5f9;border-radius:8px;padding:.6rem .8rem;">
+          💡 이 플랫폼 상품과 대응할 <b>우리 상품</b>을 오른쪽에서 검색해 선택하세요.<br>
+          상품명 키워드가 자동으로 입력됩니다.
+        </div>
+      </div>
+      <!-- 오른쪽: 우리 상품 검색 -->
+      <div class="map-modal-right">
+        <div class="map-section-label">② 우리 상품 검색 · 선택</div>
+        <input class="map-search-input" id="mapOurSearch" type="text"
+               placeholder="자재코드 또는 상품명 입력"
+               oninput="searchOurForMap(this.value)">
+        <div class="map-our-results" id="mapOurResults">
+          <div style="text-align:center;padding:1.5rem;color:#94a3b8;font-size:.82rem;">상품명을 입력하세요</div>
+        </div>
+      </div>
+    </div>
+    <div class="map-modal-foot">
+      <div class="map-preview-text" id="mapPreviewText">우리 상품을 선택하면 매핑이 등록됩니다.</div>
+      <button class="map-submit-btn" id="mapSubmitBtn" onclick="submitSkuMapping()" disabled>✅ 매핑 등록</button>
+    </div>
   </div>
 </div>
 
@@ -923,7 +1049,7 @@ function toggleSkuBody() {
 function renderSkuTable(skus) {
   const tbody = document.getElementById('skuTableBody');
   if (!skus.length) {
-    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:1.5rem;color:#9ca3af;">수집된 상품이 없습니다.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:1.5rem;color:#9ca3af;">수집된 상품이 없습니다.</td></tr>`;
     return;
   }
   const kw = (document.getElementById('skuSearch').value || '').toLowerCase();
@@ -943,6 +1069,7 @@ function renderSkuTable(skus) {
       <td style="text-align:right;">${priceStr}</td>
       <td><span class="badge badge-gray" style="font-size:.68rem;">${escHtml(s.delivery_type || '')}</span></td>
       <td style="text-align:center;"><span class="badge ${badgeClass}" style="font-size:.7rem;">${badgeLabel}</span></td>
+      <td style="text-align:center;">${!isMapped ? `<button class="sku-map-btn" onclick='openMapModal(${JSON.stringify(s)})'>매핑하기!</button>` : ''}</td>
     </tr>`;
   }).join('');
   document.getElementById('skuTableCount').textContent = `${shown}건 표시`;
@@ -967,6 +1094,151 @@ function downloadSkuListCSV() {
   const blob=new Blob([bom+[hdr.join(','),...rows].join('\n')],{type:'text/csv;charset=utf-8;'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
   a.download=`${(_seller.seller_name||'seller')}_전체SKU_${new Date().toISOString().slice(0,10)}.csv`; a.click();
+}
+
+// ── 매핑 모달 ──
+let _mapSku = null;       // 현재 모달에서 작업 중인 플랫폼 SKU
+let _mapSelectedOur = null; // 선택된 우리 상품
+let _mapOurTimer = null;
+
+function openMapModal(sku) {
+  _mapSku = sku;
+  _mapSelectedOur = null;
+  document.getElementById('mapModalOverlay').classList.remove('hidden');
+  // 플랫폼 상품 정보 렌더
+  const PLAT_LABEL2 = { baemin: '배민상회', foodspring: '식봄' };
+  document.getElementById('mapPlatCard').innerHTML = `
+    <div class="pc-name">${escHtml(sku.product_name || '')}</div>
+    <div class="pc-meta">
+      ${escHtml(PLAT_LABEL2[_seller.platform] || _seller.platform)} · ${escHtml(_seller.seller_name || '')}<br>
+      규격: ${escHtml(sku.spec || '-')} · ${escHtml(sku.delivery_type || '-')}
+    </div>
+    <div class="pc-price">${sku.price_sale != null ? Number(sku.price_sale).toLocaleString() + '원' : '-'}</div>
+  `;
+  // 플랫폼 상품명에서 키워드 자동 추출 (2글자 이상 토큰)
+  const tokens = (sku.product_name || '')
+    .replace(/[^가-힣a-zA-Z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(t => t.length >= 2)
+    .slice(0, 3)
+    .join(' ');
+  const kw = document.getElementById('mapOurSearch');
+  kw.value = tokens;
+  document.getElementById('mapOurResults').innerHTML = '<div style="text-align:center;padding:1.5rem;color:#94a3b8;font-size:.82rem;">검색 중…</div>';
+  updateMapPreview();
+  if (tokens) searchOurForMap(tokens);
+}
+
+function closeMapModal() {
+  document.getElementById('mapModalOverlay').classList.add('hidden');
+  _mapSku = null;
+  _mapSelectedOur = null;
+}
+
+async function searchOurForMap(kw) {
+  if (!kw) {
+    document.getElementById('mapOurResults').innerHTML = '<div style="text-align:center;padding:1.5rem;color:#94a3b8;font-size:.82rem;">상품명을 입력하세요</div>';
+    return;
+  }
+  clearTimeout(_mapOurTimer);
+  _mapOurTimer = setTimeout(async () => {
+    const p = new URLSearchParams(location.search);
+    const plant = p.get('plant') || 'ALL';
+    try {
+      const res = await fetch(`/portal/price-monitor/api/our-products?plant=${plant}&keyword=${encodeURIComponent(kw)}`);
+      const json = await res.json();
+      renderMapOurResults(json.data || []);
+    } catch(e) {
+      document.getElementById('mapOurResults').innerHTML = `<div style="padding:.75rem;color:#ef4444;font-size:.8rem;">⚠ 조회 오류: ${e}</div>`;
+    }
+  }, 350);
+}
+
+function renderMapOurResults(data) {
+  const el = document.getElementById('mapOurResults');
+  if (!data.length) {
+    el.innerHTML = '<div style="text-align:center;padding:1.5rem;color:#94a3b8;font-size:.82rem;">검색 결과 없음</div>';
+    return;
+  }
+  el.innerHTML = data.slice(0, 60).map(p => `
+    <div class="map-our-item${_mapSelectedOur && _mapSelectedOur.product_code === p.product_code ? ' selected' : ''}"
+         onclick='selectOurForMap(${JSON.stringify(p)})'>
+      <div class="oi-name">${escHtml(p.product_name || p.product_code)}</div>
+      <div class="oi-meta">${escHtml(p.product_code)} · ${escHtml(p.brand || '')} · ${escHtml(p.unit || '')}</div>
+    </div>`).join('');
+}
+
+function selectOurForMap(p) {
+  _mapSelectedOur = p;
+  document.querySelectorAll('.map-our-item').forEach(el => {
+    const meta = el.querySelector('.oi-meta')?.textContent || '';
+    el.classList.toggle('selected', meta.includes(p.product_code));
+  });
+  updateMapPreview();
+}
+
+function updateMapPreview() {
+  const el = document.getElementById('mapPreviewText');
+  const btn = document.getElementById('mapSubmitBtn');
+  if (_mapSku && _mapSelectedOur) {
+    el.textContent = `"${_mapSelectedOur.product_name}" ↔ "${_mapSku.product_name}" 매핑 등록`;
+    btn.disabled = false;
+  } else {
+    el.textContent = '우리 상품을 선택하면 매핑이 등록됩니다.';
+    btn.disabled = true;
+  }
+}
+
+async function submitSkuMapping() {
+  if (!_mapSku || !_mapSelectedOur) return;
+  const btn = document.getElementById('mapSubmitBtn');
+  btn.disabled = true; btn.textContent = '등록 중…';
+  try {
+    const p = new URLSearchParams(location.search);
+    const plant = p.get('plant') || 'ALL';
+    const res = await fetch('/portal/price-monitor/api/mapping/add', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        our_product_code: _mapSelectedOur.product_code,
+        plant: plant,
+        product_key: _mapSku.product_key,
+        platform: _seller.platform || '',
+        platform_seller_id: String(_seller.seller_id || ''),
+        platform_product_id: String(_mapSku.product_key || ''),
+        product_name: _mapSelectedOur.product_name || '',
+        seller_name: _seller.seller_name || '',
+      }),
+    });
+    const json = await res.json();
+    if (json.ok || json.result === 'ok' || res.ok) {
+      // SKU 데이터 업데이트 (로컬 즉시 반영)
+      const idx = _sellerSkus.findIndex(s => s.product_key === _mapSku.product_key);
+      if (idx >= 0) _sellerSkus[idx].is_mapped = true;
+      renderSkuTable(_sellerSkus);
+      // 매핑수 KPI 갱신
+      const mapped = _sellerSkus.filter(s => s.is_mapped).length;
+      const total  = _sellerSkus.length;
+      const rate   = total > 0 ? Math.round(mapped / total * 100) : 0;
+      document.getElementById('skuMapped').textContent   = mapped.toLocaleString();
+      document.getElementById('skuUnmapped').textContent = (total - mapped).toLocaleString();
+      document.getElementById('skuRate').textContent     = rate + '%';
+      document.getElementById('mappingBarFill').style.width = rate + '%';
+      closeMapModal();
+      // 간단 토스트
+      const t = document.createElement('div');
+      t.textContent = '✅ 매핑 등록 완료!';
+      t.style.cssText = 'position:fixed;bottom:1.5rem;right:1.5rem;z-index:9999;background:#16a34a;color:#fff;padding:.6rem 1.2rem;border-radius:9px;font-weight:700;font-size:.88rem;box-shadow:0 4px 16px rgba(0,0,0,.2);';
+      document.body.appendChild(t);
+      setTimeout(() => t.remove(), 2500);
+    } else {
+      alert('매핑 등록 실패: ' + (json.detail || json.error || '알 수 없는 오류'));
+      btn.disabled = false; btn.textContent = '✅ 매핑 등록';
+    }
+  } catch(e) {
+    alert('네트워크 오류: ' + e);
+    btn.disabled = false; btn.textContent = '✅ 매핑 등록';
+  }
 }
 
 loadData();
