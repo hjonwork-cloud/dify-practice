@@ -587,7 +587,7 @@ def _crawl_baemin_per_seller(test_mode: bool):
                 })
                 seller_direct += 1
             print(f"  page {page_no}: 수집 {seller_direct}건 / 제외(택배) {seller_skip}건")
-        yield s["id"], seller_records
+        yield s["id"], s["name"], seller_records
 
 
 def _crawl_food_per_seller(test_mode: bool, only_ids: set | None = None):
@@ -656,7 +656,7 @@ def _crawl_food_per_seller(test_mode: bool, only_ids: set | None = None):
             after = page_info.get("endCursor")
             page_no += 1
             time.sleep(0.3)
-        yield seller_id, seller_records
+        yield seller_id, seller_name, seller_records
 
 
 def main():
@@ -750,13 +750,14 @@ def main():
     # 셀러별 크롤링 + 즉시 저장 (메모리에 쌓지 않음)
     total_saved = 0
     failed_sellers = []
+    seller_summary: list[dict] = []
 
     run_baemin = (not args.food) and (not seller_filter or "baemin" in seller_filter)
     run_food   = (not args.baemin) and (not seller_filter or "foodspring" in seller_filter)
 
     if run_baemin:
         baemin_ids = seller_filter.get("baemin")
-        for seller_id, records in _crawl_baemin_per_seller(test_mode=args.test):
+        for seller_id, seller_name, records in _crawl_baemin_per_seller(test_mode=args.test):
             if baemin_ids and seller_id not in baemin_ids:
                 continue
             if not records:
@@ -764,14 +765,15 @@ def main():
             try:
                 _batch_insert(conn, records, today)
                 total_saved += len(records)
-                print(f"  ✓ 배민 {seller_id}: {len(records)}건 저장 (누적 {total_saved}건)")
+                seller_summary.append({"platform": "baemin", "seller_id": seller_id, "seller_name": seller_name, "count": len(records)})
+                print(f"  ✓ 배민 {seller_name}({seller_id}): {len(records)}건 저장 (누적 {total_saved}건)")
             except Exception as e:
-                print(f"  ✗ 배민 {seller_id} 저장 실패: {e}")
-                failed_sellers.append(f"baemin/{seller_id}")
+                print(f"  ✗ 배민 {seller_name}({seller_id}) 저장 실패: {e}")
+                failed_sellers.append(f"baemin/{seller_name}")
 
     if run_food:
         food_ids = seller_filter.get("foodspring")
-        for seller_id, records in _crawl_food_per_seller(test_mode=args.test, only_ids=food_ids):
+        for seller_id, seller_name, records in _crawl_food_per_seller(test_mode=args.test, only_ids=food_ids):
             if food_ids and seller_id not in food_ids:
                 continue
             if not records:
@@ -779,10 +781,11 @@ def main():
             try:
                 _batch_insert(conn, records, today)
                 total_saved += len(records)
-                print(f"  ✓ 식봄 {seller_id}: {len(records)}건 저장 (누적 {total_saved}건)")
+                seller_summary.append({"platform": "foodspring", "seller_id": seller_id, "seller_name": seller_name, "count": len(records)})
+                print(f"  ✓ 식봄 {seller_name}({seller_id}): {len(records)}건 저장 (누적 {total_saved}건)")
             except Exception as e:
-                print(f"  ✗ 식봄 {seller_id} 저장 실패: {e}")
-                failed_sellers.append(f"foodspring/{seller_id}")
+                print(f"  ✗ 식봄 {seller_name}({seller_id}) 저장 실패: {e}")
+                failed_sellers.append(f"foodspring/{seller_name}")
 
     conn.close()
 
@@ -791,6 +794,23 @@ def main():
     if failed_sellers:
         print(f"⚠ 실패 셀러: {', '.join(failed_sellers)}")
     print(f"{'='*60}")
+
+    # 요약 JSON 저장 (메일 스크립트용)
+    import json as _json
+    log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs")
+    os.makedirs(log_dir, exist_ok=True)
+    summary = {
+        "crawl_date": today,
+        "total_saved": total_saved,
+        "baemin_count": sum(s["count"] for s in seller_summary if s["platform"] == "baemin"),
+        "food_count": sum(s["count"] for s in seller_summary if s["platform"] == "foodspring"),
+        "seller_summary": seller_summary,
+        "failed_sellers": failed_sellers,
+    }
+    summary_path = os.path.join(log_dir, f"summary_{today}.json")
+    with open(summary_path, "w", encoding="utf-8") as f:
+        _json.dump(summary, f, ensure_ascii=False, indent=2)
+    print(f"요약 저장: {summary_path}")
 
 
 if __name__ == "__main__":

@@ -19,6 +19,7 @@ if (Test-Path $ENV_FILE) {
     }
 }
 $env:PYTHONIOENCODING = "utf-8"
+$env:PYTHONUNBUFFERED = "1"
 
 if (-not (Test-Path $LOG_DIR)) { New-Item -ItemType Directory -Path $LOG_DIR | Out-Null }
 
