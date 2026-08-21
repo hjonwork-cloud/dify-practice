@@ -1125,6 +1125,8 @@ let _mapSku = null;
 let _mapSelectedOur = null;
 let _mapOurTimer = null;
 let _mapTokens = [];   // { text, active } 배열
+let _mapActiveOnly = false;  // 운영중만 필터
+let _mapOurData = [];        // 마지막 검색 결과 보관
 
 function _extractTokens(productName, sellerName) {
   // 셈러명 토큰 시트 (제외 대상)
@@ -1199,6 +1201,10 @@ function closeMapModal() {
   _mapSku = null;
   _mapSelectedOur = null;
   _mapTokens = [];
+  _mapActiveOnly = false;
+  _mapOurData = [];
+  const btn = document.getElementById('mapActiveOnlyBtn');
+  if (btn) btn.classList.remove('active');
   document.getElementById('mapKwChips').innerHTML = '';
   document.getElementById('mapOurSearch').value = '';
   document.getElementById('mapOurResults').innerHTML = '';
@@ -1216,27 +1222,32 @@ async function searchOurForMap(kw) {
     try {
       const res = await fetch(`/portal/price-monitor/api/our-products?plant=${plant}&keyword=${encodeURIComponent(kw)}`);
       const json = await res.json();
-      renderMapOurResults(json.data || []);
+      _mapOurData = json.data || [];
+      renderMapOurResults(_mapOurData);
     } catch(e) {
       document.getElementById('mapOurResults').innerHTML = `<div style="padding:.75rem;color:#ef4444;font-size:.8rem;">⚠ 조회 오류: ${e}</div>`;
     }
   }, 350);
 }
 
+function toggleMapActiveOnly(btn) {
+  _mapActiveOnly = !_mapActiveOnly;
+  btn.classList.toggle('active', _mapActiveOnly);
+  renderMapOurResults(_mapOurData);
+}
+
 function renderMapOurResults(data) {
   const el = document.getElementById('mapOurResults');
-  if (!data.length) {
+  // 운영중만 필터
+  const filtered = _mapActiveOnly ? data.filter(p => !(p.use_hold || '').trim()) : data;
+  if (!filtered.length) {
     el.innerHTML = '<div style="text-align:center;padding:1.5rem;color:#94a3b8;font-size:.82rem;">검색 결과 없음</div>';
     return;
   }
-  // _products(시뮬레이션 로드 데이터)에서 매출/수량 빠르게 조회
-  const salesMap = {};
-  (_products || []).forEach(p => { salesMap[p.our_product_code] = p; });
-
-  el.innerHTML = data.slice(0, 60).map(p => {
-    const sim = salesMap[p.product_code];
-    const salesAmt = sim?.prev_sales_amt > 0 ? '₩' + sim.prev_sales_amt.toLocaleString() : '-';
-    const salesQty = sim?.prev_sales_qty > 0 ? sim.prev_sales_qty.toLocaleString() + '건' : '-';
+  // API가 이미 매출 높은순 정렬해서 내려준다
+  el.innerHTML = filtered.slice(0, 80).map(p => {
+    const salesAmt = p.prev_sales_amt > 0 ? '₩' + Math.round(p.prev_sales_amt).toLocaleString() : '-';
+    const salesQty = p.prev_sales_qty > 0 ? Math.round(p.prev_sales_qty).toLocaleString() + '건' : '-';
     const holdVal  = (p.use_hold || '').trim();
     const isActive = !holdVal;
     const opBadge  = isActive
@@ -1249,8 +1260,8 @@ function renderMapOurResults(data) {
       <div class="oi-meta">${escHtml(p.product_code)} · ${escHtml(p.brand || '')} · ${escHtml(p.unit || '')}</div>
       <div style="display:flex;gap:.5rem;align-items:center;margin-top:.25rem;flex-wrap:wrap;">
         ${opBadge}
-        <span style="font-size:.7rem;color:#6b7280;">전월매출 <b style="color:#374151;">${salesAmt}</b></span>
-        <span style="font-size:.7rem;color:#6b7280;">전월수량 <b style="color:#374151;">${salesQty}</b></span>
+        <span style="font-size:.7rem;color:#6b7280;">전체센터 전월매출 <b style="color:#374151;">${salesAmt}</b></span>
+        <span style="font-size:.7rem;color:#6b7280;">수량 <b style="color:#374151;">${salesQty}</b></span>
       </div>
     </div>`;
   }).join('');
