@@ -42,8 +42,24 @@ _scheduler_lock = threading.Lock()
 
 
 def _parse_crawl_output(stdout: str, duration_sec: float) -> dict:
-    """크롤러 stdout에서 통계 파싱."""
+    """크롤러 stdout에서 통계 파싱 — summary JSON 우선, stdout fallback."""
     today = datetime.now(_KST).date().isoformat()
+
+    # summary JSON 우선 읽기 (crawl_platform_prices.py가 저장)
+    log_dir = Path(__file__).parent.parent / "logs"
+    summary_path = log_dir / f"summary_{today}.json"
+    if summary_path.exists():
+        try:
+            import json as _json
+            with open(summary_path, encoding="utf-8") as f:
+                data = _json.load(f)
+            data["duration_sec"] = round(duration_sec, 1)
+            data.setdefault("stderr", "")
+            return data
+        except Exception as e:
+            logger.warning(f"[scheduler] summary JSON 읽기 실패, stdout fallback: {e}")
+
+    # fallback: stdout 파싱
     total = 0
     baemin_count = 0
     food_count = 0
@@ -51,24 +67,38 @@ def _parse_crawl_output(stdout: str, duration_sec: float) -> dict:
     failed_sellers = []
 
     for line in stdout.splitlines():
-        # "  ✓ 배민 1234: 500건 저장 (누적 500건)"
-        m = re.search(r'✓ 배민 (\S+): (\d+)건', line)
-        if m:
-            cnt = int(m.group(2))
+        # "  ✓ 배민 셀러명(id): 500건 저장" or "  ✓ 배민 id: 500건 저장"
+        m = re.search(r'✓ 배민 (.+?)\(?(\w+)\)?:\s*(\d+)건', line)
+        if not m:
+            m = re.search(r'✓ 배민 (\S+):\s*(\d+)건', line)
+            if m:
+                cnt = int(m.group(2))
+                baemin_count += cnt
+                seller_summary.append({"platform": "baemin", "seller_id": m.group(1),
+                                       "seller_name": m.group(1), "count": cnt})
+        else:
+            name, sid, cnt = m.group(1).strip(), m.group(2), int(m.group(3))
             baemin_count += cnt
-            seller_summary.append({"platform": "baemin", "seller_id": m.group(1),
-                                   "seller_name": m.group(1), "count": cnt})
-        # "  ✓ 식봄 1388: 12240건 저장 (누적 ...)"
-        m = re.search(r'✓ 식봄 (\S+): (\d+)건', line)
-        if m:
-            cnt = int(m.group(2))
+            seller_summary.append({"platform": "baemin", "seller_id": sid,
+                                   "seller_name": name, "count": cnt})
+
+        # "  ✓ 식봄 셀러명(id): 500건 저장" or "  ✓ 식봄 id: 500건 저장"
+        m = re.search(r'✓ 식봄 (.+?)\(?(\w+)\)?:\s*(\d+)건', line)
+        if not m:
+            m = re.search(r'✓ 식봄 (\S+):\s*(\d+)건', line)
+            if m:
+                cnt = int(m.group(2))
+                food_count += cnt
+                seller_summary.append({"platform": "foodspring", "seller_id": m.group(1),
+                                       "seller_name": m.group(1), "count": cnt})
+        else:
+            name, sid, cnt = m.group(1).strip(), m.group(2), int(m.group(3))
             food_count += cnt
-            seller_summary.append({"platform": "foodspring", "seller_id": m.group(1),
-                                   "seller_name": m.group(1), "count": cnt})
-        # "  ✗ 배민/식봄 xxx 저장 실패"
+            seller_summary.append({"platform": "foodspring", "seller_id": sid,
+                                   "seller_name": name, "count": cnt})
+
         if '✗' in line and '저장 실패' in line:
             failed_sellers.append(line.strip().lstrip('✗').strip())
-        # "✓ 완료! 총 53,240건 저장"
         m = re.search(r'총 ([\d,]+)건 저장', line)
         if m:
             total = int(m.group(1).replace(',', ''))
@@ -76,17 +106,15 @@ def _parse_crawl_output(stdout: str, duration_sec: float) -> dict:
     if total == 0:
         total = baemin_count + food_count
 
-    # 셀러 요약 수집건수 내림차순 정렬
     seller_summary.sort(key=lambda x: x["count"], reverse=True)
-
     return {
-        "crawl_date":      today,
-        "total_saved":     total,
-        "baemin_count":    baemin_count,
-        "food_count":      food_count,
-        "seller_summary":  seller_summary,
-        "failed_sellers":  failed_sellers,
-        "duration_sec":    round(duration_sec, 1),
+        "crawl_date":     today,
+        "total_saved":    total,
+        "baemin_count":   baemin_count,
+        "food_count":     food_count,
+        "seller_summary": seller_summary,
+        "failed_sellers": failed_sellers,
+        "duration_sec":   round(duration_sec, 1),
     }
 
 
@@ -94,11 +122,12 @@ def _run_crawl():
     """크롤러를 별도 프로세스로 실행 후 리포트 메일 발송."""
     logger.info("[scheduler] 크롤러 시작")
     token = os.getenv("DATABRICKS_TOKEN", "")
-    env   = {**os.environ, "DATABRICKS_TOKEN": token, "PYTHONIOENCODING": "utf-8"}
+    env   = {**os.environ, "DATABRICKS_TOKEN": token,
+             "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1"}
     t0    = time.time()
     try:
         result = subprocess.run(
-            [_PYTHON, _CRAWL_SCRIPT],
+            [_PYTHON, _CRAWL_SCRIPT, "--food"],  # 서버: 식봄만 (배민은 로컬 PC에서 실행)
             env=env,
             capture_output=True,
             text=True,
@@ -112,23 +141,22 @@ def _run_crawl():
             tail  = "\n".join(lines[-5:]) if lines else "(출력 없음)"
             logger.info(f"[scheduler] 크롤러 완료 ({duration:.0f}s)\n{tail}")
 
-            # 리포트 파싱 & 메일 발송
+            # 리포트 파싱 & 메일 발송 (식봄 전용)
             try:
-                from crawl_mailer import send_report
+                from crawl_mailer import send_foodspring_report
                 report = _parse_crawl_output(result.stdout, duration)
-                send_report(report)
+                send_foodspring_report(report)
             except Exception as e:
                 logger.warning(f"[scheduler] 메일 발송 실패: {e}")
         else:
             stderr_tail = result.stderr[-1000:] if result.stderr else "(stderr 없음)"
             logger.error(f"[scheduler] 크롤러 실패 (code={result.returncode})\n{stderr_tail}")
-            # 실패 시에도 메일 발송 시도
             try:
-                from crawl_mailer import send_report
+                from crawl_mailer import send_foodspring_report
                 report = _parse_crawl_output(result.stdout or "", duration)
                 report["failed_sellers"].append(f"크롤러 비정상 종료 (code={result.returncode})")
-                report["stderr"] = stderr_tail  # 메일에 포함용
-                send_report(report)
+                report["stderr"] = stderr_tail
+                send_foodspring_report(report)
             except Exception:
                 pass
 
