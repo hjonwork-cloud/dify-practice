@@ -102,6 +102,114 @@
 .sim-bulk-high { background: #f0fdf4; color: #15803d; border-color: #86efac; }
 .sim-bulk-high:hover { background: #16a34a; color: #fff; border-color: #16a34a; }
 
+/* ── 셀러 전체 SKU 섹션 ── */
+.sku-section { background:#fff; border-radius:14px; box-shadow:0 1px 6px rgba(0,0,0,.07); margin-bottom:1.5rem; overflow:hidden; }
+.sku-section-head { display:flex; align-items:center; gap:.75rem; padding:1rem 1.25rem; background:#f8fafc; border-bottom:1px solid #e2e8f0; cursor:pointer; user-select:none; transition:background .12s; }
+.sku-section-head:hover { background:#f1f5f9; }
+.sku-section-head h3 { font-size:.95rem; font-weight:800; color:#1e293b; margin:0; flex:1; }
+.sku-section-toggle { font-size:.75rem; color:#94a3b8; transition:transform .2s; }
+.sku-section-toggle.open { transform:rotate(180deg); }
+.sku-kpi-row { display:grid; grid-template-columns:repeat(4,1fr); gap:.6rem; padding:.9rem 1.25rem; border-bottom:1px solid #f1f5f9; }
+.sku-kpi { background:#f8fafc; border-radius:9px; padding:.65rem .85rem; display:flex; flex-direction:column; gap:.1rem; }
+.sku-kpi .kl { font-size:.72rem; color:#6b7280; font-weight:600; }
+.sku-kpi .kv { font-size:1.25rem; font-weight:800; color:#1e293b; line-height:1.1; }
+.sku-kpi-mapped .kv { color:#16a34a; }
+.sku-kpi-unmapped .kv { color:#dc2626; }
+.sku-kpi-rate .kv { color:#7c3aed; }
+.mapping-bar-wrap { padding:.5rem 1.25rem .9rem; }
+.mapping-bar-track { height:10px; background:#fee2e2; border-radius:99px; overflow:hidden; }
+.mapping-bar-fill { height:100%; background:linear-gradient(90deg,#16a34a,#22c55e); border-radius:99px; transition:width .5s ease; }
+.mapping-bar-label { font-size:.72rem; color:#6b7280; margin-top:.3rem; }
+.sku-body { padding:.5rem 1.25rem 1.25rem; overflow-x:auto; display:none; }
+.sku-body.open { display:block; }
+.sku-search-row { display:flex; gap:.5rem; margin-bottom:.6rem; flex-wrap:wrap; }
+.sku-search { border:1.5px solid #cbd5e1; border-radius:8px; padding:.35rem .7rem; font-size:.82rem; font-family:inherit; width:220px; outline:none; }
+.sku-search:focus { border-color:#7c3aed; }
+.sku-toggle-filter { padding:.3rem .65rem; border:1.5px solid #cbd5e1; border-radius:8px; background:#fff; font-size:.75rem; font-weight:600; color:#475569; cursor:pointer; font-family:inherit; transition:all .12s; }
+.sku-toggle-filter.active { background:#dc2626; color:#fff; border-color:#dc2626; }
+.sku-full-table { width:100%; border-collapse:collapse; font-size:.8rem; min-width:560px; }
+.sku-full-table th { background:#f8fafc; padding:.42rem .65rem; text-align:left; border-bottom:2px solid #e2e8f0; font-weight:700; color:#475569; font-size:.74rem; white-space:nowrap; }
+.sku-full-table td { padding:.42rem .65rem; border-bottom:1px solid #f1f5f9; vertical-align:middle; }
+.sku-full-table tr:last-child td { border-bottom:none; }
+.sku-full-table tr.mapped-row td { background:#f0fdf4; }
+.sku-full-table tr.hidden-row { display:none; }
+.mapped-badge { background:#dcfce7; color:#15803d; }
+.unmapped-badge { background:#f3f4f6; color:#6b7280; }
+@media(max-width:768px){ .sku-kpi-row { grid-template-columns:repeat(2,1fr); } }
+
+/* ── 셀러 전체 SKU 섬션 ── */
+.sku-section {
+  background: #fff; border-radius: 14px;
+  box-shadow: 0 1px 6px rgba(0,0,0,.07);
+  margin-bottom: 1.5rem; overflow: hidden;
+}
+.sku-section-head {
+  display: flex; align-items: center; gap: .75rem;
+  padding: 1rem 1.25rem;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+  cursor: pointer; user-select: none;
+  transition: background .12s;
+}
+.sku-section-head:hover { background: #f1f5f9; }
+.sku-section-head h3 { font-size: .95rem; font-weight: 800; color: #1e293b; margin: 0; flex: 1; }
+.sku-section-toggle { font-size: .75rem; color: #94a3b8; transition: transform .2s; }
+.sku-section-toggle.open { transform: rotate(180deg); }
+.sku-kpi-row {
+  display: grid; grid-template-columns: repeat(4,1fr);
+  gap: .6rem; padding: .9rem 1.25rem;
+  border-bottom: 1px solid #f1f5f9;
+}
+.sku-kpi {
+  background: #f8fafc; border-radius: 9px; padding: .65rem .85rem;
+  display: flex; flex-direction: column; gap: .1rem;
+}
+.sku-kpi .kl { font-size: .72rem; color: #6b7280; font-weight: 600; }
+.sku-kpi .kv { font-size: 1.25rem; font-weight: 800; color: #1e293b; line-height: 1.1; }
+.sku-kpi-mapped .kv { color: #16a34a; }
+.sku-kpi-unmapped .kv { color: #dc2626; }
+.sku-kpi-rate .kv { color: #7c3aed; }
+/* 매핑률 바 */
+.mapping-bar-wrap { padding: .5rem 1.25rem .9rem; }
+.mapping-bar-track {
+  height: 10px; background: #fee2e2; border-radius: 99px; overflow: hidden;
+}
+.mapping-bar-fill {
+  height: 100%; background: linear-gradient(90deg,#16a34a,#22c55e);
+  border-radius: 99px; transition: width .5s ease;
+}
+.mapping-bar-label { font-size: .72rem; color: #6b7280; margin-top: .3rem; }
+/* SKU 테이블 */
+.sku-body { padding: .5rem 1.25rem 1.25rem; overflow-x: auto; display: none; }
+.sku-body.open { display: block; }
+.sku-search-row { display: flex; gap: .5rem; margin-bottom: .6rem; flex-wrap: wrap; }
+.sku-search {
+  border: 1.5px solid #cbd5e1; border-radius: 8px;
+  padding: .35rem .7rem; font-size: .82rem; font-family: inherit;
+  width: 220px; outline: none;
+}
+.sku-search:focus { border-color: #7c3aed; }
+.sku-toggle-filter {
+  padding: .3rem .65rem; border: 1.5px solid #cbd5e1; border-radius: 8px;
+  background: #fff; font-size: .75rem; font-weight: 600; color: #475569;
+  cursor: pointer; font-family: inherit; transition: all .12s;
+}
+.sku-toggle-filter.active { background: #dc2626; color: #fff; border-color: #dc2626; }
+.sku-full-table { width: 100%; border-collapse: collapse; font-size: .8rem; min-width: 560px; }
+.sku-full-table th {
+  background: #f8fafc; padding: .42rem .65rem;
+  text-align: left; border-bottom: 2px solid #e2e8f0;
+  font-weight: 700; color: #475569; font-size: .74rem; white-space: nowrap;
+}
+.sku-full-table td { padding: .42rem .65rem; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
+.sku-full-table tr:last-child td { border-bottom: none; }
+.sku-full-table tr.mapped-row td { background: #f0fdf4; }
+.sku-full-table tr.unmapped-row td { background: #fff; }
+.sku-full-table tr.hidden-row { display: none; }
+.mapped-badge { background: #dcfce7; color: #15803d; }
+.unmapped-badge { background: #f3f4f6; color: #6b7280; }
+@media(max-width:768px){.sku-kpi-row{grid-template-columns:repeat(2,1fr);}}
+
 /* ── 상품 선택 테이블 ── */
 .sim-table-wrap { overflow-x: auto; margin-bottom: 1.25rem; }
 .sim-table {
@@ -356,7 +464,44 @@
   </div>
 </div>
 
-<script>
+<!-- E. 셀러 전체 SKU 현황 -->
+<div class="sku-section" id="sellerSkuSection" style="display:none;">
+  <div class="sku-section-head" onclick="toggleSkuBody()">
+    <h3 id="skuSectionTitle">판매 상품 전체 SKU 현황</h3>
+    <span id="skuLoadingBadge" class="badge badge-gray" style="font-size:.72rem;">조회 중…</span>
+    <span class="sku-section-toggle" id="skuToggle">▾</span>
+  </div>
+  <div class="sku-kpi-row">
+    <div class="sku-kpi"><span class="kl">📦 전체 운영 SKU</span><span class="kv" id="skuTotal">—</span></div>
+    <div class="sku-kpi sku-kpi-mapped"><span class="kl">✅ 매핑된 SKU</span><span class="kv" id="skuMapped">—</span></div>
+    <div class="sku-kpi sku-kpi-unmapped"><span class="kl">❌ 매핑 안된 SKU</span><span class="kv" id="skuUnmapped">—</span></div>
+    <div class="sku-kpi sku-kpi-rate"><span class="kl">📊 매핑률</span><span class="kv" id="skuRate">—</span></div>
+  </div>
+  <div class="mapping-bar-wrap">
+    <div class="mapping-bar-track"><div class="mapping-bar-fill" id="mappingBarFill" style="width:0%"></div></div>
+    <div class="mapping-bar-label" id="mappingBarLabel"></div>
+  </div>
+  <div class="sku-body" id="skuBody">
+    <div class="sku-search-row">
+      <input class="sku-search" id="skuSearch" type="text" placeholder="상품명 검색…" oninput="filterSkuTable()">
+      <button class="sku-toggle-filter" id="unmappedOnlyBtn" onclick="toggleUnmappedOnly(this)">매핑안된상품만</button>
+      <span id="skuTableCount" style="font-size:.76rem;color:#9ca3af;align-self:center;"></span>
+      <button class="sku-toggle-filter" onclick="downloadSkuListCSV()" style="margin-left:auto;">&#x1F4E5; SKU 리스트 CSV</button>
+    </div>
+    <table class="sku-full-table" id="skuFullTable">
+      <thead>
+        <tr>
+          <th style="width:240px;">상품명</th>
+          <th style="width:120px;">규격</th>
+          <th style="text-align:right;width:90px;">판매가</th>
+          <th style="width:72px;">배송유형</th>
+          <th style="text-align:center;width:72px;">매핑여부</th>
+        </tr>
+      </thead>
+      <tbody id="skuTableBody"></tbody>
+    </table>
+  </div>
+</div>
 let _products = [];
 let _seller   = {};
 let _filter   = 'all';
@@ -729,6 +874,100 @@ function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+// ── 셀러 전체 SKU ──
+let _sellerSkus = [];
+let _unmappedOnly = false;
+
+async function loadSellerSkus() {
+  const p = new URLSearchParams(location.search);
+  const qs = new URLSearchParams({
+    plant:       p.get('plant')       || 'ALL',
+    platform:    p.get('platform')    || '',
+    seller_name: p.get('seller_name') || '',
+    seller_id:   p.get('seller_id')   || '',
+  });
+  try {
+    const resp = await fetch(`/portal/price-monitor/api/simulation/seller-skus?${qs}`);
+    const data = await resp.json();
+    _sellerSkus = data.skus || [];
+    document.getElementById('skuTotal').textContent    = (data.total        || 0).toLocaleString();
+    document.getElementById('skuMapped').textContent   = (data.mapped       || 0).toLocaleString();
+    document.getElementById('skuUnmapped').textContent = (data.unmapped     || 0).toLocaleString();
+    document.getElementById('skuRate').textContent     = (data.mapping_rate || 0) + '%';
+    document.getElementById('mappingBarFill').style.width = (data.mapping_rate || 0) + '%';
+    document.getElementById('mappingBarLabel').textContent =
+      `전체 ${data.total}개 중 ${data.mapped}개 매핑 (${data.mapping_rate}%) · 수집일: ${data.crawl_date}`;
+    const badge = document.getElementById('skuLoadingBadge');
+    badge.textContent = `전체 ${data.total}건`;
+    badge.style.cssText = `font-size:.72rem;padding:.15rem .5rem;border-radius:99px;font-weight:700;background:${
+      data.mapping_rate >= 50 ? '#dcfce7' : data.mapping_rate >= 25 ? '#fef3c7' : '#fee2e2'};
+      color:${data.mapping_rate >= 50 ? '#15803d' : data.mapping_rate >= 25 ? '#92400e' : '#b91c1c'};`;
+    document.getElementById('sellerSkuSection').style.display = '';
+    renderSkuTable(_sellerSkus);
+  } catch(e) {
+    const badge = document.getElementById('skuLoadingBadge');
+    if (badge) badge.textContent = '조회 실패';
+    document.getElementById('sellerSkuSection').style.display = '';
+  }
+}
+
+function toggleSkuBody() {
+  const body   = document.getElementById('skuBody');
+  const toggle = document.getElementById('skuToggle');
+  const isOpen = body.classList.toggle('open');
+  toggle.classList.toggle('open', isOpen);
+}
+
+function renderSkuTable(skus) {
+  const tbody = document.getElementById('skuTableBody');
+  if (!skus.length) {
+    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:1.5rem;color:#9ca3af;">수집된 상품이 없습니다.</td></tr>`;
+    return;
+  }
+  const kw = (document.getElementById('skuSearch').value || '').toLowerCase();
+  let shown = 0;
+  tbody.innerHTML = skus.map(s => {
+    const isMapped   = s.is_mapped;
+    const rowClass   = isMapped ? 'mapped-row' : 'unmapped-row';
+    const badgeClass = isMapped ? 'mapped-badge' : 'unmapped-badge';
+    const badgeLabel = isMapped ? '✅ 매핑' : '❎ 미매핑';
+    const nameMatch  = kw ? (s.product_name || '').toLowerCase().includes(kw) : true;
+    const hidden     = !nameMatch || (_unmappedOnly && isMapped);
+    if (!hidden) shown++;
+    const priceStr   = s.price_sale != null ? Number(s.price_sale).toLocaleString() + '원' : '-';
+    return `<tr class="${rowClass}${hidden ? ' hidden-row' : ''}">
+      <td style="font-weight:600;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escHtml(s.product_name)}">${escHtml(s.product_name)}</td>
+      <td style="font-size:.76rem;color:#6b7280;">${escHtml(s.spec || '')}</td>
+      <td style="text-align:right;">${priceStr}</td>
+      <td><span class="badge badge-gray" style="font-size:.68rem;">${escHtml(s.delivery_type || '')}</span></td>
+      <td style="text-align:center;"><span class="badge ${badgeClass}" style="font-size:.7rem;">${badgeLabel}</span></td>
+    </tr>`;
+  }).join('');
+  document.getElementById('skuTableCount').textContent = `${shown}건 표시`;
+}
+
+function filterSkuTable() { renderSkuTable(_sellerSkus); }
+
+function toggleUnmappedOnly(btn) {
+  _unmappedOnly = !_unmappedOnly;
+  btn.classList.toggle('active', _unmappedOnly);
+  renderSkuTable(_sellerSkus);
+}
+
+function downloadSkuListCSV() {
+  if (!_sellerSkus.length) return;
+  const hdr = ['상품명','규격','판매가','배송유형','매핑여부','product_key'];
+  const rows = _sellerSkus.map(s => [
+    s.product_name, s.spec || '', s.price_sale ?? '', s.delivery_type || '',
+    s.is_mapped ? '매핑' : '미매핑', s.product_key,
+  ].map(v => { v=String(v??''); return v.includes(',')||v.includes('"') ? '"'+v.replace(/"/g,'""')+'"' : v; }).join(','));
+  const bom='\uFEFF';
+  const blob=new Blob([bom+[hdr.join(','),...rows].join('\n')],{type:'text/csv;charset=utf-8;'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+  a.download=`${(_seller.seller_name||'seller')}_전체SKU_${new Date().toISOString().slice(0,10)}.csv`; a.click();
+}
+
 loadData();
+loadSellerSkus();
 </script>
 {% endblock %}

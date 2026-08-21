@@ -1561,6 +1561,81 @@ async def api_simulation(
     })
 
 
+@router.get("/api/simulation/seller-skus")
+async def api_simulation_seller_skus(
+    request: Request,
+    platform: str = "",
+    seller_name: str = "",
+    seller_id: str = "",
+    plant: str = "ALL",
+):
+    """셀러의 플랫폼 전체 SKU + 매핑률.
+    ─ T_SILVER에서 해당 셀러의 최신 수집 상품 전체 조회
+    ─ 매핑된 product_key 대비 얼마나 커버되는지 비율 반환
+    """
+    _require_pm_access(request)
+
+    # 셀러명 보안 (SQL injection 예방)
+    safe_seller = seller_name.replace("'", "''")
+
+    try:
+        rows = _q(f"""
+            SELECT
+                p.product_key,
+                p.product_name,
+                p.spec,
+                p.price_sale,
+                p.price_original,
+                p.delivery_type,
+                p.is_free_delivery,
+                p.crawl_date
+            FROM {T_SILVER} p
+            INNER JOIN (
+                SELECT MAX(crawl_date) AS max_date
+                FROM {T_SILVER}
+                WHERE platform = '{platform}'
+                  AND platform_seller_name = '{safe_seller}'
+            ) md ON p.crawl_date = md.max_date
+            WHERE p.platform = '{platform}'
+              AND p.platform_seller_name = '{safe_seller}'
+            ORDER BY p.price_sale
+            LIMIT 2000
+        """)
+        rows = _serialize_rows(rows or [])
+    except Exception as e:
+        logger.warning(f"[simulation/seller-skus] 조회 실패: {e}")
+        rows = []
+
+    # 매핑된 product_key 집합
+    all_mappings = portal_db.pm_list_all_mappings(plant)
+    mapped_keys: set[str] = set()
+    for m in all_mappings:
+        if m.get("platform") == platform:
+            if seller_id and str(m.get("platform_seller_id", "")) == str(seller_id):
+                mapped_keys.add(m["product_key"])
+            elif not seller_id and (m.get("seller_name") or "") == seller_name:
+                mapped_keys.add(m["product_key"])
+
+    total   = len(rows)
+    mapped  = sum(1 for r in rows if r["product_key"] in mapped_keys)
+    mapping_rate = round(mapped / total * 100, 1) if total else 0
+
+    # 매핑여부 플래그 추가
+    for r in rows:
+        r["is_mapped"] = r["product_key"] in mapped_keys
+
+    crawl_date = str(rows[0]["crawl_date"]) if rows else ""
+
+    return JSONResponse({
+        "total":        total,
+        "mapped":       mapped,
+        "unmapped":     total - mapped,
+        "mapping_rate": mapping_rate,
+        "crawl_date":   crawl_date,
+        "skus":         rows,
+    })
+
+
 @router.get("/api/debug/baemin")
 async def api_debug_baemin(request: Request):
     """Azure 서버에서 배민 API 직접 호출 테스트."""
