@@ -101,6 +101,18 @@
   white-space: nowrap;
 }
 .csv-btn:hover { background: #f1f5f9; border-color: #94a3b8; color: #1e293b; }
+/* 시뮬레이션 버튼 */
+.sim-link-btn {
+  display: inline-flex; align-items: center; gap: .25rem;
+  padding: .22rem .6rem; border-radius: 6px;
+  background: #ede9fe; color: #6d28d9;
+  font-size: .7rem; font-weight: 700;
+  text-decoration: none; white-space: nowrap;
+  border: 1px solid #c4b5fd;
+  transition: all .12s;
+  flex-shrink: 0;
+}
+.sim-link-btn:hover { background: #7c3aed; color: #fff; border-color: #7c3aed; }
 
 /* ── 셀러 행 ── */
 .seller-row {
@@ -410,6 +422,9 @@ function renderSellers(sellers) {
             <strong>${escHtml(s.seller_name)}</strong>
             ${s.seller_id ? `<small style="margin-left:.35rem;">ID: ${escHtml(String(s.seller_id))}</small>` : ''}
           </div>
+          <a class="sim-link-btn" onclick="event.stopPropagation()"
+             href="/portal/price-monitor/simulation?platform=${encodeURIComponent(s.platform)}&seller_name=${encodeURIComponent(s.seller_name)}&seller_id=${encodeURIComponent(s.seller_id||'')}&plant=${encodeURIComponent(new URLSearchParams(location.search).get('plant')||'ALL')}"
+             title="실전 경쟁 시뮬레이션 열기">⚡ 시뮬</a>
         </div>
         <div class="sh-cnt" title="매핑 건수">${s.total}<span style="font-size:.68rem;color:#9ca3af;"> 건</span></div>
         <div class="sh-cnt sh-win"  title="우위">↑ ${s.win}</div>

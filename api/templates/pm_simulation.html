@@ -1,0 +1,689 @@
+{% extends 'pm_base.html' %}
+{% block title %}실전 경쟁 시뮬레이션{% endblock %}
+{% block page_title %}⚡ 실전 경쟁 시뮬레이션{% endblock %}
+
+{% block head %}
+<style>
+/* ── 공통 ── */
+:root { --sim-accent:#7c3aed; --sim-win:#16a34a; --sim-lose:#dc2626; --sim-warn:#f59e0b; }
+
+/* ── 뒤로가기 ── */
+.back-link {
+  display: inline-flex; align-items: center; gap: .4rem;
+  font-size: .8rem; color: #6b7280; text-decoration: none;
+  padding: .3rem .6rem; border-radius: 6px;
+  transition: background .12s;
+  margin-bottom: 1rem;
+}
+.back-link:hover { background: #f1f5f9; color: #1e293b; }
+
+/* ── 셀러 정보 카드 ── */
+.sim-seller-card {
+  background: linear-gradient(135deg, #1e1b4b 0%, #312e81 100%);
+  border-radius: 14px;
+  padding: 1.25rem 1.5rem;
+  color: #fff;
+  margin-bottom: 1.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+.sim-seller-info h2 { font-size: 1.2rem; font-weight: 800; margin-bottom: .2rem; }
+.sim-seller-info small { font-size: .78rem; opacity: .7; }
+.sim-seller-stats {
+  display: flex; gap: 1.5rem; flex-wrap: wrap;
+}
+.sim-stat { text-align: center; }
+.sim-stat .sv { font-size: 1.4rem; font-weight: 800; line-height: 1; }
+.sim-stat .sl { font-size: .7rem; opacity: .75; margin-top: .15rem; }
+.sim-stat.s-win  .sv { color: #86efac; }
+.sim-stat.s-lose .sv { color: #fca5a5; }
+.sim-stat.s-rate .sv { color: #fde68a; }
+
+/* ── 안내 배너 ── */
+.sim-guide {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-left: 4px solid #3b82f6;
+  border-radius: 10px;
+  padding: .75rem 1.1rem;
+  font-size: .83rem;
+  color: #1e40af;
+  margin-bottom: 1.1rem;
+  display: flex;
+  align-items: flex-start;
+  gap: .6rem;
+}
+
+/* ── 필터 바 ── */
+.sim-toolbar {
+  display: flex; align-items: center; gap: .6rem; flex-wrap: wrap;
+  margin-bottom: .9rem;
+}
+.sim-filter-btn {
+  padding: .32rem .75rem; border: 1.5px solid #cbd5e1;
+  border-radius: 8px; background: #fff; font-size: .78rem;
+  font-weight: 600; color: #475569; cursor: pointer;
+  font-family: inherit; transition: all .12s;
+}
+.sim-filter-btn.active { background: #1e293b; color: #fff; border-color: #1e293b; }
+.sim-filter-btn:hover:not(.active) { background: #f1f5f9; }
+
+.sim-run-btn {
+  margin-left: auto;
+  display: inline-flex; align-items: center; gap: .4rem;
+  padding: .45rem 1.2rem; border-radius: 9px;
+  background: var(--sim-accent); color: #fff;
+  border: none; font-size: .88rem; font-weight: 700;
+  cursor: pointer; font-family: inherit;
+  transition: opacity .12s; white-space: nowrap;
+}
+.sim-run-btn:hover { opacity: .88; }
+.sim-run-btn:disabled { opacity: .4; cursor: not-allowed; }
+.sim-reset-btn {
+  padding: .42rem .9rem; border: 1.5px solid #e2e8f0;
+  border-radius: 8px; background: #fff; font-size: .8rem;
+  font-weight: 600; color: #6b7280; cursor: pointer;
+  font-family: inherit; transition: all .12s;
+}
+.sim-reset-btn:hover { background: #f8fafc; }
+
+/* ── 상품 선택 테이블 ── */
+.sim-table-wrap { overflow-x: auto; margin-bottom: 1.25rem; }
+.sim-table {
+  width: 100%; border-collapse: collapse;
+  font-size: .82rem; min-width: 720px;
+  background: #fff;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 1px 4px rgba(0,0,0,.06);
+}
+.sim-table th {
+  background: #f8fafc; padding: .5rem .75rem;
+  text-align: left; border-bottom: 2px solid #e2e8f0;
+  font-weight: 700; color: #475569; font-size: .75rem;
+  white-space: nowrap;
+}
+.sim-table td {
+  padding: .55rem .75rem; border-bottom: 1px solid #f1f5f9;
+  vertical-align: middle;
+}
+.sim-table tr:last-child td { border-bottom: none; }
+.sim-table tr.row-hidden { display: none; }
+.sim-table tr.row-no-sales td { opacity: .55; }
+
+/* 선택 체크박스 */
+.sim-check {
+  width: 16px; height: 16px; cursor: pointer;
+  accent-color: var(--sim-accent);
+}
+
+/* 라인 선택 라디오 */
+.line-list { display: flex; flex-direction: column; gap: .3rem; }
+.line-item {
+  display: flex; align-items: flex-start; gap: .4rem;
+  padding: .3rem .5rem; border-radius: 6px;
+  border: 1.5px solid #e2e8f0;
+  background: #fff; cursor: pointer;
+  transition: border-color .12s, background .12s;
+  font-size: .78rem;
+}
+.line-item:hover { border-color: #a78bfa; background: #faf5ff; }
+.line-item input[type=radio] { margin-top: .15rem; accent-color: var(--sim-accent); flex-shrink: 0; }
+.line-item.selected { border-color: var(--sim-accent); background: #faf5ff; }
+.line-item.line-lose { border-color: #fca5a5; }
+.line-item.line-lose.selected { border-color: var(--sim-lose); background: #fff1f0; }
+.line-net { font-size: .72rem; color: #6b7280; }
+.line-margin-ok   { color: var(--sim-win); font-weight: 700; }
+.line-margin-warn { color: var(--sim-warn); font-weight: 700; }
+.line-margin-lose { color: var(--sim-lose); font-weight: 700; }
+
+/* 현재 GP 컬럼 */
+.cm-ok   { color: var(--sim-win); font-weight: 600; }
+.cm-warn { color: var(--sim-warn); font-weight: 600; }
+.cm-lose { color: var(--sim-lose); font-weight: 700; }
+.cm-na   { color: #9ca3af; }
+
+/* ── 결과 패널 ── */
+.sim-result-panel {
+  background: #fff;
+  border-radius: 14px;
+  box-shadow: 0 2px 12px rgba(0,0,0,.09);
+  overflow: hidden;
+  margin-bottom: 1.25rem;
+  display: none;
+}
+.sim-result-panel.visible { display: block; }
+.sim-result-header {
+  background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+  color: #fff; padding: 1rem 1.5rem;
+  display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; gap: .75rem;
+}
+.sim-result-header h3 { font-size: 1rem; font-weight: 800; margin: 0; }
+
+/* 결과 KPI */
+.sim-result-kpi {
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  gap: .75rem; padding: 1rem 1.25rem;
+  border-bottom: 1px solid #f1f5f9;
+}
+.sim-rkpi {
+  background: #f8fafc; border-radius: 10px; padding: .75rem 1rem;
+  display: flex; flex-direction: column; gap: .15rem;
+}
+.sim-rkpi .rl { font-size: .72rem; color: #6b7280; font-weight: 600; }
+.sim-rkpi .rv { font-size: 1.35rem; font-weight: 800; color: #1e293b; line-height: 1.1; }
+.sim-rkpi .rs { font-size: .7rem; color: #9ca3af; }
+.rkpi-gp  .rv { color: var(--sim-accent); }
+.rkpi-cur .rv { color: #374151; }
+.rkpi-diff .rv.positive { color: var(--sim-win); }
+.rkpi-diff .rv.negative { color: var(--sim-lose); }
+
+/* 전략 추천 메시지 */
+.sim-strategy {
+  margin: .75rem 1.25rem;
+  padding: .75rem 1rem;
+  border-radius: 10px;
+  font-size: .82rem;
+  line-height: 1.6;
+  border-left: 4px solid;
+}
+.strategy-ok   { background: #f0fdf4; border-color: var(--sim-win); color: #14532d; }
+.strategy-warn { background: #fffbeb; border-color: var(--sim-warn); color: #78350f; }
+.strategy-lose { background: #fff1f0; border-color: var(--sim-lose); color: #7f1d1d; }
+
+/* 결과 상세 테이블 */
+.sim-result-table-wrap { padding: .75rem 1.25rem 1.25rem; overflow-x: auto; }
+.sim-result-table {
+  width: 100%; border-collapse: collapse; font-size: .8rem; min-width: 600px;
+}
+.sim-result-table th {
+  background: #f8fafc; padding: .45rem .65rem;
+  text-align: left; border-bottom: 2px solid #e2e8f0;
+  font-weight: 700; color: #475569; font-size: .74rem; white-space: nowrap;
+}
+.sim-result-table td {
+  padding: .45rem .65rem; border-bottom: 1px solid #f1f5f9; vertical-align: middle;
+}
+.sim-result-table tr:last-child td { border-bottom: none; }
+.sim-result-table tr.total-row td {
+  background: #f1f5f9; font-weight: 700;
+  border-top: 2px solid #cbd5e1;
+}
+.gp-ok   { color: var(--sim-win); font-weight: 700; }
+.gp-warn { color: var(--sim-warn); font-weight: 700; }
+.gp-lose { color: var(--sim-lose); font-weight: 700; }
+
+/* 결과 액션 버튼 */
+.sim-result-actions {
+  display: flex; gap: .6rem; padding: 0 1.25rem 1.25rem; flex-wrap: wrap;
+}
+.sim-csv-btn {
+  display: inline-flex; align-items: center; gap: .35rem;
+  padding: .4rem .9rem; border: 1.5px solid #cbd5e1;
+  border-radius: 8px; background: #fff; font-size: .78rem;
+  font-weight: 600; color: #475569; cursor: pointer;
+  font-family: inherit; transition: all .12s;
+}
+.sim-csv-btn:hover { background: #f1f5f9; }
+
+/* 로딩 */
+.sim-loading {
+  text-align: center; padding: 4rem 2rem; color: #6b7280;
+}
+.sim-spinner {
+  width: 40px; height: 40px;
+  border: 4px solid #e5e7eb; border-top-color: var(--sim-accent);
+  border-radius: 50%; animation: spin .8s linear infinite; margin: 0 auto 1rem;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+@media(max-width:768px){
+  .sim-seller-card { flex-direction: column; align-items: flex-start; }
+  .sim-result-kpi { grid-template-columns: repeat(2,1fr); }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<a class="back-link" href="/portal/price-monitor/competition?plant={{ plant }}">← 경쟁분석으로 돌아가기</a>
+
+<!-- A. 셀러 정보 카드 (JS로 채움) -->
+<div class="sim-seller-card" id="sellerCard">
+  <div class="sim-loading" style="padding:1.5rem 0; width:100%;">
+    <div class="sim-spinner"></div>
+  </div>
+</div>
+
+<!-- B. 안내 배너 -->
+<div class="sim-guide">
+  <span style="font-size:1.1rem; flex-shrink:0;">💡</span>
+  <div>
+    각 우리 상품코드 행에서 <b>대응할 경쟁 상품 라인을 라디오로 선택</b>하세요.
+    선택 완료 후 <b>⚡ 시뮬레이션 실행</b>을 클릭하면 이 셀러와 실제 경쟁 시 예상 GP가 계산됩니다.<br>
+    <span style="font-size:.77rem; opacity:.8;">※ 우리 단가 = 최근 2주 평균 공급가 · 전월 매출 = 직전 1개월 실적</span>
+  </div>
+</div>
+
+<!-- C. 상품 선택 테이블 -->
+<div class="sim-toolbar" id="simToolbar" style="display:none;">
+  <button class="sim-filter-btn active" onclick="setFilter('all',this)">전체</button>
+  <button class="sim-filter-btn" onclick="setFilter('lose',this)">열세만 보기</button>
+  <button class="sim-filter-btn" onclick="setFilter('sales',this)">매출있는 상품만</button>
+  <button class="sim-filter-btn" onclick="setFilter('unselected',this)">미선택만</button>
+  <span id="selCount" style="font-size:.78rem;color:#6b7280;"></span>
+  <button class="sim-reset-btn" onclick="resetSelection()">초기화</button>
+  <button class="sim-run-btn" onclick="runSimulation()" id="runBtn">⚡ 시뮬레이션 실행</button>
+</div>
+
+<div id="simTableWrap">
+  <div class="sim-loading">
+    <div class="sim-spinner"></div>
+    <p>데이터를 불러오는 중입니다…</p>
+    <small style="font-size:.77rem;">Databricks 조회 중 (최대 20초)</small>
+  </div>
+</div>
+
+<!-- D. 시뮬레이션 결과 패널 -->
+<div class="sim-result-panel" id="simResultPanel">
+  <div class="sim-result-header">
+    <h3>📊 시뮬레이션 결과</h3>
+    <span id="resultSellerLabel" style="font-size:.82rem; opacity:.8;"></span>
+  </div>
+  <div class="sim-result-kpi">
+    <div class="sim-rkpi rkpi-gp">
+      <span class="rl">⚡ 시뮬 이익률</span>
+      <span class="rv" id="rGp">—</span>
+      <span class="rs">경쟁가 맞출 시 예상 GP율</span>
+    </div>
+    <div class="sim-rkpi rkpi-cur">
+      <span class="rl">📌 현재 이익률</span>
+      <span class="rv" id="rCur">—</span>
+      <span class="rs">현재 공급가 기준 GP율</span>
+    </div>
+    <div class="sim-rkpi rkpi-diff">
+      <span class="rl">△ 이익률 변화</span>
+      <span class="rv" id="rDiff">—</span>
+      <span class="rs">현재 대비 변화폭</span>
+    </div>
+    <div class="sim-rkpi">
+      <span class="rl">📦 시뮬 대상 매출</span>
+      <span class="rv" id="rSales" style="font-size:1.05rem;">—</span>
+      <span class="rs" id="rSkuCount"></span>
+    </div>
+  </div>
+  <div class="sim-strategy" id="simStrategy"></div>
+  <div class="sim-result-table-wrap">
+    <table class="sim-result-table">
+      <thead>
+        <tr>
+          <th>자재코드</th>
+          <th>상품명</th>
+          <th style="text-align:right;">전월 매출액</th>
+          <th style="text-align:right;">전월 수량</th>
+          <th>선택 경쟁 상품</th>
+          <th style="text-align:right;">경쟁사 실수취가</th>
+          <th style="text-align:center;">맞출 시 이익률</th>
+          <th style="text-align:right;">예상 GP 금액</th>
+        </tr>
+      </thead>
+      <tbody id="resultBody"></tbody>
+      <tfoot id="resultFoot"></tfoot>
+    </table>
+  </div>
+  <div class="sim-result-actions">
+    <button class="sim-csv-btn" onclick="downloadResultCSV()">📥 결과 CSV 다운로드</button>
+  </div>
+</div>
+
+<script>
+let _products = [];
+let _seller   = {};
+let _filter   = 'all';
+let _simResults = [];
+
+const PLAT_LABEL = { baemin: '배민상회', foodspring: '식봄' };
+
+async function loadData() {
+  const p = new URLSearchParams(location.search);
+  const plant      = p.get('plant')       || 'ALL';
+  const platform   = p.get('platform')    || '';
+  const sellerName = p.get('seller_name') || '';
+  const sellerId   = p.get('seller_id')   || '';
+
+  try {
+    const qs = new URLSearchParams({ plant, platform, seller_name: sellerName, seller_id: sellerId });
+    const resp = await fetch(`/portal/price-monitor/api/simulation?${qs}`);
+    const data = await resp.json();
+    _seller   = data.seller   || {};
+    _products = data.products || [];
+
+    renderSellerCard(data);
+    renderTable();
+    document.getElementById('simToolbar').style.display = 'flex';
+  } catch(e) {
+    document.getElementById('sellerCard').innerHTML =
+      '<div style="color:#fca5a5;padding:1rem;">⚠️ 데이터 로드 실패</div>';
+    document.getElementById('simTableWrap').innerHTML =
+      '<div style="text-align:center;padding:2rem;color:#9ca3af;">데이터를 불러오지 못했습니다.</div>';
+  }
+}
+
+function renderSellerCard(data) {
+  const s = data.seller;
+  const platLabel = PLAT_LABEL[s.platform] || s.platform;
+  const rateColor = s.win_rate >= 60 ? '#86efac' : s.win_rate >= 40 ? '#fde68a' : '#fca5a5';
+  document.getElementById('sellerCard').innerHTML = `
+    <div class="sim-seller-info">
+      <div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.4rem;">
+        <span style="background:rgba(255,255,255,.15);padding:.2rem .6rem;border-radius:99px;font-size:.72rem;font-weight:700;">${escHtml(platLabel)}</span>
+        ${s.seller_id ? `<span style="font-size:.75rem;opacity:.6;">ID: ${escHtml(String(s.seller_id))}</span>` : ''}
+        ${data.crawl_date ? `<span style="font-size:.72rem;opacity:.5;">📅 ${escHtml(data.crawl_date)}</span>` : ''}
+      </div>
+      <h2>🏪 ${escHtml(s.seller_name)}</h2>
+      <small>매핑 상품 ${s.total}건 · 실전 경쟁 시뮬레이션</small>
+    </div>
+    <div class="sim-seller-stats">
+      <div class="sim-stat"><div class="sv">${_products.length}</div><div class="sl">우리 상품 코드</div></div>
+      <div class="sim-stat s-win"><div class="sv">${s.win}</div><div class="sl">경쟁우위 라인</div></div>
+      <div class="sim-stat s-lose"><div class="sv">${s.lose}</div><div class="sl">경쟁열세 라인</div></div>
+      <div class="sim-stat s-rate"><div class="sv" style="color:${rateColor};">${s.win_rate}%</div><div class="sl">경쟁우위율</div></div>
+    </div>`;
+}
+
+function renderTable() {
+  const wrap = document.getElementById('simTableWrap');
+  if (!_products.length) {
+    wrap.innerHTML = '<div style="text-align:center;padding:3rem;color:#9ca3af;">매핑된 상품이 없습니다.</div>';
+    return;
+  }
+
+  const rows = _products.map((prod, pi) => {
+    const hasLines  = prod.lines && prod.lines.length > 0;
+    const hasSales  = prod.prev_sales_amt > 0;
+    const isLose    = prod.lines.some(l => l.status === 'lose');
+    const isUnsel   = true; // 초기엔 모두 미선택
+
+    const cmClass = prod.current_margin == null ? 'cm-na'
+                  : prod.current_margin < 10 ? 'cm-lose'
+                  : prod.current_margin < 20 ? 'cm-warn' : 'cm-ok';
+    const cmStr = prod.current_margin != null ? prod.current_margin + '%' : '-';
+
+    const linesHtml = hasLines ? prod.lines.map((ln, li) => {
+      const mc = ln.match_margin == null ? 'line-margin-lose'
+               : ln.match_margin < 10 ? 'line-margin-lose'
+               : ln.match_margin < 15 ? 'line-margin-warn'
+               : 'line-margin-ok';
+      const loseClass = ln.status === 'lose' ? 'line-lose' : '';
+      const mStr = ln.match_margin != null
+        ? `<span class="${mc}">${ln.match_margin}%${ln.match_margin < 10 ? ' 🔴' : ln.match_margin < 15 ? ' ⚠️' : ' ✅'}</span>`
+        : '<span style="color:#9ca3af;">-</span>';
+      const netStr = ln.comp_net_price != null ? ln.comp_net_price.toLocaleString() + '원' : '-';
+      const compStr = ln.competitor_price != null ? ln.competitor_price.toLocaleString() + '원' : '-';
+      return `
+        <label class="line-item ${loseClass}" id="li_${pi}_${li}" onclick="onLineSelect(${pi},${li})">
+          <input type="radio" name="line_${pi}" value="${li}" onchange="onLineSelect(${pi},${li})">
+          <div>
+            <div style="font-weight:600;">${escHtml(ln.ext_product_name || '-')}</div>
+            <div class="line-net">소비자가 ${compStr} → 실수취 ${netStr} &nbsp; 이익률 ${mStr}</div>
+            <div class="line-net" style="color:#9ca3af;">${escHtml(ln.delivery_type)} · 수수료 ${ln.fee_pct}%</div>
+          </div>
+        </label>`;
+    }).join('') : '<span style="font-size:.75rem;color:#9ca3af;">매핑 데이터 없음</span>';
+
+    const rowFilter = `data-has-sales="${hasSales}" data-is-lose="${isLose}"`;
+    return `<tr data-pi="${pi}" class="${!hasSales ? 'row-no-sales' : ''}" ${rowFilter}>
+      <td>
+        <input type="checkbox" class="sim-check" id="chk_${pi}" checked onchange="updateSelCount()">
+      </td>
+      <td style="font-size:.72rem;color:#6b7280;">${escHtml(prod.our_product_code)}</td>
+      <td style="font-weight:600;">${escHtml(prod.product_name)}</td>
+      <td style="text-align:right;">${prod.prev_sales_amt > 0 ? '₩' + prod.prev_sales_amt.toLocaleString() : '<span style="color:#d1d5db;">-</span>'}</td>
+      <td style="text-align:right;">${prod.prev_sales_qty > 0 ? prod.prev_sales_qty.toLocaleString() : '<span style="color:#d1d5db;">-</span>'}</td>
+      <td><span class="${cmClass}">${cmStr}</span></td>
+      <td><div class="line-list">${linesHtml}</div></td>
+    </tr>`;
+  }).join('');
+
+  wrap.innerHTML = `
+    <div class="sim-table-wrap">
+      <table class="sim-table">
+        <thead>
+          <tr>
+            <th style="width:32px;"><input type="checkbox" id="chkAll" checked onclick="toggleAll(this)" style="accent-color:#7c3aed;"></th>
+            <th style="width:76px;">자재코드</th>
+            <th>우리 상품명</th>
+            <th style="text-align:right;width:110px;">전월 매출액</th>
+            <th style="text-align:right;width:72px;">전월 수량</th>
+            <th style="width:80px;">현재 GP율</th>
+            <th>경쟁 상품 라인 선택 <span style="font-size:.68rem;font-weight:400;color:#9ca3af;">(라디오 선택 → 시뮬레이션 반영)</span></th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+
+  updateSelCount();
+}
+
+function setFilter(f, btn) {
+  _filter = f;
+  document.querySelectorAll('.sim-filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  const rows = document.querySelectorAll('#simTableWrap tbody tr');
+  rows.forEach(tr => {
+    const hasSales = tr.dataset.hasSales === 'true';
+    const isLose   = tr.dataset.isLose === 'true';
+    const pi = parseInt(tr.dataset.pi);
+    const chk = document.getElementById('chk_' + pi);
+    let show = true;
+    if (f === 'sales') show = hasSales;
+    if (f === 'lose')  show = isLose;
+    if (f === 'unselected') {
+      const radio = document.querySelector(`input[name="line_${pi}"]:checked`);
+      show = !radio;
+    }
+    tr.classList.toggle('row-hidden', !show);
+  });
+  updateSelCount();
+}
+
+function toggleAll(cb) {
+  document.querySelectorAll('.sim-check').forEach(c => c.checked = cb.checked);
+  updateSelCount();
+}
+
+function onLineSelect(pi, li) {
+  const label = document.getElementById(`li_${pi}_${li}`);
+  // 같은 그룹의 모든 label에서 selected 제거 후 이 label에 추가
+  const row = label.closest('tr');
+  row.querySelectorAll('.line-item').forEach(l => l.classList.remove('selected'));
+  label.classList.add('selected');
+  updateSelCount();
+}
+
+function resetSelection() {
+  document.querySelectorAll('input[type=radio]').forEach(r => r.checked = false);
+  document.querySelectorAll('.line-item').forEach(l => l.classList.remove('selected'));
+  document.querySelectorAll('.sim-check').forEach(c => c.checked = true);
+  document.getElementById('chkAll').checked = true;
+  document.getElementById('simResultPanel').classList.remove('visible');
+  updateSelCount();
+}
+
+function updateSelCount() {
+  const checked = document.querySelectorAll('.sim-check:checked').length;
+  const total   = document.querySelectorAll('.sim-check').length;
+  document.getElementById('selCount').textContent = `${checked}/${total}건 선택`;
+}
+
+function runSimulation() {
+  _simResults = [];
+  let totalSales = 0, totalGp = 0, totalCurGp = 0, totalCurSales = 0;
+  let skuCount = 0;
+
+  _products.forEach((prod, pi) => {
+    const chk = document.getElementById('chk_' + pi);
+    if (!chk || !chk.checked) return;
+    const radio = document.querySelector(`input[name="line_${pi}"]:checked`);
+    if (!radio) return;
+    const li = parseInt(radio.value);
+    const line = prod.lines[li];
+    if (!line) return;
+
+    const sales = prod.prev_sales_amt || 0;
+    const margin = line.match_margin;
+    const gpAmt = margin != null ? Math.round(sales * margin / 100) : null;
+    const curGpAmt = prod.current_margin != null ? Math.round(sales * prod.current_margin / 100) : null;
+
+    _simResults.push({
+      our_product_code: prod.our_product_code,
+      product_name:     prod.product_name,
+      prev_sales_amt:   sales,
+      prev_sales_qty:   prod.prev_sales_qty,
+      ext_product_name: line.ext_product_name,
+      comp_net_price:   line.comp_net_price,
+      match_margin:     margin,
+      gp_amt:           gpAmt,
+      cur_margin:       prod.current_margin,
+      cur_gp_amt:       curGpAmt,
+      delivery_type:    line.delivery_type,
+    });
+
+    if (sales > 0) {
+      totalSales    += sales;
+      totalGp       += (gpAmt    || 0);
+      totalCurGp    += (curGpAmt || 0);
+      totalCurSales += sales;
+      skuCount++;
+    }
+  });
+
+  if (!_simResults.length) {
+    alert('시뮬레이션할 상품을 선택하고, 경쟁 라인을 라디오로 선택해주세요.');
+    return;
+  }
+
+  // KPI 계산
+  const simGpRate = totalSales > 0 ? (totalGp / totalSales * 100).toFixed(1) : null;
+  const curGpRate = totalCurSales > 0 ? (totalCurGp / totalCurSales * 100).toFixed(1) : null;
+  const diffRate  = simGpRate != null && curGpRate != null
+    ? (parseFloat(simGpRate) - parseFloat(curGpRate)).toFixed(1) : null;
+
+  // KPI 렌더
+  const rGp = document.getElementById('rGp');
+  rGp.textContent = simGpRate != null ? simGpRate + '%' : '-';
+  rGp.className = 'rv ' + gpClass(parseFloat(simGpRate));
+  document.getElementById('rCur').textContent = curGpRate != null ? curGpRate + '%' : '-';
+  const rDiff = document.getElementById('rDiff');
+  if (diffRate != null) {
+    const d = parseFloat(diffRate);
+    rDiff.textContent = (d > 0 ? '+' : '') + diffRate + '%p';
+    rDiff.className = 'rv ' + (d >= 0 ? 'positive' : 'negative');
+  }
+  document.getElementById('rSales').textContent = totalSales > 0 ? '₩' + totalSales.toLocaleString() : '-';
+  document.getElementById('rSkuCount').textContent = `${skuCount}개 SKU 포함`;
+  document.getElementById('resultSellerLabel').textContent =
+    `${PLAT_LABEL[_seller.platform] || _seller.platform} · ${_seller.seller_name}`;
+
+  // 전략 메시지
+  const stratEl = document.getElementById('simStrategy');
+  const loseCnt = _simResults.filter(r => r.match_margin != null && r.match_margin < 10).length;
+  const warnCnt = _simResults.filter(r => r.match_margin != null && r.match_margin >= 10 && r.match_margin < 15).length;
+  const gr = parseFloat(simGpRate) || 0;
+  let stratClass, stratMsg;
+  if (gr < 10) {
+    stratClass = 'strategy-lose';
+    stratMsg = `⚠️ <b>경고:</b> 경쟁가 전면 대응 시 예상 GP율 ${simGpRate}%로 10% 미달입니다. ` +
+               `${loseCnt}개 SKU는 이 셀러 가격에 맞추면 수익성이 심각하게 훼손됩니다. ` +
+               `선택적 대응(고마진 상품 우선) 또는 단가 재검토가 필요합니다.`;
+  } else if (gr < 15) {
+    stratClass = 'strategy-warn';
+    stratMsg = `💡 <b>주의:</b> 전면 경쟁 시 GP율 ${simGpRate}%로 수익성이 낮아집니다. ` +
+               `${warnCnt}개 SKU는 이익률 10~15% 구간으로 안전마진이 부족합니다. ` +
+               `핵심 SKU 위주로 선별 대응을 권장합니다.`;
+  } else {
+    stratClass = 'strategy-ok';
+    stratMsg = `✅ <b>양호:</b> 경쟁가 대응 시에도 예상 GP율 ${simGpRate}%로 수익성이 유지됩니다. ` +
+               `이 셀러와의 가격 경쟁은 현실적으로 감당 가능한 수준입니다.`;
+  }
+  stratEl.className = 'sim-strategy ' + stratClass;
+  stratEl.innerHTML = stratMsg;
+
+  // 상세 테이블
+  const tbody = document.getElementById('resultBody');
+  tbody.innerHTML = _simResults.map(r => {
+    const gc = r.match_margin == null ? 'gp-warn'
+             : r.match_margin < 10  ? 'gp-lose'
+             : r.match_margin < 15  ? 'gp-warn' : 'gp-ok';
+    const mStr = r.match_margin != null ? r.match_margin + '%' : '-';
+    const gpStr = r.gp_amt != null ? '₩' + r.gp_amt.toLocaleString() : '-';
+    const netStr = r.comp_net_price != null ? r.comp_net_price.toLocaleString() + '원' : '-';
+    return `<tr>
+      <td style="font-size:.72rem;color:#6b7280;">${escHtml(r.our_product_code)}</td>
+      <td style="font-weight:600;">${escHtml(r.product_name)}</td>
+      <td style="text-align:right;">${r.prev_sales_amt > 0 ? '₩' + r.prev_sales_amt.toLocaleString() : '-'}</td>
+      <td style="text-align:right;">${r.prev_sales_qty > 0 ? r.prev_sales_qty.toLocaleString() : '-'}</td>
+      <td style="font-size:.76rem;">${escHtml(r.ext_product_name)}</td>
+      <td style="text-align:right;">${netStr}</td>
+      <td style="text-align:center;" class="${gc}">${mStr}</td>
+      <td style="text-align:right;" class="${gc}">${gpStr}</td>
+    </tr>`;
+  }).join('');
+
+  // 합계 행
+  document.getElementById('resultFoot').innerHTML = `
+    <tr class="total-row">
+      <td colspan="2">합계 (${skuCount}개 SKU)</td>
+      <td style="text-align:right;">₩${totalSales.toLocaleString()}</td>
+      <td></td><td></td><td></td>
+      <td style="text-align:center;" class="${gpClass(parseFloat(simGpRate))}">${simGpRate != null ? simGpRate+'%' : '-'}</td>
+      <td style="text-align:right;" class="${gpClass(parseFloat(simGpRate))}">₩${totalGp.toLocaleString()}</td>
+    </tr>`;
+
+  document.getElementById('simResultPanel').classList.add('visible');
+  document.getElementById('simResultPanel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function gpClass(v) {
+  if (isNaN(v)) return '';
+  return v < 10 ? 'gp-lose' : v < 15 ? 'gp-warn' : 'gp-ok';
+}
+
+// ── CSV 다운로드 ──
+function csvEsc(v) {
+  if (v == null) return '';
+  const s = String(v);
+  return s.includes(',') || s.includes('"') || s.includes('\n') ? '"' + s.replace(/"/g,'""') + '"' : s;
+}
+function downloadResultCSV() {
+  if (!_simResults.length) return alert('먼저 시뮬레이션을 실행해주세요.');
+  const header = ['플랫폼','셀러명','자재코드','우리상품명','경쟁상품명','전월매출액','전월수량','경쟁사실수취가','맞출시이익률(%)','예상GP금액','현재GP율(%)'];
+  const rows = _simResults.map(r => [
+    PLAT_LABEL[_seller.platform] || _seller.platform,
+    _seller.seller_name,
+    r.our_product_code, r.product_name, r.ext_product_name,
+    r.prev_sales_amt, r.prev_sales_qty,
+    r.comp_net_price ?? '', r.match_margin ?? '',
+    r.gp_amt ?? '', r.cur_margin ?? '',
+  ].map(csvEsc).join(','));
+  const today = new Date().toISOString().slice(0,10);
+  const bom = '\uFEFF';
+  const blob = new Blob([bom + [header.join(','),...rows].join('\n')], {type:'text/csv;charset=utf-8;'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `경쟁시뮬레이션_${_seller.seller_name}_${today}.csv`;
+  a.click();
+}
+
+function escHtml(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+loadData();
+</script>
+{% endblock %}
