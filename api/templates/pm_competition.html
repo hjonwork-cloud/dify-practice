@@ -1,0 +1,414 @@
+{% extends 'pm_base.html' %}
+{% block title %}플랫폼 경쟁분석{% endblock %}
+{% block page_title %}📊 플랫폼 경쟁분석{% endblock %}
+
+{% block head %}
+<style>
+/* ── KPI 카드 ── */
+.comp-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: .9rem;
+  margin-bottom: 1.25rem;
+}
+.comp-kpi {
+  background: #fff;
+  border-radius: 12px;
+  padding: 1.1rem 1.25rem;
+  box-shadow: 0 1px 4px rgba(0,0,0,.06);
+  display: flex;
+  flex-direction: column;
+  gap: .25rem;
+}
+.comp-kpi .kpi-label { font-size: .78rem; color: #6b7280; font-weight: 600; }
+.comp-kpi .kpi-val   { font-size: 1.85rem; font-weight: 800; line-height: 1.1; }
+.comp-kpi .kpi-sub   { font-size: .75rem; color: #9ca3af; }
+.kpi-total { border-top: 3px solid #6366f1; }
+.kpi-win   { border-top: 3px solid #16a34a; }
+.kpi-tie   { border-top: 3px solid #9ca3af; }
+.kpi-lose  { border-top: 3px solid #dc2626; }
+.kpi-total .kpi-val { color: #4f46e5; }
+.kpi-win   .kpi-val { color: #16a34a; }
+.kpi-tie   .kpi-val { color: #6b7280; }
+.kpi-lose  .kpi-val { color: #dc2626; }
+
+/* ── 셀러 요약 테이블 ── */
+.comp-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: .75rem;
+}
+.comp-section-title { font-size: .92rem; font-weight: 700; color: #1e293b; }
+.comp-filter-row {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+.comp-filter-row label { font-size: .8rem; color: #6b7280; font-weight: 600; }
+.comp-select {
+  border: 1.5px solid #cbd5e1;
+  border-radius: 8px;
+  padding: .35rem .7rem;
+  font-size: .82rem;
+  background: #fff;
+  cursor: pointer;
+  font-family: inherit;
+  color: #1e293b;
+}
+
+/* ── 셀러 행 ── */
+.seller-row {
+  background: #fff;
+  border-radius: 10px;
+  margin-bottom: .5rem;
+  box-shadow: 0 1px 3px rgba(0,0,0,.05);
+  overflow: hidden;
+  transition: box-shadow .15s;
+}
+.seller-row:hover { box-shadow: 0 2px 8px rgba(0,0,0,.1); }
+.seller-head {
+  display: grid;
+  grid-template-columns: 1fr 80px 60px 60px 60px 80px 36px;
+  align-items: center;
+  gap: .5rem;
+  padding: .7rem 1rem;
+  cursor: pointer;
+  user-select: none;
+  border-bottom: 1px solid transparent;
+  transition: background .12s;
+}
+.seller-head:hover { background: #f8fafc; }
+.seller-head.open { border-bottom-color: #e2e8f0; background: #f8fafc; }
+.sh-name { display: flex; align-items: center; gap: .5rem; }
+.sh-name .plat-badge { font-size: .7rem; }
+.sh-name strong { font-size: .88rem; font-weight: 700; color: #1e293b; }
+.sh-name small { font-size: .72rem; color: #9ca3af; }
+.sh-cnt { font-size: .82rem; font-weight: 600; text-align: center; }
+.sh-win  { color: #16a34a; }
+.sh-tie  { color: #6b7280; }
+.sh-lose { color: #dc2626; }
+.sh-rate { text-align: center; }
+
+/* 경쟁우위율 바 */
+.win-rate-wrap { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.win-rate-bar { width: 56px; height: 6px; background: #f1f5f9; border-radius: 99px; overflow: hidden; }
+.win-rate-fill { height: 100%; border-radius: 99px; }
+.win-rate-val { font-size: .72rem; font-weight: 700; }
+.rate-high  { background: #16a34a; }
+.rate-mid   { background: #f59e0b; }
+.rate-low   { background: #dc2626; }
+.rate-val-high { color: #16a34a; }
+.rate-val-mid  { color: #f59e0b; }
+.rate-val-low  { color: #dc2626; }
+
+.sh-toggle { font-size: .75rem; color: #94a3b8; transition: transform .2s; display: flex; align-items: center; justify-content: center; }
+.sh-toggle.open { transform: rotate(180deg); }
+
+/* ── SKU 상세 테이블 ── */
+.sku-detail {
+  display: none;
+  padding: .75rem 1rem 1rem;
+  background: #f8fafc;
+  overflow-x: auto;
+}
+.sku-detail.open { display: block; }
+.sku-table { width: 100%; border-collapse: collapse; font-size: .8rem; min-width: 680px; }
+.sku-table th {
+  background: #f1f5f9;
+  padding: .45rem .65rem;
+  text-align: left;
+  border-bottom: 2px solid #e2e8f0;
+  white-space: nowrap;
+  font-weight: 700;
+  color: #475569;
+  font-size: .75rem;
+}
+.sku-table td {
+  padding: .45rem .65rem;
+  border-bottom: 1px solid #e9eef5;
+  vertical-align: middle;
+}
+.sku-table tr:last-child td { border-bottom: none; }
+.sku-win  td { background: #f0fdf4; }
+.sku-lose td { background: #fff1f0; }
+.sku-tie  td { background: #fff; }
+.diff-win  { color: #16a34a; font-weight: 700; }
+.diff-lose { color: #dc2626; font-weight: 700; }
+.diff-tie  { color: #6b7280; }
+.status-badge-win  { background: #dcfce7; color: #15803d; }
+.status-badge-lose { background: #fee2e2; color: #b91c1c; }
+.status-badge-tie  { background: #f3f4f6; color: #6b7280; }
+.status-badge-unknown { background: #f3f4f6; color: #9ca3af; }
+
+/* 로딩/에러 */
+.comp-loading { text-align: center; padding: 3rem; color: #6b7280; }
+.comp-spinner {
+  width: 36px; height: 36px;
+  border: 4px solid #e5e7eb;
+  border-top-color: #1677ff;
+  border-radius: 50%;
+  animation: spin .8s linear infinite;
+  margin: 0 auto 1rem;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.comp-empty { text-align: center; padding: 3rem 1rem; color: #9ca3af; font-size: .9rem; }
+
+/* crawl date 태그 */
+.crawl-tag {
+  font-size: .75rem;
+  background: #dbeafe;
+  color: #1d4ed8;
+  padding: .2rem .6rem;
+  border-radius: 99px;
+  font-weight: 600;
+}
+
+@media(max-width: 768px) {
+  .comp-kpi-grid { grid-template-columns: repeat(2, 1fr); }
+  .seller-head { grid-template-columns: 1fr 60px 60px 36px; }
+  .seller-head .sh-cnt:nth-child(3),
+  .seller-head .sh-cnt:nth-child(4),
+  .seller-head .sh-rate { display: none; }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:1.25rem; flex-wrap:wrap; gap:.75rem;">
+  <div>
+    <p style="font-size:.78rem; color:#6b7280; font-weight:600; margin-bottom:.15rem;">PLATFORM COMPETITION</p>
+    <h2 style="font-size:1.15rem; font-weight:800; color:#1e293b; margin:0;">플랫폼 경쟁분석</h2>
+    <p style="font-size:.8rem; color:#6b7280; margin-top:.25rem;">셀러(경쟁사)별 매핑 상품 가격을 비교하여 경쟁 우위·열세를 파악합니다.</p>
+  </div>
+  <span id="crawlDateTag" class="crawl-tag" style="display:none;"></span>
+</div>
+
+<!-- KPI 카드 -->
+<div class="comp-kpi-grid" id="kpiGrid">
+  <div class="comp-kpi kpi-total">
+    <span class="kpi-label">📦 매핑 상품 총 건수</span>
+    <span class="kpi-val skel-kpi">—</span>
+    <span class="kpi-sub">플랫폼 전체</span>
+  </div>
+  <div class="comp-kpi kpi-win">
+    <span class="kpi-label">↑ 경쟁 우위</span>
+    <span class="kpi-val skel-kpi">—</span>
+    <span class="kpi-sub">우리가 더 저렴한 SKU</span>
+  </div>
+  <div class="comp-kpi kpi-tie">
+    <span class="kpi-label">= 동일 가격</span>
+    <span class="kpi-val skel-kpi">—</span>
+    <span class="kpi-sub">±0.5원 이내 동일</span>
+  </div>
+  <div class="comp-kpi kpi-lose">
+    <span class="kpi-label">↓ 경쟁 열세</span>
+    <span class="kpi-val skel-kpi">—</span>
+    <span class="kpi-sub">경쟁사가 더 저렴한 SKU</span>
+  </div>
+</div>
+
+<!-- 필터 바 -->
+<div class="comp-filter-row">
+  <label>플랫폼</label>
+  <select class="comp-select" id="filterPlatform" onchange="applyFilter()">
+    <option value="">전체</option>
+    <option value="baemin">배민상회</option>
+    <option value="foodspring">식봄</option>
+  </select>
+  <label style="margin-left:.5rem;">정렬</label>
+  <select class="comp-select" id="filterSort" onchange="applyFilter()">
+    <option value="win_rate_asc">경쟁우위율 낮은순 (위험↑)</option>
+    <option value="win_rate_desc">경쟁우위율 높은순</option>
+    <option value="lose_desc">열세 건수 많은순</option>
+    <option value="total_desc">매핑 건수 많은순</option>
+  </select>
+  <span id="filterCount" style="font-size:.78rem; color:#9ca3af; margin-left:.25rem;"></span>
+</div>
+
+<!-- 셀러 목록 -->
+<div id="sellerList">
+  <div class="comp-loading">
+    <div class="comp-spinner"></div>
+    <p>데이터를 불러오는 중입니다…</p>
+    <small style="font-size:.78rem;">Databricks 조회 중 (최대 20초)</small>
+  </div>
+</div>
+
+<style>
+.skel-kpi { display: inline-block; width: 60px; height: 32px; background: linear-gradient(90deg,#e5e7eb 25%,#f3f4f6 50%,#e5e7eb 75%); background-size: 300px 100%; animation: shimmer 1.2s infinite linear; border-radius: 6px; }
+@keyframes shimmer { 0%{background-position:-300px 0} 100%{background-position:300px 0} }
+</style>
+
+<script>
+let _allSellers = [];
+let _openSellers = new Set();  // 펼쳐진 셀러 키
+
+const PLAT_LABEL = { baemin: '배민상회', foodspring: '식봄' };
+const PLAT_BADGE_CLASS = { baemin: 'badge-baemin', foodspring: 'badge-foodspring' };
+
+async function loadData() {
+  const plant = new URLSearchParams(location.search).get('plant') || 'ALL';
+  try {
+    const resp = await fetch(`/portal/price-monitor/api/competition?plant=${plant}`);
+    const data = await resp.json();
+
+    // crawl date
+    if (data.crawl_date) {
+      const tag = document.getElementById('crawlDateTag');
+      tag.textContent = '📅 수집일: ' + data.crawl_date;
+      tag.style.display = '';
+    }
+
+    // KPI
+    const kvals = document.querySelectorAll('.kpi-val');
+    const kpi = data.kpi || {};
+    kvals[0].textContent = (kpi.total || 0).toLocaleString();
+    kvals[1].textContent = (kpi.win   || 0).toLocaleString();
+    kvals[2].textContent = (kpi.tie   || 0).toLocaleString();
+    kvals[3].textContent = (kpi.lose  || 0).toLocaleString();
+    kvals.forEach(el => el.classList.remove('skel-kpi'));
+
+    _allSellers = data.sellers || [];
+    applyFilter();
+  } catch (e) {
+    document.getElementById('sellerList').innerHTML =
+      '<div class="comp-empty">⚠️ 데이터를 불러오지 못했습니다. 페이지를 새로고침해 주세요.</div>';
+  }
+}
+
+function applyFilter() {
+  const platFilter = document.getElementById('filterPlatform').value;
+  const sortMode   = document.getElementById('filterSort').value;
+
+  let sellers = platFilter
+    ? _allSellers.filter(s => s.platform === platFilter)
+    : [..._allSellers];
+
+  // 정렬
+  if (sortMode === 'win_rate_asc')  sellers.sort((a,b) => a.win_rate - b.win_rate);
+  if (sortMode === 'win_rate_desc') sellers.sort((a,b) => b.win_rate - a.win_rate);
+  if (sortMode === 'lose_desc')     sellers.sort((a,b) => b.lose - a.lose);
+  if (sortMode === 'total_desc')    sellers.sort((a,b) => b.total - a.total);
+
+  document.getElementById('filterCount').textContent =
+    sellers.length ? `셀러 ${sellers.length}개` : '';
+
+  renderSellers(sellers);
+}
+
+function renderSellers(sellers) {
+  const el = document.getElementById('sellerList');
+  if (!sellers.length) {
+    el.innerHTML = '<div class="comp-empty">매핑된 상품이 없습니다.</div>';
+    return;
+  }
+
+  el.innerHTML = sellers.map((s, idx) => {
+    const key = `${s.platform}__${s.seller_id || s.seller_name}`;
+    const isOpen = _openSellers.has(key);
+    const rateClass = s.win_rate >= 60 ? 'rate-high' : s.win_rate >= 40 ? 'rate-mid' : 'rate-low';
+    const rateValClass = s.win_rate >= 60 ? 'rate-val-high' : s.win_rate >= 40 ? 'rate-val-mid' : 'rate-val-low';
+    const platLabel = PLAT_LABEL[s.platform] || s.platform;
+    const platBadge = PLAT_BADGE_CLASS[s.platform] || 'badge-gray';
+
+    return `
+    <div class="seller-row">
+      <div class="seller-head ${isOpen ? 'open' : ''}"
+           onclick="toggleSeller('${key}', this)"
+           data-key="${key}">
+        <div class="sh-name">
+          <span class="badge ${platBadge} plat-badge">${platLabel}</span>
+          <div>
+            <strong>${escHtml(s.seller_name)}</strong>
+            ${s.seller_id ? `<small style="margin-left:.35rem;">ID: ${escHtml(String(s.seller_id))}</small>` : ''}
+          </div>
+        </div>
+        <div class="sh-cnt" title="매핑 건수">${s.total}<span style="font-size:.68rem;color:#9ca3af;"> 건</span></div>
+        <div class="sh-cnt sh-win"  title="우위">↑ ${s.win}</div>
+        <div class="sh-cnt sh-tie"  title="동일">= ${s.tie}</div>
+        <div class="sh-cnt sh-lose" title="열세">↓ ${s.lose}</div>
+        <div class="sh-rate">
+          <div class="win-rate-wrap">
+            <div class="win-rate-bar"><div class="win-rate-fill ${rateClass}" style="width:${s.win_rate}%"></div></div>
+            <span class="win-rate-val ${rateValClass}">${s.win_rate}%</span>
+          </div>
+        </div>
+        <div class="sh-toggle ${isOpen ? 'open' : ''}">▾</div>
+      </div>
+      <div class="sku-detail ${isOpen ? 'open' : ''}" id="sku_${key}">
+        ${renderSkuTable(s.items)}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderSkuTable(items) {
+  if (!items || !items.length) return '<div class="comp-empty" style="padding:1rem;">매핑 상품 없음</div>';
+  const rows = items.map(it => {
+    const rowClass = it.status === 'win' ? 'sku-win' : it.status === 'lose' ? 'sku-lose' : 'sku-tie';
+    const badgeClass = `status-badge-${it.status}`;
+    const statusLabel = it.status === 'win' ? '↑ 우위' : it.status === 'lose' ? '↓ 열세' : it.status === 'tie' ? '= 동일' : '-';
+    const diffClass = it.status === 'win' ? 'diff-win' : it.status === 'lose' ? 'diff-lose' : 'diff-tie';
+    const ourP  = it.our_price  != null ? Number(it.our_price).toLocaleString()  + '원' : '-';
+    const compP = it.competitor_price != null ? Number(it.competitor_price).toLocaleString() + '원' : '-';
+    const diffStr = it.diff != null
+      ? (it.diff > 0 ? '+' : '') + Number(it.diff).toLocaleString() + '원'
+      : '-';
+    const diffPctStr = it.diff_pct != null
+      ? (it.diff_pct > 0 ? '+' : '') + it.diff_pct + '%'
+      : '';
+    return `<tr class="${rowClass}">
+      <td><span style="font-size:.72rem;color:#9ca3af;">${escHtml(it.our_product_code)}</span></td>
+      <td><span style="font-weight:600;">${escHtml(it.product_name)}</span>
+          ${it.ext_product_name && it.ext_product_name !== it.product_name
+            ? `<br><span style="font-size:.72rem;color:#9ca3af;">${escHtml(it.ext_product_name)}</span>` : ''}
+      </td>
+      <td style="text-align:right;font-weight:600;">${ourP}</td>
+      <td style="text-align:right;font-weight:600;">${compP}</td>
+      <td style="text-align:right;" class="${diffClass}">${diffStr} ${diffPctStr ? `<span style="font-size:.72rem;">(${diffPctStr})</span>` : ''}</td>
+      <td>${it.delivery_type ? `<span class="badge badge-gray" style="font-size:.68rem;">${escHtml(it.delivery_type)}</span>` : ''}</td>
+      <td><span class="badge ${badgeClass}">${statusLabel}</span></td>
+    </tr>`;
+  }).join('');
+
+  return `<table class="sku-table">
+    <thead>
+      <tr>
+        <th style="width:80px;">자재코드</th>
+        <th>상품명</th>
+        <th style="text-align:right;width:100px;">우리 단가</th>
+        <th style="text-align:right;width:100px;">경쟁사 단가</th>
+        <th style="text-align:right;width:110px;">차이</th>
+        <th style="width:80px;">배송유형</th>
+        <th style="width:72px;">판정</th>
+      </tr>
+    </thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
+function toggleSeller(key, headEl) {
+  const detail = document.getElementById('sku_' + key);
+  const toggle = headEl.querySelector('.sh-toggle');
+  if (!detail) return;
+  const isNowOpen = !detail.classList.contains('open');
+  detail.classList.toggle('open', isNowOpen);
+  headEl.classList.toggle('open', isNowOpen);
+  toggle.classList.toggle('open', isNowOpen);
+  if (isNowOpen) _openSellers.add(key);
+  else           _openSellers.delete(key);
+}
+
+function escHtml(s) {
+  if (s == null) return '';
+  return String(s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;');
+}
+
+loadData();
+</script>
+{% endblock %}

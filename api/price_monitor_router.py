@@ -1181,6 +1181,154 @@ async def api_scheduler_run_now(request: Request):
     return JSONResponse({"ok": True, "message": "크롤링 백그라운드 실행 시작됨"})
 
 
+# ── 화면 6: 플랫폼 경쟁분석 ────────────────────────────────────────────────
+
+@router.get("/competition", response_class=HTMLResponse)
+async def pm_competition(request: Request, plant: str = "ALL"):
+    """셀러별 매핑 상품 경쟁가격 비교 화면."""
+    _require_pm_access(request)
+    if plant not in PLANTS:
+        plant = "ALL"
+    return _render(request, "pm_competition.html",
+                   active_page="competition", plant=plant, plants=PLANTS)
+
+
+@router.get("/api/competition")
+async def api_competition(request: Request, plant: str = "ALL"):
+    """플랫폼 경쟁분석 JSON API.
+
+    반환:
+      crawl_date: 최신 수집일
+      kpi: {total, win, tie, lose}
+      sellers: [{platform, seller_name, seller_id, total, win, tie, lose, win_rate, items}]
+        items: [{our_product_code, product_name, our_price, competitor_price, diff, diff_pct, status}]
+    """
+    _require_pm_access(request)
+    if plant not in PLANTS:
+        plant = "ALL"
+
+    # ── 기준 데이터 수집 ──
+    all_mappings = portal_db.pm_list_all_mappings(plant)
+    if not all_mappings:
+        return JSONResponse({"crawl_date": "", "kpi": {"total": 0, "win": 0, "tie": 0, "lose": 0}, "sellers": []})
+
+    price_rows  = _get_base_prices(plant)
+    price_map: dict[str, dict] = {r["product_code"]: r for r in price_rows}
+
+    # 상품명 맵
+    our_name_map: dict[str, str] = {
+        p["product_code"]: p["product_name"]
+        for p in _get_our_products(plant)
+        if p.get("product_name")
+    }
+
+    def _resolve(p_code: str) -> str:
+        name = our_name_map.get(p_code)
+        if name and name != p_code:
+            return name
+        try:
+            rows_fb = _q(f"SELECT MAX(`상품명`) AS nm FROM {T_ZMM60} WHERE `상품코드` = '{p_code}'")
+            nm = rows_fb[0]["nm"] if rows_fb else None
+            if nm:
+                our_name_map[p_code] = nm
+                return nm
+        except Exception:
+            pass
+        return p_code
+
+    # 플랫폼 최신가 (전체 매핑 product_key)
+    product_keys = [m["product_key"] for m in all_mappings]
+    platform_rows = _get_platform_latest(product_keys=product_keys)
+    platform_map: dict[str, dict] = {r["product_key"]: r for r in platform_rows}
+
+    # ── 셀러별 그룹화 ──
+    # key: (platform, seller_name)
+    from collections import defaultdict
+    seller_groups: dict[tuple, list] = defaultdict(list)
+    crawl_date = ""
+
+    for m in all_mappings:
+        pk = m["product_key"]
+        pf_data = platform_map.get(pk)
+        if not pf_data:
+            continue
+
+        p_code        = m["our_product_code"]
+        our_price     = (price_map.get(p_code) or {}).get("avg_sale_price")
+        comp_price    = pf_data.get("price_sale")
+        seller_name   = pf_data.get("platform_seller_name") or m.get("seller_name") or ""
+        seller_id     = m.get("platform_seller_id") or ""
+        platform      = pf_data.get("platform") or m.get("platform") or ""
+
+        if not crawl_date:
+            crawl_date = str(pf_data.get("crawl_date", ""))
+
+        # 판정
+        if our_price and comp_price:
+            diff     = round(float(our_price) - float(comp_price), 0)
+            diff_pct = round((float(our_price) - float(comp_price)) / float(comp_price) * 100, 1)
+            if diff < -0.5:
+                status = "win"   # 우리가 더 쌈 → 우위
+            elif diff > 0.5:
+                status = "lose"  # 경쟁사가 더 쌈 → 열세
+            else:
+                status = "tie"
+        else:
+            diff = diff_pct = None
+            status = "unknown"
+
+        seller_groups[(platform, seller_name, seller_id)].append({
+            "our_product_code": p_code,
+            "product_name":     _resolve(p_code),
+            "our_price":        int(our_price)  if our_price  else None,
+            "competitor_price": int(comp_price) if comp_price else None,
+            "diff":             int(diff)        if diff is not None else None,
+            "diff_pct":         diff_pct,
+            "status":           status,
+            "product_key":      pk,
+            "ext_product_name": pf_data.get("product_name", ""),
+            "delivery_type":    pf_data.get("delivery_type", ""),
+        })
+
+    # ── 셀러 요약 빌드 ──
+    sellers = []
+    for (platform, seller_name, seller_id), items in seller_groups.items():
+        win  = sum(1 for i in items if i["status"] == "win")
+        tie  = sum(1 for i in items if i["status"] == "tie")
+        lose = sum(1 for i in items if i["status"] == "lose")
+        total_items = len(items)
+        win_rate = round(win / total_items * 100) if total_items else 0
+
+        # 열세 상품 상단 정렬
+        items_sorted = sorted(items, key=lambda x: (
+            0 if x["status"] == "lose" else 1 if x["status"] == "tie" else 2
+        ))
+        sellers.append({
+            "platform":    platform,
+            "seller_name": seller_name,
+            "seller_id":   seller_id,
+            "total":       total_items,
+            "win":         win,
+            "tie":         tie,
+            "lose":        lose,
+            "win_rate":    win_rate,
+            "items":       items_sorted,
+        })
+
+    # 경쟁우위율 오름차순 (위험 셀러 상단)
+    sellers.sort(key=lambda s: s["win_rate"])
+
+    # 전체 KPI
+    kpi = {
+        "total": sum(s["total"] for s in sellers),
+        "win":   sum(s["win"]   for s in sellers),
+        "tie":   sum(s["tie"]   for s in sellers),
+        "lose":  sum(s["lose"]  for s in sellers),
+    }
+
+    return JSONResponse({"crawl_date": crawl_date, "kpi": kpi, "sellers": sellers})
+
+
 @router.get("/api/debug/baemin")
 async def api_debug_baemin(request: Request):
     """Azure 서버에서 배민 API 직접 호출 테스트."""
