@@ -96,6 +96,9 @@
           <span class="nav-icon">📊</span><span class="nav-label">액션 실적</span>
         </a>
       </div>
+      <a href="https://fsi-rst-stock-tf.web.app/" target="_blank" rel="noopener">
+        <span class="nav-icon">🔄</span><span class="nav-label">무회전재고관리</span>
+      </a>
       {% if user and user.is_admin %}
       {% set admin_active = '/portal/admin' in request.url.path or '/portal/price-monitor' in request.url.path %}
       <div class="nav-parent {% if admin_active %}active open{% endif %}"
