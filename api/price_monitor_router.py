@@ -399,12 +399,27 @@ async def pm_dashboard(
         r["product_code"]: r for r in price_rows
     }
 
-    # 우리 상품명 맵 (T_ZMM60 기준)
+    # 우리 상품명 맵 (T_ZMM60 기준) — miss 시 T_ZMM60 직접 fallback
     our_name_map: dict[str, str] = {
         p["product_code"]: p["product_name"]
         for p in _get_our_products(plant)
         if p.get("product_name")
     }
+
+    def _resolve_name(p_code: str) -> str:
+        """our_name_map 미스 시 T_ZMM60 직접 조회 (해당 플랜트가 아닌 상품 대응)"""
+        name = our_name_map.get(p_code)
+        if name and name != p_code:
+            return name
+        try:
+            rows_fb = _q(f"SELECT MAX(`상품명`) AS nm FROM {T_ZMM60} WHERE `상품코드` = '{p_code}'")
+            nm = rows_fb[0]["nm"] if rows_fb else None
+            if nm:
+                our_name_map[p_code] = nm  # 캐시에 저장
+                return nm
+        except Exception:
+            pass
+        return p_code
 
     # 전월 매출 데이터
     prev_sales_map = _get_prev_month_sales(plant)
@@ -444,7 +459,7 @@ async def pm_dashboard(
             continue
         rows.append({
             "our_product_code":   p_code,
-            "product_name":       our_name_map.get(p_code) or p_code,
+            "product_name":       _resolve_name(p_code),
             "platform":           _platform,
             "seller_name":        _seller_name,
             "ext_product_name":   pf_data.get("product_name", ""),
@@ -869,10 +884,13 @@ async def pm_detail(
                        p.price_sale, p.price_original, p.discount_rate,
                        p.delivery_type, p.is_free_delivery, p.crawl_date
                 FROM {T_SILVER} p
-                CROSS JOIN (SELECT MAX(crawl_date) AS max_date FROM {T_SILVER}
-                            WHERE product_key IN ({keys_str})) md
-                WHERE p.product_key IN ({keys_str})
-                  AND p.crawl_date = md.max_date
+                INNER JOIN (
+                    SELECT product_key, MAX(crawl_date) AS max_date
+                    FROM {T_SILVER}
+                    WHERE product_key IN ({keys_str})
+                    GROUP BY product_key
+                ) md ON p.product_key = md.product_key
+                       AND p.crawl_date = md.max_date
                 ORDER BY p.platform, p.platform_seller_name
             """)
             history_rows = _q(f"""
