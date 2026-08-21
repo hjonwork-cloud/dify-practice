@@ -298,6 +298,28 @@
 }
 .map-submit-btn:hover { opacity: .88; }
 .map-submit-btn:disabled { opacity: .4; cursor: not-allowed; }
+
+/* 키워드 칙 */
+.map-kw-chips {
+  display: flex; flex-wrap: wrap; gap: .4rem;
+  padding: .5rem 0 .25rem;
+}
+.map-kw-chip {
+  display: inline-flex; align-items: center; gap: .25rem;
+  padding: .28rem .65rem; border-radius: 99px;
+  border: 1.5px solid #a78bfa; background: #faf5ff;
+  color: #6d28d9; font-size: .78rem; font-weight: 700;
+  cursor: pointer; user-select: none; transition: all .12s;
+  font-family: inherit;
+}
+.map-kw-chip.inactive {
+  border-color: #d1d5db; background: #f3f4f6;
+  color: #9ca3af; text-decoration: line-through;
+}
+.map-kw-chip:hover:not(.inactive) { background: #ede9fe; }
+.map-kw-chip.inactive:hover { background: #e5e7eb; color: #6b7280; text-decoration: none; }
+.map-kw-hint { font-size: .71rem; color: #9ca3af; margin-bottom: .3rem; }
+
 @media(max-width:640px){ .map-modal-body { grid-template-columns: 1fr; } }
 
 /* ── 상품 선택 테이블 ── */
@@ -614,9 +636,11 @@
       <!-- 오른쪽: 우리 상품 검색 -->
       <div class="map-modal-right">
         <div class="map-section-label">② 우리 상품 검색 · 선택</div>
+        <div class="map-kw-hint">아래 키워드 버튼을 클릭하면 토글(창의또는 해제)됩니다. 입력시 자동 검색됩니다.</div>
+        <div class="map-kw-chips" id="mapKwChips"></div>
         <input class="map-search-input" id="mapOurSearch" type="text"
-               placeholder="자재코드 또는 상품명 입력"
-               oninput="searchOurForMap(this.value)">
+               placeholder="직접 키워드 입력 (선택 사항)"
+               oninput="onMapSearchInput(this.value)">
         <div class="map-our-results" id="mapOurResults">
           <div style="text-align:center;padding:1.5rem;color:#94a3b8;font-size:.82rem;">상품명을 입력하세요</div>
         </div>
@@ -1097,15 +1121,57 @@ function downloadSkuListCSV() {
 }
 
 // ── 매핑 모달 ──
-let _mapSku = null;       // 현재 모달에서 작업 중인 플랫폼 SKU
-let _mapSelectedOur = null; // 선택된 우리 상품
+let _mapSku = null;
+let _mapSelectedOur = null;
 let _mapOurTimer = null;
+let _mapTokens = [];   // { text, active } 배열
+
+function _extractTokens(productName, sellerName) {
+  // 셈러명 토큰 시트 (제외 대상)
+  const sellerTokens = new Set(
+    (sellerName || '')
+      .replace(/[^가-힣a-zA-Z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .filter(t => t.length >= 2)
+      .map(t => t.toLowerCase())
+  );
+  return (productName || '')
+    .replace(/[^가-힣a-zA-Z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(t => t.length >= 2)
+    .filter(t => !sellerTokens.has(t.toLowerCase()))
+    .slice(0, 6);
+}
+
+function _buildKwFromTokens() {
+  return _mapTokens.filter(t => t.active).map(t => t.text).join(' ');
+}
+
+function renderMapChips() {
+  const el = document.getElementById('mapKwChips');
+  if (!_mapTokens.length) { el.innerHTML = ''; return; }
+  el.innerHTML = _mapTokens.map((t, i) =>
+    `<button class="map-kw-chip${t.active ? '' : ' inactive'}" onclick="toggleMapToken(${i})">${escHtml(t.text)}</button>`
+  ).join('');
+}
+
+function toggleMapToken(i) {
+  _mapTokens[i].active = !_mapTokens[i].active;
+  renderMapChips();
+  const kw = _buildKwFromTokens();
+  document.getElementById('mapOurSearch').value = kw;
+  searchOurForMap(kw);
+}
+
+function onMapSearchInput(val) {
+  // 수동 입력 시 칙들은 리셋되지 않고 추가 키워드로 검색
+  searchOurForMap(val);
+}
 
 function openMapModal(sku) {
   _mapSku = sku;
   _mapSelectedOur = null;
   document.getElementById('mapModalOverlay').classList.remove('hidden');
-  // 플랫폼 상품 정보 렌더
   const PLAT_LABEL2 = { baemin: '배민상회', foodspring: '식봄' };
   document.getElementById('mapPlatCard').innerHTML = `
     <div class="pc-name">${escHtml(sku.product_name || '')}</div>
@@ -1115,24 +1181,25 @@ function openMapModal(sku) {
     </div>
     <div class="pc-price">${sku.price_sale != null ? Number(sku.price_sale).toLocaleString() + '원' : '-'}</div>
   `;
-  // 플랫폼 상품명에서 키워드 자동 추출 (2글자 이상 토큰)
-  const tokens = (sku.product_name || '')
-    .replace(/[^가-힣a-zA-Z0-9\s]/g, ' ')
-    .split(/\s+/)
-    .filter(t => t.length >= 2)
-    .slice(0, 3)
-    .join(' ');
-  const kw = document.getElementById('mapOurSearch');
-  kw.value = tokens;
+  // 셀러명 제외 키워드 있주니 생성
+  const rawTokens = _extractTokens(sku.product_name, _seller.seller_name);
+  _mapTokens = rawTokens.map(t => ({ text: t, active: true }));
+  renderMapChips();
+  const kw = _buildKwFromTokens();
+  document.getElementById('mapOurSearch').value = kw;
   document.getElementById('mapOurResults').innerHTML = '<div style="text-align:center;padding:1.5rem;color:#94a3b8;font-size:.82rem;">검색 중…</div>';
   updateMapPreview();
-  if (tokens) searchOurForMap(tokens);
+  if (kw) searchOurForMap(kw);
 }
 
 function closeMapModal() {
   document.getElementById('mapModalOverlay').classList.add('hidden');
   _mapSku = null;
   _mapSelectedOur = null;
+  _mapTokens = [];
+  document.getElementById('mapKwChips').innerHTML = '';
+  document.getElementById('mapOurSearch').value = '';
+  document.getElementById('mapOurResults').innerHTML = '';
 }
 
 async function searchOurForMap(kw) {
