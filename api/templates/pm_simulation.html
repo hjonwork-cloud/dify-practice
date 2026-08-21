@@ -89,6 +89,18 @@
   font-family: inherit; transition: all .12s;
 }
 .sim-reset-btn:hover { background: #f8fafc; }
+/* 일괄선택 버튼 */
+.sim-bulk-btn {
+  padding: .32rem .75rem; border-radius: 8px;
+  font-size: .75rem; font-weight: 700;
+  cursor: pointer; font-family: inherit;
+  border: 1.5px solid; transition: all .12s;
+  white-space: nowrap;
+}
+.sim-bulk-low  { background: #fff1f0; color: #b91c1c; border-color: #fca5a5; }
+.sim-bulk-low:hover  { background: #dc2626; color: #fff; border-color: #dc2626; }
+.sim-bulk-high { background: #f0fdf4; color: #15803d; border-color: #86efac; }
+.sim-bulk-high:hover { background: #16a34a; color: #fff; border-color: #16a34a; }
 
 /* ── 상품 선택 테이블 ── */
 .sim-table-wrap { overflow-x: auto; margin-bottom: 1.25rem; }
@@ -276,7 +288,12 @@
   <button class="sim-filter-btn" onclick="setFilter('unselected',this)">미선택만</button>
   <span id="selCount" style="font-size:.78rem;color:#6b7280;"></span>
   <button class="sim-reset-btn" onclick="resetSelection()">초기화</button>
-  <button class="sim-run-btn" onclick="runSimulation()" id="runBtn">⚡ 시뮬레이션 실행</button>
+  <div style="display:flex;gap:.4rem;margin-left:auto;flex-wrap:wrap;align-items:center;">
+    <span style="font-size:.72rem;color:#9ca3af;">일괄선택:</span>
+    <button class="sim-bulk-btn sim-bulk-low" onclick="bulkSelectLine('low')" title="상품별 이익률 가장 낮은 경쟁 라인 일괄 선택 (최악 시나리오)">🔴 이익률 낮은순</button>
+    <button class="sim-bulk-btn sim-bulk-high" onclick="bulkSelectLine('high')" title="상품별 이익률 가장 높은 경쟁 라인 일괄 선택 (최적 시나리오)">✅ 이익률 높은순</button>
+    <button class="sim-run-btn" onclick="runSimulation()" id="runBtn">⚡ 시뮬레이션 실행</button>
+  </div>
 </div>
 
 <div id="simTableWrap">
@@ -511,6 +528,34 @@ function resetSelection() {
   document.querySelectorAll('.sim-check').forEach(c => c.checked = true);
   document.getElementById('chkAll').checked = true;
   document.getElementById('simResultPanel').classList.remove('visible');
+  updateSelCount();
+}
+
+// 일괄 라인 선택: mode = 'low'(이익률 최저) | 'high'(이익률 최고)
+function bulkSelectLine(mode) {
+  _products.forEach((prod, pi) => {
+    if (!prod.lines || !prod.lines.length) return;
+    // match_margin 있는 라인만 후보로, 없으면 전체
+    const candidates = prod.lines
+      .map((ln, li) => ({ li, margin: ln.match_margin }))
+      .filter(c => c.margin != null);
+    if (!candidates.length) return; // null만 있으면 건너맜
+    candidates.sort((a, b) =>
+      mode === 'low' ? a.margin - b.margin : b.margin - a.margin
+    );
+    const chosen = candidates[0].li;
+    // 라디오 체크
+    const radio = document.querySelector(`input[name="line_${pi}"][value="${chosen}"]`);
+    if (radio) {
+      radio.checked = true;
+      // 셀렉티드 클래스
+      const row = radio.closest('tr');
+      if (row) {
+        row.querySelectorAll('.line-item').forEach(l => l.classList.remove('selected'));
+        radio.closest('.line-item').classList.add('selected');
+      }
+    }
+  });
   updateSelCount();
 }
 
