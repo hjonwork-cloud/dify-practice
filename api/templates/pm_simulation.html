@@ -378,6 +378,45 @@
   </div>
 </div>
 
+<!-- E. 셀러 전체 SKU 현황 -->
+<div class="sku-section" id="sellerSkuSection" style="display:none;">
+  <div class="sku-section-head" onclick="toggleSkuBody()">
+    <h3 id="skuSectionTitle">판매 상품 전체 SKU 현황</h3>
+    <span id="skuLoadingBadge" class="badge badge-gray" style="font-size:.72rem;">조회 중…</span>
+    <span class="sku-section-toggle" id="skuToggle">▾</span>
+  </div>
+  <div class="sku-kpi-row">
+    <div class="sku-kpi"><span class="kl">📦 전체 운영 SKU</span><span class="kv" id="skuTotal">—</span></div>
+    <div class="sku-kpi sku-kpi-mapped"><span class="kl">✅ 매핑된 SKU</span><span class="kv" id="skuMapped">—</span></div>
+    <div class="sku-kpi sku-kpi-unmapped"><span class="kl">❌ 매핑 안된 SKU</span><span class="kv" id="skuUnmapped">—</span></div>
+    <div class="sku-kpi sku-kpi-rate"><span class="kl">📊 매핑률</span><span class="kv" id="skuRate">—</span></div>
+  </div>
+  <div class="mapping-bar-wrap">
+    <div class="mapping-bar-track"><div class="mapping-bar-fill" id="mappingBarFill" style="width:0%"></div></div>
+    <div class="mapping-bar-label" id="mappingBarLabel"></div>
+  </div>
+  <div class="sku-body" id="skuBody">
+    <div class="sku-search-row">
+      <input class="sku-search" id="skuSearch" type="text" placeholder="상품명 검색…" oninput="filterSkuTable()">
+      <button class="sku-toggle-filter" id="unmappedOnlyBtn" onclick="toggleUnmappedOnly(this)">매핑안된상품만</button>
+      <span id="skuTableCount" style="font-size:.76rem;color:#9ca3af;align-self:center;"></span>
+      <button class="sku-toggle-filter" onclick="downloadSkuListCSV()" style="margin-left:auto;">&#x1F4E5; SKU 리스트 CSV</button>
+    </div>
+    <table class="sku-full-table" id="skuFullTable">
+      <thead>
+        <tr>
+          <th style="width:240px;">상품명</th>
+          <th style="width:120px;">규격</th>
+          <th style="text-align:right;width:90px;">판매가</th>
+          <th style="width:72px;">배송유형</th>
+          <th style="text-align:center;width:72px;">매핑여부</th>
+        </tr>
+      </thead>
+      <tbody id="skuTableBody"></tbody>
+    </table>
+  </div>
+</div>
+
 <!-- B. 안내 배너 -->
 <div class="sim-guide">
   <span style="font-size:1.1rem; flex-shrink:0;">💡</span>
@@ -461,45 +500,6 @@
   </div>
   <div class="sim-result-actions">
     <button class="sim-csv-btn" onclick="downloadResultCSV()">📥 결과 CSV 다운로드</button>
-  </div>
-</div>
-
-<!-- E. 셀러 전체 SKU 현황 -->
-<div class="sku-section" id="sellerSkuSection" style="display:none;">
-  <div class="sku-section-head" onclick="toggleSkuBody()">
-    <h3 id="skuSectionTitle">판매 상품 전체 SKU 현황</h3>
-    <span id="skuLoadingBadge" class="badge badge-gray" style="font-size:.72rem;">조회 중…</span>
-    <span class="sku-section-toggle" id="skuToggle">▾</span>
-  </div>
-  <div class="sku-kpi-row">
-    <div class="sku-kpi"><span class="kl">📦 전체 운영 SKU</span><span class="kv" id="skuTotal">—</span></div>
-    <div class="sku-kpi sku-kpi-mapped"><span class="kl">✅ 매핑된 SKU</span><span class="kv" id="skuMapped">—</span></div>
-    <div class="sku-kpi sku-kpi-unmapped"><span class="kl">❌ 매핑 안된 SKU</span><span class="kv" id="skuUnmapped">—</span></div>
-    <div class="sku-kpi sku-kpi-rate"><span class="kl">📊 매핑률</span><span class="kv" id="skuRate">—</span></div>
-  </div>
-  <div class="mapping-bar-wrap">
-    <div class="mapping-bar-track"><div class="mapping-bar-fill" id="mappingBarFill" style="width:0%"></div></div>
-    <div class="mapping-bar-label" id="mappingBarLabel"></div>
-  </div>
-  <div class="sku-body" id="skuBody">
-    <div class="sku-search-row">
-      <input class="sku-search" id="skuSearch" type="text" placeholder="상품명 검색…" oninput="filterSkuTable()">
-      <button class="sku-toggle-filter" id="unmappedOnlyBtn" onclick="toggleUnmappedOnly(this)">매핑안된상품만</button>
-      <span id="skuTableCount" style="font-size:.76rem;color:#9ca3af;align-self:center;"></span>
-      <button class="sku-toggle-filter" onclick="downloadSkuListCSV()" style="margin-left:auto;">&#x1F4E5; SKU 리스트 CSV</button>
-    </div>
-    <table class="sku-full-table" id="skuFullTable">
-      <thead>
-        <tr>
-          <th style="width:240px;">상품명</th>
-          <th style="width:120px;">규격</th>
-          <th style="text-align:right;width:90px;">판매가</th>
-          <th style="width:72px;">배송유형</th>
-          <th style="text-align:center;width:72px;">매핑여부</th>
-        </tr>
-      </thead>
-      <tbody id="skuTableBody"></tbody>
-    </table>
   </div>
 </div>
 

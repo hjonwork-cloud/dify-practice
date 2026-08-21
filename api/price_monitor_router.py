@@ -1579,6 +1579,21 @@ async def api_simulation_seller_skus(
     safe_seller = seller_name.replace("'", "''")
 
     try:
+        # 전체 건수 별도 집계 (LIMIT 없이)
+        cnt_rows = _q(f"""
+            SELECT COUNT(*) AS cnt
+            FROM {T_SILVER} p
+            INNER JOIN (
+                SELECT MAX(crawl_date) AS max_date
+                FROM {T_SILVER}
+                WHERE platform = '{platform}'
+                  AND platform_seller_name = '{safe_seller}'
+            ) md ON p.crawl_date = md.max_date
+            WHERE p.platform = '{platform}'
+              AND p.platform_seller_name = '{safe_seller}'
+        """)
+        actual_total = int((cnt_rows or [{}])[0].get("cnt", 0))
+
         rows = _q(f"""
             SELECT
                 p.product_key,
@@ -1599,12 +1614,12 @@ async def api_simulation_seller_skus(
             WHERE p.platform = '{platform}'
               AND p.platform_seller_name = '{safe_seller}'
             ORDER BY p.price_sale
-            LIMIT 2000
         """)
         rows = _serialize_rows(rows or [])
     except Exception as e:
         logger.warning(f"[simulation/seller-skus] 조회 실패: {e}")
         rows = []
+        actual_total = 0
 
     # 매핑된 product_key 집합
     all_mappings = portal_db.pm_list_all_mappings(plant)
@@ -1616,7 +1631,8 @@ async def api_simulation_seller_skus(
             elif not seller_id and (m.get("seller_name") or "") == seller_name:
                 mapped_keys.add(m["product_key"])
 
-    total   = len(rows)
+    # actual_total: COUNT 쿼리 기준 실제 전체 수 (rows가 잘리지 않았다면 같음)
+    total   = actual_total if actual_total > len(rows) else len(rows)
     mapped  = sum(1 for r in rows if r["product_key"] in mapped_keys)
     mapping_rate = round(mapped / total * 100, 1) if total else 0
 
