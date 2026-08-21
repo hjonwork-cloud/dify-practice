@@ -1144,7 +1144,9 @@ function _extractTokens(productName, sellerName) {
 }
 
 function _buildKwFromTokens() {
-  return _mapTokens.filter(t => t.active).map(t => t.text).join(' ');
+  const active = _mapTokens.filter(t => t.active).map(t => t.text);
+  if (!active.length) return '';
+  return '*' + active.join('*') + '*';
 }
 
 function renderMapChips() {
