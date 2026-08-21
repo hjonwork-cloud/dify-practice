@@ -58,6 +58,49 @@
   font-family: inherit;
   color: #1e293b;
 }
+/* ── 셀러 헤더 행 ── */
+.seller-header {
+  display: grid;
+  grid-template-columns: 1fr 80px 60px 60px 60px 80px 36px;
+  align-items: center;
+  gap: .5rem;
+  padding: .45rem 1rem;
+  background: #f1f5f9;
+  border-radius: 10px;
+  margin-bottom: .35rem;
+  border: 1px solid #e2e8f0;
+}
+.sh-col {
+  font-size: .72rem;
+  font-weight: 700;
+  color: #475569;
+  text-align: center;
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: .2rem;
+  padding: .2rem .3rem;
+  border-radius: 5px;
+  transition: background .12s;
+  white-space: nowrap;
+}
+.sh-col:hover { background: #e2e8f0; }
+.sh-col.sort-asc  .sort-arrow::after { content: ' ▲'; }
+.sh-col.sort-desc .sort-arrow::after { content: ' ▼'; }
+.sh-col:not(.sort-asc):not(.sort-desc) .sort-arrow::after { content: ' ⇅'; opacity: .4; }
+.sh-col-name { justify-content: flex-start; }
+/* CSV 버튼 */
+.csv-btn {
+  display: inline-flex; align-items: center; gap: .35rem;
+  padding: .35rem .8rem; border-radius: 8px;
+  border: 1.5px solid #cbd5e1; background: #fff;
+  font-size: .78rem; font-weight: 600; color: #475569;
+  cursor: pointer; transition: all .12s; font-family: inherit;
+  white-space: nowrap;
+}
+.csv-btn:hover { background: #f1f5f9; border-color: #94a3b8; color: #1e293b; }
 
 /* ── 셀러 행 ── */
 .seller-row {
@@ -218,14 +261,11 @@
     <option value="baemin">배민상회</option>
     <option value="foodspring">식봄</option>
   </select>
-  <label style="margin-left:.5rem;">정렬</label>
-  <select class="comp-select" id="filterSort" onchange="applyFilter()">
-    <option value="win_rate_asc">경쟁우위율 낮은순 (위험↑)</option>
-    <option value="win_rate_desc">경쟁우위율 높은순</option>
-    <option value="lose_desc">열세 건수 많은순</option>
-    <option value="total_desc">매핑 건수 많은순</option>
-  </select>
   <span id="filterCount" style="font-size:.78rem; color:#9ca3af; margin-left:.25rem;"></span>
+  <div style="margin-left:auto; display:flex; gap:.5rem;">
+    <button class="csv-btn" onclick="downloadSellerCSV()" title="셀러 요약 CSV 다운로드">📥 셀러요약 CSV</button>
+    <button class="csv-btn" onclick="downloadSkuCSV()" title="전체 SKU 상세 CSV 다운로드">📥 SKU 상세 CSV</button>
+  </div>
 </div>
 
 <!-- 셀러 목록 -->
@@ -244,25 +284,34 @@
 
 <script>
 let _allSellers = [];
-let _openSellers = new Set();  // 펼쳐진 셀러 키
+let _filteredSellers = [];  // 현재 필터 적용된 셀러 목록
+let _openSellers = new Set();
+let _sortCol = 'win_rate';  // 현재 정렬 컬럼
+let _sortDir = 'asc';       // 'asc' | 'desc'
 
 const PLAT_LABEL = { baemin: '배민상회', foodspring: '식봄' };
 const PLAT_BADGE_CLASS = { baemin: 'badge-baemin', foodspring: 'badge-foodspring' };
+
+// 컬럼 정의: { id, label, field, numeric }
+const COLS = [
+  { id: 'seller_name', label: '셀러명',     field: 'seller_name', numeric: false },
+  { id: 'total',       label: '매핑건수',   field: 'total',       numeric: true  },
+  { id: 'win',         label: '우위↑',     field: 'win',         numeric: true  },
+  { id: 'tie',         label: '동일=',     field: 'tie',         numeric: true  },
+  { id: 'lose',        label: '열세↓',     field: 'lose',        numeric: true  },
+  { id: 'win_rate',    label: '경쟁우위율', field: 'win_rate',    numeric: true  },
+];
 
 async function loadData() {
   const plant = new URLSearchParams(location.search).get('plant') || 'ALL';
   try {
     const resp = await fetch(`/portal/price-monitor/api/competition?plant=${plant}`);
     const data = await resp.json();
-
-    // crawl date
     if (data.crawl_date) {
       const tag = document.getElementById('crawlDateTag');
       tag.textContent = '📅 수집일: ' + data.crawl_date;
       tag.style.display = '';
     }
-
-    // KPI
     const kvals = document.querySelectorAll('.kpi-val');
     const kpi = data.kpi || {};
     kvals[0].textContent = (kpi.total || 0).toLocaleString();
@@ -270,7 +319,6 @@ async function loadData() {
     kvals[2].textContent = (kpi.tie   || 0).toLocaleString();
     kvals[3].textContent = (kpi.lose  || 0).toLocaleString();
     kvals.forEach(el => el.classList.remove('skel-kpi'));
-
     _allSellers = data.sellers || [];
     applyFilter();
   } catch (e) {
@@ -279,24 +327,55 @@ async function loadData() {
   }
 }
 
+function sortBy(col) {
+  if (_sortCol === col) {
+    _sortDir = _sortDir === 'asc' ? 'desc' : 'asc';
+  } else {
+    _sortCol = col;
+    // 숫자형은 내림차순 기본, 텍스트는 오름차순 기본
+    const colDef = COLS.find(c => c.id === col);
+    _sortDir = (colDef && colDef.numeric) ? 'desc' : 'asc';
+    // 단, win_rate는 위험 먼저 = 오름차순 기본
+    if (col === 'win_rate') _sortDir = 'asc';
+  }
+  applyFilter();
+}
+
 function applyFilter() {
   const platFilter = document.getElementById('filterPlatform').value;
-  const sortMode   = document.getElementById('filterSort').value;
-
   let sellers = platFilter
     ? _allSellers.filter(s => s.platform === platFilter)
     : [..._allSellers];
 
   // 정렬
-  if (sortMode === 'win_rate_asc')  sellers.sort((a,b) => a.win_rate - b.win_rate);
-  if (sortMode === 'win_rate_desc') sellers.sort((a,b) => b.win_rate - a.win_rate);
-  if (sortMode === 'lose_desc')     sellers.sort((a,b) => b.lose - a.lose);
-  if (sortMode === 'total_desc')    sellers.sort((a,b) => b.total - a.total);
+  const colDef = COLS.find(c => c.id === _sortCol);
+  sellers.sort((a, b) => {
+    let va = a[_sortCol], vb = b[_sortCol];
+    if (!colDef || !colDef.numeric) {
+      va = String(va || '').toLowerCase();
+      vb = String(vb || '').toLowerCase();
+      return _sortDir === 'asc' ? va.localeCompare(vb, 'ko') : vb.localeCompare(va, 'ko');
+    }
+    return _sortDir === 'asc' ? (va - vb) : (vb - va);
+  });
 
+  _filteredSellers = sellers;
   document.getElementById('filterCount').textContent =
     sellers.length ? `셀러 ${sellers.length}개` : '';
-
   renderSellers(sellers);
+}
+
+// 셀러 요약 헤더 행 HTML
+function renderSellerHeader() {
+  const cols = COLS.map(c => {
+    const isCur = c.id === _sortCol;
+    const cls = isCur ? (_sortDir === 'asc' ? 'sort-asc' : 'sort-desc') : '';
+    const nameExtra = c.id === 'seller_name' ? ' sh-col-name' : '';
+    // win/lose 색상
+    const color = c.id === 'win' ? 'color:#16a34a;' : c.id === 'lose' ? 'color:#dc2626;' : '';
+    return `<div class="sh-col ${cls}${nameExtra}" onclick="sortBy('${c.id}')" style="${color}">${escHtml(c.label)}<span class="sort-arrow"></span></div>`;
+  });
+  return `<div class="seller-header">${cols.join('')}<div></div></div>`;
 }
 
 function renderSellers(sellers) {
@@ -305,15 +384,14 @@ function renderSellers(sellers) {
     el.innerHTML = '<div class="comp-empty">매핑된 상품이 없습니다.</div>';
     return;
   }
-
-  el.innerHTML = sellers.map((s, idx) => {
+  const header = renderSellerHeader();
+  const rows = sellers.map(s => {
     const key = `${s.platform}__${s.seller_id || s.seller_name}`;
     const isOpen = _openSellers.has(key);
     const rateClass = s.win_rate >= 60 ? 'rate-high' : s.win_rate >= 40 ? 'rate-mid' : 'rate-low';
     const rateValClass = s.win_rate >= 60 ? 'rate-val-high' : s.win_rate >= 40 ? 'rate-val-mid' : 'rate-val-low';
     const platLabel = PLAT_LABEL[s.platform] || s.platform;
     const platBadge = PLAT_BADGE_CLASS[s.platform] || 'badge-gray';
-
     return `
     <div class="seller-row">
       <div class="seller-head ${isOpen ? 'open' : ''}"
@@ -343,6 +421,7 @@ function renderSellers(sellers) {
       </div>
     </div>`;
   }).join('');
+  el.innerHTML = header + rows;
 }
 
 function renderSkuTable(items) {
@@ -407,6 +486,65 @@ function escHtml(s) {
   return String(s)
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
     .replace(/"/g,'&quot;');
+}
+
+// ── CSV 다운로드 ──────────────────────────────────────────────────
+function csvEscape(v) {
+  if (v == null) return '';
+  const s = String(v);
+  return s.includes(',') || s.includes('"') || s.includes('\n')
+    ? '"' + s.replace(/"/g, '""') + '"'
+    : s;
+}
+function triggerDownload(csv, filename) {
+  const bom = '\uFEFF'; // Excel UTF-8 BOM
+  const blob = new Blob([bom + csv], { type: 'text/csv;charset=utf-8;' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+}
+
+function downloadSellerCSV() {
+  if (!_filteredSellers.length) return alert('데이터가 없습니다.');
+  const header = ['플랫폼', '셀러명', '셀러ID', '매핑건수', '우위↑', '동일=', '열세↓', '경쟁우위율(%)'];
+  const rows = _filteredSellers.map(s => [
+    PLAT_LABEL[s.platform] || s.platform,
+    s.seller_name,
+    s.seller_id || '',
+    s.total,
+    s.win,
+    s.tie,
+    s.lose,
+    s.win_rate,
+  ].map(csvEscape).join(','));
+  const today = new Date().toISOString().slice(0, 10);
+  triggerDownload([header.join(','), ...rows].join('\n'), `경쟁분석_셀러요약_${today}.csv`);
+}
+
+function downloadSkuCSV() {
+  if (!_filteredSellers.length) return alert('데이터가 없습니다.');
+  const header = ['플랫폼', '셀러명', '자재코드', '우리상품명', '경쟁사상품명', '우리단가', '경쟁사단가', '차이', '차이율(%)', '배송유형', '판정'];
+  const rows = [];
+  _filteredSellers.forEach(s => {
+    (s.items || []).forEach(it => {
+      rows.push([
+        PLAT_LABEL[s.platform] || s.platform,
+        s.seller_name,
+        it.our_product_code,
+        it.product_name,
+        it.ext_product_name || '',
+        it.our_price  != null ? it.our_price  : '',
+        it.competitor_price != null ? it.competitor_price : '',
+        it.diff     != null ? it.diff     : '',
+        it.diff_pct != null ? it.diff_pct : '',
+        it.delivery_type || '',
+        it.status === 'win' ? '우위' : it.status === 'lose' ? '열세' : it.status === 'tie' ? '동일' : '-',
+      ].map(csvEscape).join(','));
+    });
+  });
+  const today = new Date().toISOString().slice(0, 10);
+  triggerDownload([header.join(','), ...rows].join('\n'), `경쟁분석_SKU상세_${today}.csv`);
 }
 
 loadData();

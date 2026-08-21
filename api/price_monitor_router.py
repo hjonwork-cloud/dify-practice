@@ -1212,6 +1212,17 @@ async def api_competition(request: Request, plant: str = "ALL"):
     if not all_mappings:
         return JSONResponse({"crawl_date": "", "kpi": {"total": 0, "win": 0, "tie": 0, "lose": 0}, "sellers": []})
 
+    # 중복 제거: 동일 (우리상품코드, product_key) 조합은 1건만 사용
+    # (plant=4120/4123/4121/ALL 각각에 매핑이 중복 등록된 경우 대응)
+    _seen_pairs: set = set()
+    _deduped: list = []
+    for _m in all_mappings:
+        _pair = (_m["our_product_code"], _m["product_key"])
+        if _pair not in _seen_pairs:
+            _seen_pairs.add(_pair)
+            _deduped.append(_m)
+    all_mappings = _deduped
+
     price_rows  = _get_base_prices(plant)
     price_map: dict[str, dict] = {r["product_code"]: r for r in price_rows}
 
