@@ -306,9 +306,22 @@ def _get_our_products_with_batch(plant: str) -> list[dict]:
 def _get_platform_latest(product_keys: list[str] | None = None,
                           keyword: str = "") -> list[dict]:
     """silver.dim_platform_products 최신 가격 조회
-    — 플랫폼별 MAX(crawl_date)를 각각 적용하여 식봄/배민 수집일이 다를때도 둘 다 노출
+    — 플랫폼별 MAX(crawl_date)를 경량 쿼리로 먼저 조회 후 각각 적용
+      → 식봄/배민 수집일이 달라도 둘 다 노출, 풀스캔 없이 인덱스 활용
     """
     try:
+        # Step 1: 플랫폼별 최신 수집일 경량 조회
+        max_rows = _q(f"SELECT platform, MAX(crawl_date) AS max_date FROM {T_SILVER} GROUP BY platform") or []
+        if not max_rows:
+            return []
+        date_clauses = " OR ".join(
+            f"(p.platform='{r['platform']}' AND p.crawl_date='{r['max_date']}')"
+            for r in max_rows if r.get("platform") and r.get("max_date")
+        )
+        if not date_clauses:
+            return []
+
+        # Step 2: 추가 조건 빌드
         if product_keys is not None:
             if not product_keys:
                 return []
@@ -323,13 +336,10 @@ def _get_platform_latest(product_keys: list[str] | None = None,
         rows = _q(f"""
             SELECT p.*
             FROM {T_SILVER} p
-            INNER JOIN (
-                SELECT platform, MAX(crawl_date) AS max_date
-                FROM {T_SILVER}
-                GROUP BY platform
-            ) md ON p.platform = md.platform AND p.crawl_date = md.max_date
-            WHERE 1=1 {where_extra}
+            WHERE ({date_clauses})
+              {where_extra}
             ORDER BY p.platform, p.platform_seller_name, p.price_sale
+            LIMIT 10000
         """)
         return _serialize_rows(rows)
     except Exception as e:
