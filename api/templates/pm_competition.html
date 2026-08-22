@@ -326,8 +326,13 @@ async function loadData() {
   try {
     const resp = await fetch(`/portal/price-monitor/api/competition?plant=${plant}`);
     const data = await resp.json();
-    if (data.crawl_date) {
-      const tag = document.getElementById('crawlDateTag');
+    if (data.crawl_dates && Object.keys(data.crawl_dates).length) {
+      const PLAT = { baemin: '배민상회', foodspring: '식봄' };
+      const parts = Object.entries(data.crawl_dates)
+        .map(([p, d]) => `${PLAT[p] || p}: ${d}`);
+      tag.textContent = '📅 수집일 · ' + parts.join(' / ');
+      tag.style.display = 'inline-block';
+    } else if (data.crawl_date) {
       tag.textContent = '📅 수집일: ' + data.crawl_date;
       tag.style.display = '';
     }

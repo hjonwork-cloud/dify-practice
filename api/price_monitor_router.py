@@ -305,26 +305,31 @@ def _get_our_products_with_batch(plant: str) -> list[dict]:
 
 def _get_platform_latest(product_keys: list[str] | None = None,
                           keyword: str = "") -> list[dict]:
-    """silver.dim_platform_products 최신 가격 조회"""
+    """silver.dim_platform_products 최신 가격 조회
+    — 플랫폼별 MAX(crawl_date)를 각각 적용하여 식봄/배민 수집일이 다를때도 둘 다 노출
+    """
     try:
         if product_keys is not None:
             if not product_keys:
                 return []
             keys_str = ", ".join(f"'{k}'" for k in product_keys)
-            where = f"WHERE product_key IN ({keys_str}) AND crawl_date = latest.max_date"
+            where_extra = f"AND p.product_key IN ({keys_str})"
         elif keyword:
             safe_kw = keyword.replace("'", "''")
-            where = f"WHERE product_name LIKE '%{safe_kw}%' AND crawl_date = latest.max_date"
+            where_extra = f"AND p.product_name LIKE '%{safe_kw}%'"
         else:
-            where = "WHERE crawl_date = latest.max_date"
+            where_extra = ""
 
         rows = _q(f"""
             SELECT p.*
             FROM {T_SILVER} p
-            CROSS JOIN (SELECT MAX(crawl_date) AS max_date FROM {T_SILVER}) latest
-            {where}
-            ORDER BY platform, platform_seller_name, price_sale
-            LIMIT 500
+            INNER JOIN (
+                SELECT platform, MAX(crawl_date) AS max_date
+                FROM {T_SILVER}
+                GROUP BY platform
+            ) md ON p.platform = md.platform AND p.crawl_date = md.max_date
+            WHERE 1=1 {where_extra}
+            ORDER BY p.platform, p.platform_seller_name, p.price_sale
         """)
         return _serialize_rows(rows)
     except Exception as e:
@@ -1273,7 +1278,7 @@ async def api_competition(request: Request, plant: str = "ALL"):
     # key: (platform, seller_name)
     from collections import defaultdict
     seller_groups: dict[tuple, list] = defaultdict(list)
-    crawl_date = ""
+    crawl_dates: dict[str, str] = {}  # platform → crawl_date
 
     for m in all_mappings:
         pk = m["product_key"]
@@ -1291,8 +1296,8 @@ async def api_competition(request: Request, plant: str = "ALL"):
         platform      = pf_data.get("platform") or m.get("platform") or ""
         delivery_type = pf_data.get("delivery_type", "직배송")
 
-        if not crawl_date:
-            crawl_date = str(pf_data.get("crawl_date", ""))
+        if platform and not crawl_dates.get(platform):
+            crawl_dates[platform] = str(pf_data.get("crawl_date", ""))
 
         # ── 경쟁사 실수취가: 소비자가에서 수수료·VAT 제거 ──
         # comp_net = price_sale × (1 − fee) / 1.1
@@ -1374,7 +1379,7 @@ async def api_competition(request: Request, plant: str = "ALL"):
         "lose":  sum(s["lose"]  for s in sellers),
     }
 
-    return JSONResponse({"crawl_date": crawl_date, "kpi": kpi, "sellers": sellers})
+    return JSONResponse({"crawl_dates": crawl_dates, "crawl_date": " / ".join(f"{k}: {v}" for k, v in crawl_dates.items()), "kpi": kpi, "sellers": sellers})
 
 
 # ── 화면 7: 실전 경쟁 시뮬레이션 ──────────────────────────────────────────
