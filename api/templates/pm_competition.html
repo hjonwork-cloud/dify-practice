@@ -323,6 +323,7 @@ const COLS = [
 
 async function loadData() {
   const plant = new URLSearchParams(location.search).get('plant') || 'ALL';
+  const tag = document.getElementById('crawlDateTag');
   try {
     const resp = await fetch(`/portal/price-monitor/api/competition?plant=${plant}`);
     const data = await resp.json();
