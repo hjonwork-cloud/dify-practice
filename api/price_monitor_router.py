@@ -28,7 +28,7 @@ _SESSION_COOKIE = "dongwon_portal_session"
 _SESSION_SECRET = os.getenv("PORTAL_SESSION_SECRET", "dongwon-portal-dev-secret-change-me")
 
 # 테스트 기간 중 관리자 전용
-_ALLOWED_EMP_CODES: set[str] = {access_control.ADMIN_EMP_CODE}
+_ALLOWED_EMP_CODES = {access_control.ADMIN_EMP_CODE}
 
 PLANTS = ["ALL", "4120", "4123", "4121"]
 PLANT_LABELS = {"ALL": "전체센터", "4120": "4120(시화)", "4123": "4123(화성)", "4121": "4121(화성3배치)"}
@@ -98,7 +98,7 @@ def _serialize_rows(rows: list[dict]) -> list[dict]:
 
 
 # ── 기준가/구매가 캐시 (5분) ─────────────────────────────────────────────────
-_price_cache: dict[str, tuple[float, list]] = {}
+_price_cache = {}
 _CACHE_TTL = 300
 
 
@@ -140,7 +140,7 @@ def _get_base_prices(plant: str) -> list[dict]:
 
 
 # ── 전월 매출 캐시 (1시간) ───────────────────────────────────────────────────
-_prev_sales_cache: dict[str, tuple[float, list]] = {}
+_prev_sales_cache = {}
 
 
 def _get_prev_month_sales(plant: str) -> dict[tuple, dict]:
@@ -179,7 +179,7 @@ def _get_prev_month_sales_totals(plant: str) -> dict[str, dict]:
     """전월 매출을 product_code 단위로 플랜트 합산 반환 (product_code → dict).
     매핑 모달, 대시보드 등 플랜트 구분 불필요한 조회에 사용."""
     per_plant = _get_prev_month_sales(plant)
-    totals: dict[str, dict] = {}
+    totals = {}
     for (code, _plant), v in per_plant.items():
         if code not in totals:
             totals[code] = {"product_code": code, "prev_sales_amt": 0.0, "prev_sales_qty": 0.0}
@@ -189,7 +189,7 @@ def _get_prev_month_sales_totals(plant: str) -> dict[str, dict]:
 
 
 # ── 운영상품 목록 캐시 (1시간) ─────────────────────────────────────────────
-_product_cache: dict[str, tuple[float, list]] = {}
+_product_cache = {}
 _PRODUCT_CACHE_TTL = 3600  # 1시간
 
 T_ZSDR  = "h_hmfo_fsi.gd_fsi_ent.sap_zsdr0017_order_linkage_status_d"
@@ -424,12 +424,12 @@ async def pm_dashboard(
 
     # 기준가/구매가
     price_rows = _get_base_prices(plant)
-    price_map: dict[str, dict] = {
+    price_map = {
         r["product_code"]: r for r in price_rows
     }
 
     # 우리 상품명 맵 (T_ZMM60 기준) — miss 시 T_ZMM60 직접 fallback
-    our_name_map: dict[str, str] = {
+    our_name_map = {
         p["product_code"]: p["product_name"]
         for p in _get_our_products(plant)
         if p.get("product_name")
@@ -464,7 +464,7 @@ async def pm_dashboard(
     # 플랫폼 최신 가격
     product_keys = [m["product_key"] for m in all_mappings]
     platform_rows = _get_platform_latest(product_keys=product_keys)
-    platform_map: dict[str, dict] = {r["product_key"]: r for r in platform_rows}
+    platform_map = {r["product_key"]: r for r in platform_rows}
 
     # 매핑 + 가격 + GP 계산
     rows = []
@@ -541,7 +541,7 @@ async def pm_products(
     all_mappings = portal_db.pm_list_all_mappings(plant)
 
     # 상품코드별 매핑 수 집계
-    mapping_count: dict[str, dict] = {}
+    mapping_count = {}
     for m in all_mappings:
         c = m["our_product_code"]
         if c not in mapping_count:
@@ -892,7 +892,7 @@ async def pm_history(
     mappings = portal_db.pm_list_mappings(product_code, plant)
     product_keys = [m["product_key"] for m in mappings]
 
-    history_rows: list[dict] = []
+    history_rows = []
     if product_keys:
         try:
             keys_str = ", ".join(f"'{k}'" for k in product_keys)
@@ -962,8 +962,8 @@ async def pm_detail(
     product_keys = [m["product_key"] for m in mappings]
 
     # 오늘(최신) 플랫폼 가격 – 셀러별
-    today_rows: list[dict] = []
-    history_rows: list[dict] = []
+    today_rows = []
+    history_rows = []
     if product_keys:
         keys_str = ", ".join(f"'{k}'" for k in product_keys)
         try:
@@ -1013,8 +1013,8 @@ async def pm_detail(
         row["net_price"] = round(ps * (1 - fee), 0) if ps else None
 
     # 중복 제거: (platform, seller_name, spec, price_sale) 동일 행 하나만 표시
-    _seen: set = set()
-    _deduped: list[dict] = []
+    _seen = set()
+    _deduped = []
     for row in today_rows:
         _key = (row.get("platform"), row.get("platform_seller_name"),
                 row.get("spec"), row.get("price_sale"))
@@ -1053,8 +1053,8 @@ async def pm_detail(
     # Chart.js 데이터 (날짜 × 셀러 라인)
     import json as _json
     from collections import defaultdict as _defaultdict
-    chart_dates: list[str] = sorted({str(r["crawl_date"]) for r in history_rows})
-    seller_keys: list[str] = sorted({f"{r['platform']}|{r['platform_seller_name']}" for r in history_rows})
+    chart_dates = sorted({str(r["crawl_date"]) for r in history_rows})
+    seller_keys = sorted({f"{r['platform']}|{r['platform_seller_name']}" for r in history_rows})
     chart_datasets = []
     COLORS = ["#3b82f6","#10b981","#f59e0b","#ef4444","#8b5cf6","#06b6d4","#f97316","#84cc16"]
     for i, sk in enumerate(seller_keys):
@@ -1079,13 +1079,13 @@ async def pm_detail(
         pf_rows  = [r for r in history_rows if r["platform"] == pf_key]
         if not pf_rows:
             continue
-        _by_date: dict = _defaultdict(list)
+        _by_date = _defaultdict(list)
         for r in pf_rows:
             if r["min_price"] is not None:
                 _by_date[str(r["crawl_date"])].append(float(r["min_price"]))
         for stat, fn, dash in [("최저", min, None), ("평균", lambda v: sum(v)/len(v), [5,3]), ("최고", max, [2,2])]:
             data = [round(fn(_by_date[d]), 0) if _by_date.get(d) else None for d in chart_dates]
-            ds: dict = {
+            ds = {
                 "label": f"{pf_label} {stat}",
                 "data": data,
                 "borderColor": _pf_colors[pf_key][stat],
@@ -1303,8 +1303,8 @@ async def api_competition(request: Request, plant: str = "ALL"):
 
     # 중복 제거: 동일 (우리상품코드, product_key) 조합은 1건만 사용
     # (plant=4120/4123/4121/ALL 각각에 매핑이 중복 등록된 경우 대응)
-    _seen_pairs: set = set()
-    _deduped: list = []
+    _seen_pairs = set()
+    _deduped = []
     for _m in all_mappings:
         _pair = (_m["our_product_code"], _m["product_key"])
         if _pair not in _seen_pairs:
@@ -1313,10 +1313,10 @@ async def api_competition(request: Request, plant: str = "ALL"):
     all_mappings = _deduped
 
     price_rows  = _get_base_prices(plant)
-    price_map: dict[str, dict] = {r["product_code"]: r for r in price_rows}
+    price_map = {r["product_code"]: r for r in price_rows}
 
     # 상품명 맵
-    our_name_map: dict[str, str] = {
+    our_name_map = {
         p["product_code"]: p["product_name"]
         for p in _get_our_products(plant)
         if p.get("product_name")
@@ -1339,13 +1339,13 @@ async def api_competition(request: Request, plant: str = "ALL"):
     # 플랫폼 최신가 (전체 매핑 product_key)
     product_keys = [m["product_key"] for m in all_mappings]
     platform_rows = _get_platform_latest(product_keys=product_keys)
-    platform_map: dict[str, dict] = {r["product_key"]: r for r in platform_rows}
+    platform_map = {r["product_key"]: r for r in platform_rows}
 
     # ── 셀러별 그룹화 ──
     # key: (platform, seller_name)
     from collections import defaultdict
-    seller_groups: dict[tuple, list] = defaultdict(list)
-    crawl_dates: dict[str, str] = {}  # platform → crawl_date
+    seller_groups = defaultdict(list)
+    crawl_dates = {}  # platform → crawl_date
 
     for m in all_mappings:
         pk = m["product_key"]
@@ -1504,7 +1504,7 @@ async def api_simulation(
     # ── 전체 매핑 중 해당 셀러 필터링 ──
     all_mappings = portal_db.pm_list_all_mappings(plant)
     # dedup
-    _seen: set = set()
+    _seen = set()
     _deduped = []
     for _m in all_mappings:
         _pair = (_m["our_product_code"], _m["product_key"])
@@ -1539,7 +1539,7 @@ async def api_simulation(
     prev_sales = _get_prev_month_sales_totals(plant)
 
     # 상품명 맵
-    our_name_map: dict[str, str] = {
+    our_name_map = {
         p["product_code"]: p["product_name"]
         for p in _get_our_products(plant)
         if p.get("product_name")
@@ -1561,13 +1561,13 @@ async def api_simulation(
     # ── 플랫폼 최신가 ──
     product_keys = [m["product_key"] for m in seller_mappings]
     platform_rows = _get_platform_latest(product_keys=product_keys)
-    platform_map: dict[str, dict] = {r["product_key"]: r for r in platform_rows}
+    platform_map = {r["product_key"]: r for r in platform_rows}
 
     crawl_date = ""
 
     # ── 우리 상품코드 기준 그룹화 ──
     from collections import defaultdict as _dd
-    prod_lines: dict[str, list] = _dd(list)
+    prod_lines = _dd(list)
 
     for m in seller_mappings:
         pk = m["product_key"]
@@ -1720,7 +1720,7 @@ async def api_simulation_seller_skus(
 
     # 매핑된 product_key 집합
     all_mappings = portal_db.pm_list_all_mappings(plant)
-    mapped_keys: set[str] = set()
+    mapped_keys = set()
     for m in all_mappings:
         if m.get("platform") == platform:
             if seller_id and str(m.get("platform_seller_id", "")) == str(seller_id):
@@ -1837,7 +1837,7 @@ async def api_sellers_from_silver(request: Request, platform: str = ""):
         """) or []
         # 매핑 수 포함
         all_mappings = portal_db.pm_list_all_mappings("ALL")
-        mapped_cnt: dict[str, int] = {}
+        mapped_cnt = {}
         for m in all_mappings:
             sn = m.get("seller_name", "")
             if m.get("platform") == platform and sn:
@@ -1952,7 +1952,7 @@ def _build_pattern_map(all_mappings, our_products):
     반환: {our_product_code → pattern_strength(0~1)}"""
     from collections import Counter
     our_name_map = {p["product_code"]: (p.get("product_name") or "") for p in our_products}
-    token_code: dict[str, Counter] = {}
+    token_code = {}
     for m in all_mappings:
         code = m.get("our_product_code", "")
         pname = m.get("product_name", "")
@@ -1961,7 +1961,7 @@ def _build_pattern_map(all_mappings, our_products):
                 token_code[t] = Counter()
             token_code[t][code] += 1
     # code → 토큰 매칭 강도 합산
-    code_strength: dict[str, float] = {}
+    code_strength = {}
     for t, counter in token_code.items():
         total = sum(counter.values())
         for code, cnt in counter.items():
@@ -1984,9 +1984,9 @@ async def api_mapping_ai_debug(
     steps = {}
     total_rows = 0
     plat_sample = []
-    mapped_keys: set = set()
+    mapped_keys = set()
     our_products = []
-    base_prices: dict = {}
+    base_prices = {}
     sample_scores = []
 
     # 1단계: 플랫폼 SKU 카운트
