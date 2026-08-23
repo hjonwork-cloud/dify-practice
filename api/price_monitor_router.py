@@ -1977,43 +1977,80 @@ async def api_mapping_ai_debug(
     seller_name: str = "",
     plant: str = "ALL",
 ):
-    """AI 매핑 진단용 엔드포인트: 데이터 건수 및 샘플 점수 반환."""
+    """AI 매핑 진단용 엔드포인트: 각 단계별 결과 반환."""
     _require_pm_access(request)
     safe_seller = seller_name.replace("'", "''")
+    steps = {}
+    total_rows = 0
+    plat_sample = []
+    mapped_keys: set = set()
+    our_products = []
+    base_prices: dict = {}
+    sample_scores = []
+
+    # 1단계: 플랫폼 SKU 카운트
     try:
         plat_count = _q(f"""
             SELECT COUNT(*) AS cnt FROM {T_SILVER}
             WHERE platform='{platform}' AND platform_seller_name='{safe_seller}'
         """) or []
+        row0 = plat_count[0] if plat_count else {}
+        total_rows = list(row0.values())[0] if row0 else 0
+        steps["step1_plat_count"] = f"OK: {total_rows}개"
+    except Exception as e:
+        steps["step1_plat_count"] = f"ERROR: {e}"
+
+    # 2단계: 샘플 SKU 조회
+    try:
         plat_sample = _q(f"""
             SELECT product_key, product_name, price_sale, delivery_type FROM {T_SILVER}
             WHERE platform='{platform}' AND platform_seller_name='{safe_seller}'
             LIMIT 3
         """) or []
+        steps["step2_plat_sample"] = f"OK: {len(plat_sample)}건"
     except Exception as e:
-        import traceback
-        return JSONResponse({"error": str(e), "traceback": traceback.format_exc()[-2000:]})
-    all_mappings = portal_db.pm_list_all_mappings(plant)
-    mapped_keys = {m["product_key"] for m in all_mappings if m.get("is_active", 1)}
-    our_products = _get_our_products(plant)
-    base_prices  = {r["product_code"]: r for r in _get_base_prices(plant)}
-    # plat_count 세이프 추출 - 콼럼명 과계로 첫번째 값 사용
-    if plat_count:
-        row0 = plat_count[0]
-        total_rows = list(row0.values())[0] if row0 else 0
-    else:
-        total_rows = 0
-    sample_scores = []
-    if plat_sample and our_products:
-        p_row = plat_sample[0]
-        for op in our_products[:5]:
-            bp = base_prices.get(op["product_code"], {})
-            sc = _score_mapping(
-                p_row.get("product_name",""), p_row.get("price_sale"),
-                op.get("product_name",""), bp.get("avg_sale_price"), bp.get("avg_buy_price"),
-                p_row.get("delivery_type","직배송"), platform, seller_name
-            )
-            sample_scores.append({"plat": p_row.get("product_name",""), "our": op.get("product_name",""), "score": sc})
+        steps["step2_plat_sample"] = f"ERROR: {e}"
+
+    # 3단계: 매핑 목록
+    try:
+        all_mappings = portal_db.pm_list_all_mappings(plant)
+        mapped_keys = {m["product_key"] for m in all_mappings if m.get("is_active", 1)}
+        steps["step3_mappings"] = f"OK: 전체 {len(all_mappings)}개, 활성 {len(mapped_keys)}개"
+    except Exception as e:
+        steps["step3_mappings"] = f"ERROR: {e}"
+
+    # 4단계: 우리 상품 목록
+    try:
+        our_products = _get_our_products(plant)
+        steps["step4_our_products"] = f"OK: {len(our_products)}개"
+    except Exception as e:
+        steps["step4_our_products"] = f"ERROR: {e}"
+
+    # 5단계: 기준가
+    try:
+        base_prices = {r["product_code"]: r for r in _get_base_prices(plant)}
+        steps["step5_base_prices"] = f"OK: {len(base_prices)}개"
+    except Exception as e:
+        steps["step5_base_prices"] = f"ERROR: {e}"
+
+    # 6단계: 샘플 점수
+    try:
+        if plat_sample and our_products:
+            p_row = plat_sample[0]
+            for op in our_products[:5]:
+                bp = base_prices.get(op["product_code"], {})
+                sc = _score_mapping(
+                    p_row.get("product_name", ""), p_row.get("price_sale"),
+                    op.get("product_name", ""), bp.get("avg_sale_price"), bp.get("avg_buy_price"),
+                    p_row.get("delivery_type", "직배송"), platform, seller_name
+                )
+                sample_scores.append({"plat": p_row.get("product_name", ""), "our": op.get("product_name", ""), "score": sc})
+            steps["step6_scores"] = f"OK: {len(sample_scores)}개 계산"
+        else:
+            steps["step6_scores"] = f"SKIP: plat_sample={len(plat_sample)}, our_products={len(our_products)}"
+    except Exception as e:
+        steps["step6_scores"] = f"ERROR: {e}"
+
     return JSONResponse({
         "plat_total_rows":    total_rows,
         "plat_sample":        _serialize_rows(plat_sample),
@@ -2021,6 +2058,7 @@ async def api_mapping_ai_debug(
         "our_products_count": len(our_products),
         "base_prices_count":  len(base_prices),
         "sample_scores":      sample_scores,
+        "steps":              steps,
     })
 
 

@@ -380,8 +380,12 @@ async function runDebug() {
       + `플랫폼 전체 행: ${d.plat_total_rows ?? 'N/A'}\n`
       + `이미 매핑된 수: ${d.mapped_count ?? 'N/A'}\n`
       + `우리 상품 수: ${d.our_products_count ?? 'N/A'}\n`
-      + `기준가 보유 상품: ${d.base_prices_count ?? 'N/A'}\n\n`
-      + `[샘플 점수 (플랫폼상품 vs 우리상품)]\n`;
+      + `기준가 보유 상품: ${d.base_prices_count ?? 'N/A'}\n`;
+    if (d.steps) {
+      msg += `\n[단계별 결과]\n`;
+      Object.entries(d.steps).forEach(([k,v]) => { msg += `  ${k}: ${v}\n`; });
+    }
+    msg += `\n[샘플 점수 (플랫폼상품 vs 우리상품)]\n`;
     if (d.sample_scores && d.sample_scores.length) {
       d.sample_scores.forEach(s => {
         msg += `  "${s.plat}" vs "${s.our}" → ${s.score}점\n`;
