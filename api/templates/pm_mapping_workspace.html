@@ -370,8 +370,18 @@ async function runDebug() {
   const url = `/portal/price-monitor/api/mapping/ai-debug?platform=${encodeURIComponent(currentPlatform)}&seller_name=${encodeURIComponent(currentSeller)}&plant=${currentPlant}`;
   try {
     const r = await fetch(url);
-    const d = await r.json();
-    // 에러가 있으면 먼저 표시
+    const raw = await r.text();  // 먼저 텍스트로 받음
+    let d;
+    try { d = JSON.parse(raw); } catch(e) {
+      alert(`[진단 API 응답 파싱 실패]\nHTTP ${r.status}\n\n${raw.slice(0, 500)}`);
+      return;
+    }
+    // FastAPI HTTPException: {"detail": "..."}
+    if (d.detail) {
+      alert(`[진단 API 접근 오류]\n${d.detail}\n\nURL: ${url}`);
+      return;
+    }
+    // 커스텀 에러
     if (d.error) {
       alert(`[진단 API 오류]\n${d.error}\n\n[traceback]\n${d.traceback||''}`);
       return;
@@ -384,6 +394,8 @@ async function runDebug() {
     if (d.steps) {
       msg += `\n[단계별 결과]\n`;
       Object.entries(d.steps).forEach(([k,v]) => { msg += `  ${k}: ${v}\n`; });
+    } else {
+      msg += `\n(steps 키 없음 — 구버전 응답)\n응답 키: ${Object.keys(d).join(', ')}`;
     }
     msg += `\n[샘플 점수 (플랫폼상품 vs 우리상품)]\n`;
     if (d.sample_scores && d.sample_scores.length) {
@@ -400,7 +412,7 @@ async function runDebug() {
       });
     }
     alert(msg);
-  } catch(e) { alert('진단 실패: ' + e.message); }
+  } catch(e) { alert('진단 실패: ' + e.message + '\nURL: ' + url); }
 }
 
 // ══ AI 분석 실행 ══
