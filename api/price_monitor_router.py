@@ -2136,10 +2136,12 @@ async def _do_ai_suggest(request, platform, seller_name, plant, limit):
     our_products = _get_our_products(plant) or []
     price_totals = _get_prev_month_sales_totals(plant) or {}
     base_prices  = {r["product_code"]: r for r in (_get_base_prices(plant) or [])}
-    # 매출데이터 있는 상품 우선, 없으면 전체 (max 3000개)
+    # 매출데이터 있는 상품 우선, 없으면 전체
+    # 전체셀러(__ALL__) 분석은 연산량이 크므로 상품 수 제한
     our_with_sales = [p for p in our_products if p["product_code"] in base_prices]
     our_no_sales   = [p for p in our_products if p["product_code"] not in base_prices]
-    our_scan = (our_with_sales + our_no_sales)[:3000]
+    _our_limit = 500 if all_sellers else 3000
+    our_scan = (our_with_sales + our_no_sales)[:_our_limit]
 
     # 기존 매핑 패턴
     pattern_strength = _build_pattern_map(all_mappings, our_scan) or {}
@@ -2198,10 +2200,6 @@ async def _do_ai_suggest(request, platform, seller_name, plant, limit):
         import traceback as _tb
         return JSONResponse({"items": items, "total_unmapped": len(unmapped),
                              "error": str(e), "traceback": _tb.format_exc()[-3000:]})
-
-    # 신뢰도 높은 순 정렬 (제안 없는 항목은 뒤로)
-    items.sort(key=lambda x: x["suggestions"][0]["score"] if x["suggestions"] else -1, reverse=True)
-    return JSONResponse({"items": items[:limit], "total_unmapped": len(unmapped)})
 
     # 신뢰도 높은 순 정렬 (제안 없는 항목은 뒤로)
     items.sort(key=lambda x: x["suggestions"][0]["score"] if x["suggestions"] else -1, reverse=True)

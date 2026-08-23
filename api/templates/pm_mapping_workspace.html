@@ -216,7 +216,8 @@ let currentPlant    = '{{ plant }}';
 let suggestItems    = [];
 
 // 팝업 상태
-let modalPlatItems  = [];   // 전체 셀러 유사 플랫폼 상품
+let modalPlatItems     = [];   // 현재 팝업에 표시되는 유사 플랫폼 상품
+let modalPlatItemsBase = [];   // 열릴 때 AI 유사에서 가져온 고정 항목 (검색해도 유지)
 let modalOurItem    = null; // 우리 상품 후보
 let modalPlatKey    = '';   // 기준 product_key
 let modalTag        = 'normal';
@@ -565,11 +566,22 @@ async function openMappingModal(cardIdx) {
   modalChecked = new Set([item.product_key]); // 기본 체크
   document.getElementById('inputMultiplier').value = '1';
   setTag('normal');
+  // 검색창 이력 초기화 (이전 팝업 검색어가 남지 않도록)
+  document.getElementById('modalSearch').value = '';
   document.getElementById('mappingModal').classList.add('open');
   document.getElementById('modalTitle').textContent = `매핑 확정 — ${item.product_name}`;
 
-  // 우리 상품 후보 렌더 (top1, 없으면 직접검색 모드)
-  const top = item.suggestions[0] || null;
+  // 카드에서 선택된 제안(클릭한 .selected) 인덱스 확인
+  let selectedSugIdx = 0;
+  const card = document.querySelector(`.suggest-card[data-idx="${cardIdx}"]`);
+  if (card) {
+    card.querySelectorAll('.sug-item').forEach((el, i) => {
+      if (el.classList.contains('selected')) selectedSugIdx = i;
+    });
+  }
+
+  // 우리 상품 후보 렌더 (선택된 제안, 없으면 top1, 없으면 직접검색 모드)
+  const top = item.suggestions[selectedSugIdx] || item.suggestions[0] || null;
   modalOurItem = top;
   renderOurCandidate(top);
   // 우리 상품 직접 검색 입력창 표시 여부
@@ -580,7 +592,8 @@ async function openMappingModal(cardIdx) {
   try {
     const r = await fetch(`/portal/price-monitor/api/pm-ai/similar?product_name=${encodeURIComponent(item.product_name)}&platform=${currentPlatform}&exclude_key=`);
     const d = await r.json();
-    modalPlatItems = d.data || [];
+    modalPlatItemsBase = d.data || []; // 고정 목록 저장
+    modalPlatItems = [...modalPlatItemsBase];
     renderModalPlatList();
   } catch(e) {
     document.getElementById('modalPlatList').innerHTML = `<p style="color:#ef4444;font-size:13px">로드 실패: ${e.message}</p>`;
@@ -608,10 +621,8 @@ function renderOurCandidate(s) {
 }
 
 function renderModalPlatList() {
-  const query = (document.getElementById('modalSearch').value || '').toLowerCase();
-  const filtered = modalPlatItems.filter(r =>
-    !query || (r.product_name||'').toLowerCase().includes(query)
-  );
+  // query 필터링은 filterModalList()(검색 API호출)에서 수행 → 여기서는 modalPlatItems 그대로 렌더
+  const filtered = modalPlatItems;
   if (!filtered.length) {
     document.getElementById('modalPlatList').innerHTML = '<p style="color:#9ca3af;font-size:13px;text-align:center;padding:20px">유사 상품 없음</p>';
     return;
@@ -640,7 +651,31 @@ function renderModalPlatList() {
   updateSelCount();
 }
 
-function filterModalList() { renderModalPlatList(); }
+// filterModalList: 입력 없으면 base목록, 있으면 API 검색 후 병합
+let _modalSearchTimer = null;
+function filterModalList() {
+  clearTimeout(_modalSearchTimer);
+  const query = (document.getElementById('modalSearch').value || '').trim();
+  if (!query) {
+    modalPlatItems = [...modalPlatItemsBase];
+    renderModalPlatList();
+    return;
+  }
+  _modalSearchTimer = setTimeout(async () => {
+    try {
+      const r = await fetch(`/portal/price-monitor/api/pm-ai/similar?product_name=${encodeURIComponent(query)}&platform=${currentPlatform}`);
+      const d = await r.json();
+      const searchResults = d.data || [];
+      // base 항목은 항상 앞에 고정, 검색 결과에서 중복 제외 후 추가
+      const baseKeys = new Set(modalPlatItemsBase.map(i => i.product_key));
+      const newItems = searchResults.filter(r => !baseKeys.has(r.product_key));
+      modalPlatItems = [...modalPlatItemsBase, ...newItems];
+    } catch(e) {
+      modalPlatItems = [...modalPlatItemsBase];
+    }
+    renderModalPlatList();
+  }, 300);
+}
 
 function togglePlatCheck(key, checked) {
   if (checked) modalChecked.add(key);
@@ -755,9 +790,10 @@ async function confirmMapping() {
 
 function closeModal() {
   document.getElementById('mappingModal').classList.remove('open');
-  modalPlatItems  = [];
-  modalOurItem    = null;
-  modalChecked    = new Set();
+  modalPlatItems     = [];
+  modalPlatItemsBase = [];
+  modalOurItem       = null;
+  modalChecked       = new Set();
 }
 
 // Toast
