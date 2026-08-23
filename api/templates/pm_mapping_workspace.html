@@ -1,0 +1,589 @@
+{% extends "base_portal.html" %}
+{% block title %}AI 매핑 워크스페이스{% endblock %}
+{% block content %}
+<style>
+.ws-header { background:#fff; border-bottom:1px solid #e5e7eb; padding:16px 24px; }
+.ws-selector { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+.ws-selector select { border:1px solid #d1d5db; border-radius:8px; padding:8px 12px; font-size:14px; background:#fff; }
+.ws-selector button { padding:8px 18px; border-radius:8px; font-size:14px; font-weight:600; cursor:pointer; border:none; }
+.btn-ai { background:#4f46e5; color:#fff; }
+.btn-ai:hover { background:#4338ca; }
+.btn-ai:disabled { background:#9ca3af; cursor:not-allowed; }
+
+/* KPI Bar */
+.kpi-bar { display:flex; gap:12px; padding:12px 24px; background:#f9fafb; border-bottom:1px solid #e5e7eb; flex-wrap:wrap; }
+.kpi-chip { background:#fff; border:1px solid #e5e7eb; border-radius:8px; padding:8px 16px; font-size:13px; }
+.kpi-chip span { font-weight:700; font-size:16px; }
+
+/* List */
+.suggest-list { padding:20px 24px; display:flex; flex-direction:column; gap:12px; max-width:1100px; }
+.suggest-card { background:#fff; border:1px solid #e5e7eb; border-radius:12px; overflow:hidden; }
+.suggest-card-header { display:flex; gap:16px; padding:14px 16px; align-items:flex-start; border-bottom:1px solid #f3f4f6; }
+.plat-badge { font-size:11px; padding:2px 8px; border-radius:20px; font-weight:600; white-space:nowrap; }
+.badge-baemin { background:#fff5d4; color:#b45309; }
+.badge-food { background:#d1fae5; color:#065f46; }
+.plat-info { flex:1; min-width:0; }
+.plat-name { font-size:14px; font-weight:600; color:#111; margin-bottom:4px; }
+.plat-meta { font-size:12px; color:#6b7280; display:flex; gap:12px; flex-wrap:wrap; }
+.plat-meta .price-main { font-size:14px; font-weight:700; color:#1d4ed8; }
+.plat-meta .price-net { font-size:12px; color:#6b7280; }
+.confidence { text-align:right; min-width:80px; }
+.conf-score { font-size:22px; font-weight:800; }
+.conf-score.high { color:#059669; }
+.conf-score.mid  { color:#d97706; }
+.conf-score.low  { color:#9ca3af; }
+
+/* Suggestions */
+.suggest-card-body { padding:12px 16px; display:flex; gap:10px; flex-wrap:wrap; }
+.sug-item { background:#f9fafb; border:1px solid #e5e7eb; border-radius:8px; padding:10px 14px; flex:1; min-width:220px; cursor:pointer; transition:all .15s; position:relative; }
+.sug-item:hover { border-color:#4f46e5; background:#eef2ff; }
+.sug-item.selected { border-color:#4f46e5; background:#eef2ff; box-shadow:0 0 0 2px #818cf8; }
+.sug-rank { position:absolute; top:8px; right:10px; font-size:11px; color:#9ca3af; font-weight:600; }
+.sug-code { font-size:11px; color:#6b7280; margin-bottom:2px; }
+.sug-name { font-size:13px; font-weight:600; color:#111; margin-bottom:6px; }
+.sug-prices { display:flex; gap:10px; font-size:12px; flex-wrap:wrap; }
+.sug-prices .lbl { color:#6b7280; }
+.sug-prices .val { font-weight:700; }
+.sug-prices .val.sale { color:#1d4ed8; }
+.sug-score-bar { height:4px; background:#e5e7eb; border-radius:2px; margin-top:8px; }
+.sug-score-fill { height:4px; border-radius:2px; }
+.btn-map-open { margin-left:auto; white-space:nowrap; padding:7px 14px; border-radius:8px; background:#4f46e5; color:#fff; font-size:13px; font-weight:600; border:none; cursor:pointer; }
+.btn-map-open:hover { background:#4338ca; }
+
+/* Empty/Loading */
+.ws-empty { text-align:center; padding:80px 20px; color:#9ca3af; font-size:15px; }
+.ws-loading { text-align:center; padding:60px; }
+.spinner { display:inline-block; width:36px; height:36px; border:4px solid #e5e7eb; border-top-color:#4f46e5; border-radius:50%; animation:spin .7s linear infinite; }
+@keyframes spin { to { transform:rotate(360deg); } }
+
+/* ── 매핑 팝업 ── */
+#mappingModal { display:none; position:fixed; inset:0; z-index:9000; }
+#mappingModal.open { display:flex; align-items:center; justify-content:center; }
+.modal-backdrop { position:absolute; inset:0; background:rgba(0,0,0,.45); }
+.modal-box { position:relative; background:#fff; border-radius:16px; width:92vw; max-width:1050px; max-height:88vh; display:flex; flex-direction:column; overflow:hidden; box-shadow:0 20px 60px rgba(0,0,0,.25); }
+.modal-header { padding:16px 20px; border-bottom:1px solid #e5e7eb; display:flex; align-items:center; gap:12px; }
+.modal-header h3 { font-size:15px; font-weight:700; flex:1; }
+.modal-body { display:flex; gap:0; flex:1; overflow:hidden; }
+.modal-left, .modal-right { flex:1; overflow-y:auto; padding:16px; }
+.modal-left { border-right:1px solid #e5e7eb; background:#f9fafb; }
+.modal-right { background:#fff; }
+.modal-section-title { font-size:12px; font-weight:700; color:#6b7280; text-transform:uppercase; letter-spacing:.05em; margin-bottom:10px; }
+.modal-footer { padding:14px 20px; border-top:1px solid #e5e7eb; display:flex; align-items:center; gap:12px; background:#fff; flex-wrap:wrap; }
+
+/* 플랫폼 상품 체크리스트 */
+.plat-check-item { display:flex; align-items:flex-start; gap:10px; padding:10px; border-radius:8px; border:1px solid #e5e7eb; background:#fff; margin-bottom:8px; cursor:pointer; transition:all .15s; }
+.plat-check-item:hover { border-color:#818cf8; }
+.plat-check-item.checked { border-color:#4f46e5; background:#eef2ff; }
+.plat-check-item input[type=checkbox] { margin-top:2px; accent-color:#4f46e5; width:15px; height:15px; cursor:pointer; }
+.plat-check-name { font-size:13px; font-weight:600; color:#111; }
+.plat-check-meta { font-size:12px; color:#6b7280; margin-top:3px; display:flex; gap:10px; flex-wrap:wrap; }
+.plat-check-meta .net-price { font-weight:700; color:#1d4ed8; }
+.plat-check-meta .already-mapped { color:#059669; font-weight:600; }
+
+/* 우리 상품 후보 */
+.our-candidate { border:1.5px solid #4f46e5; border-radius:10px; padding:14px; margin-bottom:12px; background:#eef2ff; }
+.our-candidate-name { font-size:15px; font-weight:700; color:#1d4ed8; margin-bottom:8px; }
+.our-candidate-prices { display:flex; gap:16px; font-size:13px; flex-wrap:wrap; }
+.our-candidate-prices .lbl { color:#6b7280; }
+.our-candidate-prices .val { font-weight:700; }
+.our-candidate-prices .val.sale { color:#1d4ed8; }
+.our-candidate-prices .val.buy  { color:#374151; }
+.our-candidate-prices .val.sales-amt { color:#059669; }
+
+/* 태그 & 배수 */
+.tag-row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.tag-btn { padding:6px 14px; border-radius:20px; border:1.5px solid #d1d5db; background:#fff; font-size:13px; cursor:pointer; font-weight:500; }
+.tag-btn:hover { border-color:#4f46e5; }
+.tag-btn.active { border-color:#4f46e5; background:#eef2ff; color:#4f46e5; font-weight:700; }
+.tag-btn.active.substitute { border-color:#d97706; background:#fffbeb; color:#d97706; }
+.tag-btn.active.multiple   { border-color:#7c3aed; background:#f5f3ff; color:#7c3aed; }
+.multiplier-row { display:flex; align-items:center; gap:10px; font-size:13px; margin-top:10px; }
+.multiplier-row label { color:#374151; font-weight:600; white-space:nowrap; }
+.multiplier-row input { width:90px; padding:6px 10px; border:1.5px solid #d1d5db; border-radius:8px; font-size:14px; font-weight:700; text-align:center; }
+.multiplier-row input:focus { border-color:#4f46e5; outline:none; }
+.multiplier-hint { font-size:12px; color:#6b7280; }
+
+.btn-confirm { background:#059669; color:#fff; border:none; border-radius:8px; padding:9px 22px; font-size:14px; font-weight:700; cursor:pointer; }
+.btn-confirm:hover { background:#047857; }
+.btn-confirm:disabled { background:#9ca3af; cursor:not-allowed; }
+.btn-close-modal { background:#f3f4f6; color:#374151; border:none; border-radius:8px; padding:9px 18px; font-size:14px; cursor:pointer; }
+
+.search-box { width:100%; padding:8px 12px; border:1px solid #d1d5db; border-radius:8px; font-size:13px; margin-bottom:10px; }
+
+.tag-badge { display:inline-block; font-size:10px; padding:1px 7px; border-radius:10px; font-weight:700; margin-left:6px; vertical-align:middle; }
+.tag-badge.normal     { background:#e5e7eb; color:#374151; }
+.tag-badge.substitute { background:#fef3c7; color:#b45309; }
+.tag-badge.multiple   { background:#ede9fe; color:#7c3aed; }
+</style>
+
+<div class="ws-header">
+  <div class="ws-selector">
+    <select id="selPlatform" onchange="onPlatformChange()">
+      <option value="">-- 플랫폼 선택 --</option>
+      <option value="baemin" {% if platform=='baemin' %}selected{% endif %}>배민상회</option>
+      <option value="foodspring" {% if platform=='foodspring' %}selected{% endif %}>식봄</option>
+    </select>
+    <select id="selSeller">
+      <option value="">-- 셀러 선택 --</option>
+    </select>
+    <select id="selPlant">
+      {% for p in plants %}
+      <option value="{{ p }}" {% if p == plant %}selected{% endif %}>
+        {% if p == 'ALL' %}전체센터{% elif p == '4120' %}4120(시화){% elif p == '4123' %}4123(화성){% elif p == '4121' %}4121(화성3배치){% else %}{{ p }}{% endif %}
+      </option>
+      {% endfor %}
+    </select>
+    <button class="btn-ai" id="btnAnalyze" onclick="runAISuggest()" disabled>🤖 AI 매핑 분석</button>
+  </div>
+</div>
+
+<div class="kpi-bar" id="kpiBar" style="display:none">
+  <div class="kpi-chip">전체 미매핑: <span id="kpiTotal">-</span></div>
+  <div class="kpi-chip">분석 완료: <span id="kpiShown">-</span></div>
+  <div class="kpi-chip">고신뢰(80↑): <span id="kpiHigh" style="color:#059669">-</span></div>
+  <div class="kpi-chip">중신뢰(50-80): <span id="kpiMid" style="color:#d97706">-</span></div>
+</div>
+
+<div id="wsContent">
+  <div class="ws-empty">플랫폼과 셀러를 선택 후 AI 매핑 분석 버튼을 눌러주세요.</div>
+</div>
+
+<!-- ══ 매핑 팝업 ══ -->
+<div id="mappingModal">
+  <div class="modal-backdrop" onclick="closeModal()"></div>
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3 id="modalTitle">AI 매핑 확정</h3>
+      <button class="btn-close-modal" onclick="closeModal()">✕ 닫기</button>
+    </div>
+    <div class="modal-body">
+      <!-- 좌: 유사 플랫폼 상품 (전체 셀러) -->
+      <div class="modal-left">
+        <div class="modal-section-title">유사 플랫폼 상품 <span style="color:#9ca3af;font-weight:400;text-transform:none">(전체 셀러)</span></div>
+        <input type="text" class="search-box" id="modalSearch" placeholder="상품명 필터..." oninput="filterModalList()">
+        <div id="modalPlatList"></div>
+      </div>
+      <!-- 우: 우리 상품 + 태그/배수 -->
+      <div class="modal-right">
+        <div class="modal-section-title">우리 상품</div>
+        <div id="modalOurCandidate"></div>
+        <hr style="border:none;border-top:1px solid #e5e7eb;margin:14px 0">
+        <div class="modal-section-title">태그</div>
+        <div class="tag-row">
+          <button class="tag-btn active" id="tagNormal"    onclick="setTag('normal')">📌 일반</button>
+          <button class="tag-btn" id="tagSubstitute" onclick="setTag('substitute')">🔄 대체자재</button>
+          <button class="tag-btn" id="tagMultiple"   onclick="setTag('multiple')">✖️ 배수</button>
+        </div>
+        <div class="multiplier-row" id="multiplierRow" style="display:none">
+          <label>배수</label>
+          <input type="number" id="inputMultiplier" value="1" step="0.01" min="0.01" placeholder="1.0">
+          <span class="multiplier-hint">플랫폼 단가 ÷ 배수 = 우리 단가 기준</span>
+        </div>
+        <div id="multiplierPreview" style="font-size:12px;color:#6b7280;margin-top:6px;display:none"></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <span id="modalSelCount" style="font-size:13px;color:#374151">선택된 항목: 0개</span>
+      <span style="flex:1"></span>
+      <button class="btn-close-modal" onclick="closeModal()">취소</button>
+      <button class="btn-confirm" id="btnConfirm" onclick="confirmMapping()" disabled>✅ 매핑 확정</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ══ 상태 ══
+let currentPlatform = '{{ platform }}';
+let currentSeller   = '{{ seller_name }}';
+let currentSellerId = '{{ seller_id }}';
+let currentPlant    = '{{ plant }}';
+let suggestItems    = [];
+
+// 팝업 상태
+let modalPlatItems  = [];   // 전체 셀러 유사 플랫폼 상품
+let modalOurItem    = null; // 우리 상품 후보
+let modalPlatKey    = '';   // 기준 product_key
+let modalTag        = 'normal';
+let modalChecked    = new Set(); // 체크된 product_key들
+
+// ══ 초기화 ══
+document.addEventListener('DOMContentLoaded', () => {
+  if (currentPlatform) {
+    loadSellers(currentPlatform).then(() => {
+      if (currentSeller) {
+        const sel = document.getElementById('selSeller');
+        for (let o of sel.options) if (o.text.trim() === currentSeller.trim()) o.selected = true;
+        document.getElementById('btnAnalyze').disabled = false;
+      }
+    });
+  }
+});
+
+// ══ 셀러 목록 로드 ══
+async function loadSellers(platform) {
+  const sel = document.getElementById('selSeller');
+  sel.innerHTML = '<option value="">-- 셀러 선택 --</option>';
+  if (!platform) return;
+  try {
+    const endpoint = platform === 'baemin'
+      ? '/portal/price-monitor/api/sellers/baemin'
+      : '/portal/price-monitor/api/sellers/foodspring';
+    // 셀러 목록은 기존 시뮬레이션 데이터에서 가져옴 (competition API 활용)
+    const r = await fetch(`/portal/price-monitor/api/competition?plant=${currentPlant}`);
+    const d = await r.json();
+    const sellers = (d.sellers || []).filter(s => s.platform === platform);
+    sellers.forEach(s => {
+      const o = document.createElement('option');
+      o.value = s.seller_id || s.seller_name;
+      o.textContent = `${s.seller_name} (${s.total}개)`;
+      o.dataset.name = s.seller_name;
+      o.dataset.id   = s.seller_id || '';
+      sel.appendChild(o);
+    });
+  } catch(e) {
+    console.warn('셀러 목록 로드 실패', e);
+  }
+}
+
+function onPlatformChange() {
+  currentPlatform = document.getElementById('selPlatform').value;
+  loadSellers(currentPlatform);
+  document.getElementById('btnAnalyze').disabled = true;
+  document.getElementById('wsContent').innerHTML = '<div class="ws-empty">셀러를 선택해주세요.</div>';
+  document.getElementById('kpiBar').style.display = 'none';
+}
+
+document.getElementById('selSeller').addEventListener('change', function() {
+  const opt = this.options[this.selectedIndex];
+  currentSeller   = opt.dataset.name || opt.text;
+  currentSellerId = opt.dataset.id   || '';
+  document.getElementById('btnAnalyze').disabled = !this.value;
+});
+
+document.getElementById('selPlant').addEventListener('change', function() {
+  currentPlant = this.value;
+});
+
+// ══ AI 분석 실행 ══
+async function runAISuggest() {
+  const btn = document.getElementById('btnAnalyze');
+  btn.disabled = true;
+  btn.textContent = '⏳ 분석 중...';
+  document.getElementById('wsContent').innerHTML = '<div class="ws-loading"><div class="spinner"></div><p style="margin-top:12px;color:#6b7280;font-size:14px">AI 유사도 분석 중입니다...</p></div>';
+  document.getElementById('kpiBar').style.display = 'none';
+
+  try {
+    const url = `/portal/price-monitor/api/mapping/ai-suggest?platform=${encodeURIComponent(currentPlatform)}&seller_name=${encodeURIComponent(currentSeller)}&seller_id=${encodeURIComponent(currentSellerId)}&plant=${currentPlant}&limit=200`;
+    const r   = await fetch(url);
+    const d   = await r.json();
+    suggestItems = d.items || [];
+    renderSuggestList(suggestItems, d.total_unmapped || 0);
+  } catch(e) {
+    document.getElementById('wsContent').innerHTML = `<div class="ws-empty" style="color:#ef4444">오류 발생: ${e.message}</div>`;
+  }
+  btn.disabled = false;
+  btn.textContent = '🤖 AI 매핑 분석';
+}
+
+// ══ 리스트 렌더 ══
+function renderSuggestList(items, totalUnmapped) {
+  if (!items.length) {
+    document.getElementById('wsContent').innerHTML = '<div class="ws-empty">AI 제안 가능한 미매핑 상품이 없습니다.<br><small style="color:#9ca3af">미매핑 상품이 있더라도 유사한 우리 상품이 없으면 표시되지 않습니다.</small></div>';
+    return;
+  }
+
+  // KPI
+  const high = items.filter(i => i.suggestions[0]?.score >= 80).length;
+  const mid  = items.filter(i => { const s=i.suggestions[0]?.score||0; return s>=50 && s<80; }).length;
+  document.getElementById('kpiTotal').textContent = totalUnmapped.toLocaleString();
+  document.getElementById('kpiShown').textContent = items.length.toLocaleString();
+  document.getElementById('kpiHigh').textContent  = high.toLocaleString();
+  document.getElementById('kpiMid').textContent   = mid.toLocaleString();
+  document.getElementById('kpiBar').style.display = 'flex';
+
+  const platLabel = currentPlatform === 'baemin' ? '배민상회' : '식봄';
+  const platClass = currentPlatform === 'baemin' ? 'badge-baemin' : 'badge-food';
+
+  let html = '<div class="suggest-list">';
+  items.forEach((item, idx) => {
+    const top    = item.suggestions[0] || {};
+    const score  = top.score || 0;
+    const scoreClass = score >= 80 ? 'high' : score >= 50 ? 'mid' : 'low';
+    const netDisp = item.net_price ? item.net_price.toLocaleString()+'원' : '-';
+    const saleDisp = item.price_sale ? item.price_sale.toLocaleString()+'원' : '-';
+
+    html += `<div class="suggest-card" data-idx="${idx}">
+      <div class="suggest-card-header">
+        <span class="plat-badge ${platClass}">${platLabel}</span>
+        <div class="plat-info">
+          <div class="plat-name">${escHtml(item.product_name)}${item.spec ? ' <small style="color:#9ca3af">'+escHtml(item.spec)+'</small>' : ''}</div>
+          <div class="plat-meta">
+            <span>${escHtml(currentSeller)}</span>
+            <span class="price-main">${saleDisp}</span>
+            <span class="price-net">실판매가 ${netDisp} <small>(${item.delivery_type}, 수수료 ${item.fee_pct}%+VAT)</small></span>
+          </div>
+        </div>
+        <div class="confidence">
+          <div class="conf-score ${scoreClass}">${score.toFixed(0)}점</div>
+          <div style="font-size:11px;color:#9ca3af">신뢰도</div>
+        </div>
+        <button class="btn-map-open" onclick="openMappingModal(${idx})">매핑하기 →</button>
+      </div>
+      <div class="suggest-card-body">`;
+
+    item.suggestions.forEach((s, si) => {
+      const barPct = Math.round(s.score);
+      const barColor = s.score>=80?'#059669':s.score>=50?'#d97706':'#9ca3af';
+      const saleV  = s.our_sale_price ? s.our_sale_price.toLocaleString()+'원' : '-';
+      const buyV   = s.buy_price      ? s.buy_price.toLocaleString()+'원'      : '-';
+      const salesV = s.prev_sales_amt > 0 ? Math.round(s.prev_sales_amt/10000)+'만원' : '-';
+      html += `<div class="sug-item" onclick="selectSuggest(${idx},${si})" id="sug-${idx}-${si}">
+        <span class="sug-rank">#${si+1}</span>
+        <div class="sug-code">${escHtml(s.our_product_code)}</div>
+        <div class="sug-name">${escHtml(s.product_name)}</div>
+        <div class="sug-prices">
+          <span><span class="lbl">공급가</span> <span class="val sale">${saleV}</span></span>
+          <span><span class="lbl">구매가</span> <span class="val">${buyV}</span></span>
+          <span><span class="lbl">전월매출</span> <span class="val">${salesV}</span></span>
+        </div>
+        <div class="sug-score-bar"><div class="sug-score-fill" style="width:${barPct}%;background:${barColor}"></div></div>
+      </div>`;
+    });
+
+    html += `</div></div>`;
+  });
+  html += '</div>';
+  document.getElementById('wsContent').innerHTML = html;
+}
+
+// 카드 내 제안 선택 하이라이트
+function selectSuggest(cardIdx, sugIdx) {
+  const card = document.querySelector(`.suggest-card[data-idx="${cardIdx}"]`);
+  card.querySelectorAll('.sug-item').forEach((el, i) => {
+    el.classList.toggle('selected', i === sugIdx);
+  });
+}
+
+// ══ 팝업 열기 ══
+async function openMappingModal(cardIdx) {
+  const item = suggestItems[cardIdx];
+  if (!item) return;
+
+  // 기준 정보 초기화
+  modalPlatKey = item.product_key;
+  modalTag     = 'normal';
+  modalChecked = new Set([item.product_key]); // 기본 체크
+  document.getElementById('inputMultiplier').value = '1';
+  setTag('normal');
+  document.getElementById('mappingModal').classList.add('open');
+  document.getElementById('modalTitle').textContent = `매핑 확정 — ${item.product_name}`;
+
+  // 우리 상품 후보 렌더 (top1)
+  const top = item.suggestions[0] || {};
+  modalOurItem = top;
+  renderOurCandidate(top);
+
+  // 유사 플랫폼 상품 로드 (전체 셀러)
+  document.getElementById('modalPlatList').innerHTML = '<div style="text-align:center;padding:20px"><div class="spinner"></div></div>';
+  try {
+    const r = await fetch(`/portal/price-monitor/api/mapping/similar-platform?product_name=${encodeURIComponent(item.product_name)}&platform=${currentPlatform}&exclude_key=`);
+    const d = await r.json();
+    modalPlatItems = d.data || [];
+    renderModalPlatList();
+  } catch(e) {
+    document.getElementById('modalPlatList').innerHTML = `<p style="color:#ef4444;font-size:13px">로드 실패: ${e.message}</p>`;
+  }
+  updateConfirmBtn();
+}
+
+function renderOurCandidate(s) {
+  if (!s || !s.our_product_code) {
+    document.getElementById('modalOurCandidate').innerHTML = '<p style="color:#9ca3af;font-size:13px">제안된 우리 상품이 없습니다.</p>';
+    return;
+  }
+  const saleV  = s.our_sale_price ? s.our_sale_price.toLocaleString()+'원' : '-';
+  const buyV   = s.buy_price      ? s.buy_price.toLocaleString()+'원'      : '-';
+  const salesV = s.prev_sales_amt > 0 ? Math.round(s.prev_sales_amt/10000).toLocaleString()+'만원' : '-';
+  document.getElementById('modalOurCandidate').innerHTML = `
+    <div class="our-candidate">
+      <div class="our-candidate-name">📦 ${escHtml(s.our_product_code)} ${escHtml(s.product_name)}</div>
+      <div class="our-candidate-prices">
+        <span><span class="lbl">평균판매가(공급가)</span> <span class="val sale">${saleV}</span></span>
+        <span><span class="lbl">구매가</span> <span class="val buy">${buyV}</span></span>
+        <span><span class="lbl">전월매출</span> <span class="val sales-amt">${salesV}</span></span>
+      </div>
+    </div>`;
+}
+
+function renderModalPlatList() {
+  const query = (document.getElementById('modalSearch').value || '').toLowerCase();
+  const filtered = modalPlatItems.filter(r =>
+    !query || (r.product_name||'').toLowerCase().includes(query)
+  );
+  if (!filtered.length) {
+    document.getElementById('modalPlatList').innerHTML = '<p style="color:#9ca3af;font-size:13px;text-align:center;padding:20px">유사 상품 없음</p>';
+    return;
+  }
+  const platLabelOf = p => p === 'baemin' ? '배민' : '식봄';
+  let html = '';
+  filtered.forEach(r => {
+    const checked   = modalChecked.has(r.product_key);
+    const netDisp   = r.net_price ? r.net_price.toLocaleString()+'원' : '-';
+    const saleDisp  = r.price_sale ? r.price_sale.toLocaleString()+'원' : '-';
+    const mappedTxt = r.is_mapped ? '<span class="already-mapped">✅ 이미 매핑됨</span>' : '';
+    html += `<label class="plat-check-item ${checked?'checked':''}" data-key="${escHtml(r.product_key)}">
+      <input type="checkbox" ${checked?'checked':''} ${r.is_mapped?'disabled':''} onchange="togglePlatCheck('${escHtml(r.product_key)}', this.checked)">
+      <div style="flex:1;min-width:0">
+        <div class="plat-check-name">${escHtml(r.product_name||'')}${r.spec?' <small style=color:#9ca3af>'+escHtml(r.spec)+'</small>':''}</div>
+        <div class="plat-check-meta">
+          <span>${platLabelOf(r.platform)} / ${escHtml(r.platform_seller_name||'')}</span>
+          <span class="net-price">${netDisp}</span>
+          <span style="color:#9ca3af">(판매가 ${saleDisp}, ${r.delivery_type||'직배송'}, 수수료 ${r.fee_pct}%)</span>
+          ${mappedTxt}
+        </div>
+      </div>
+    </label>`;
+  });
+  document.getElementById('modalPlatList').innerHTML = html;
+  updateSelCount();
+}
+
+function filterModalList() { renderModalPlatList(); }
+
+function togglePlatCheck(key, checked) {
+  if (checked) modalChecked.add(key);
+  else          modalChecked.delete(key);
+  // 체크 항목 스타일 업데이트
+  document.querySelectorAll(`[data-key="${CSS.escape(key)}"]`).forEach(el => {
+    el.classList.toggle('checked', checked);
+  });
+  updateSelCount();
+  updateConfirmBtn();
+}
+
+function updateSelCount() {
+  document.getElementById('modalSelCount').textContent = `선택된 항목: ${modalChecked.size}개`;
+}
+
+function updateConfirmBtn() {
+  document.getElementById('btnConfirm').disabled = (modalChecked.size === 0 || !modalOurItem);
+}
+
+// 태그 선택
+function setTag(tag) {
+  modalTag = tag;
+  ['tagNormal','tagSubstitute','tagMultiple'].forEach(id => {
+    const el = document.getElementById(id);
+    el.classList.remove('active','substitute','multiple');
+  });
+  const tagMap = {normal:'tagNormal', substitute:'tagSubstitute', multiple:'tagMultiple'};
+  const btn = document.getElementById(tagMap[tag]);
+  btn.classList.add('active');
+  if (tag === 'substitute') btn.classList.add('substitute');
+  if (tag === 'multiple')   btn.classList.add('multiple');
+
+  const mRow = document.getElementById('multiplierRow');
+  mRow.style.display = tag === 'multiple' ? 'flex' : 'none';
+  document.getElementById('multiplierPreview').style.display = 'none';
+  if (tag === 'multiple') updateMultiplierPreview();
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('inputMultiplier').addEventListener('input', updateMultiplierPreview);
+});
+
+function updateMultiplierPreview() {
+  const m = parseFloat(document.getElementById('inputMultiplier').value) || 1;
+  if (!modalOurItem?.our_sale_price) return;
+  const topItem = suggestItems.find(i => i.product_key === modalPlatKey);
+  if (!topItem?.net_price) return;
+  const adjusted = Math.round(topItem.net_price / m);
+  const div = document.getElementById('multiplierPreview');
+  div.textContent = `배수 적용 단가: ${topItem.net_price.toLocaleString()}원 ÷ ${m} = ${adjusted.toLocaleString()}원 (우리 공급가 ${modalOurItem.our_sale_price.toLocaleString()}원과 비교)`;
+  div.style.display = 'block';
+}
+
+// 매핑 확정
+async function confirmMapping() {
+  if (!modalOurItem || modalChecked.size === 0) return;
+  const multiplier = parseFloat(document.getElementById('inputMultiplier').value) || 1.0;
+
+  // 체크된 product_key → 플랫폼 상품 상세 정보 수집
+  const itemsToMap = [];
+  modalChecked.forEach(pk => {
+    const found = modalPlatItems.find(r => r.product_key === pk);
+    if (found) {
+      itemsToMap.push({
+        product_key:         pk,
+        platform:            found.platform,
+        platform_seller_id:  '',
+        platform_product_id: '',
+        product_name:        found.product_name || '',
+        seller_name:         found.platform_seller_name || '',
+      });
+    }
+  });
+
+  if (!itemsToMap.length) { alert('매핑할 항목이 없습니다.'); return; }
+
+  const btn = document.getElementById('btnConfirm');
+  btn.disabled = true;
+  btn.textContent = '저장 중...';
+
+  try {
+    const r = await fetch('/portal/price-monitor/api/mapping/bulk-add', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        our_product_code: modalOurItem.our_product_code,
+        plant:            currentPlant,
+        tag:              modalTag,
+        multiplier:       multiplier,
+        items:            itemsToMap,
+      }),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      showToast(`✅ ${d.added}개 매핑 저장 완료!`);
+      closeModal();
+      // 해당 카드를 목록에서 제거 (completed)
+      const cardEl = document.querySelector(`.suggest-card[data-key="${CSS.escape(modalPlatKey)}"]`);
+      if (cardEl) cardEl.remove();
+      // suggestItems에서도 제거
+      suggestItems = suggestItems.filter(i => i.product_key !== modalPlatKey);
+    } else {
+      alert('오류: ' + (d.error || '알 수 없는 오류'));
+    }
+  } catch(e) {
+    alert('저장 실패: ' + e.message);
+  }
+  btn.disabled = false;
+  btn.textContent = '✅ 매핑 확정';
+}
+
+function closeModal() {
+  document.getElementById('mappingModal').classList.remove('open');
+  modalPlatItems  = [];
+  modalOurItem    = null;
+  modalChecked    = new Set();
+}
+
+// Toast
+function showToast(msg) {
+  let t = document.getElementById('globalToast');
+  if (!t) {
+    t = document.createElement('div');
+    t.id = 'globalToast';
+    t.style.cssText = 'position:fixed;bottom:30px;right:30px;background:#1f2937;color:#fff;padding:12px 20px;border-radius:10px;font-size:14px;z-index:9999;opacity:0;transition:opacity .3s';
+    document.body.appendChild(t);
+  }
+  t.textContent = msg;
+  t.style.opacity = '1';
+  setTimeout(() => { t.style.opacity = '0'; }, 3000);
+}
+
+function escHtml(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+</script>
+{% endblock %}

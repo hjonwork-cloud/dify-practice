@@ -848,6 +848,8 @@ async def api_mapping_add(request: Request):
         product_name=product_name,
         seller_name=seller_name,
         created_by=session.get("emp_code", ""),
+        tag=body.get("tag", "normal"),
+        multiplier=float(body.get("multiplier", 1.0)),
     )
     return JSONResponse({"ok": True, "mapping_id": mapping_id})
 
@@ -1360,15 +1362,17 @@ async def api_competition(request: Request, plant: str = "ALL"):
         seller_id     = m.get("platform_seller_id") or ""
         platform      = pf_data.get("platform") or m.get("platform") or ""
         delivery_type = pf_data.get("delivery_type", "직배송")
+        multiplier    = float(m.get("multiplier") or 1.0)
+        tag           = m.get("tag", "normal")
 
         if platform and not crawl_dates.get(platform):
             crawl_dates[platform] = str(pf_data.get("crawl_date", ""))
 
         # ── 경쟁사 실수취가: 소비자가에서 수수료·VAT 제거 ──
-        # comp_net = price_sale × (1 − fee) / 1.1
+        # comp_net = price_sale × (1 − fee) / 1.1 / multiplier
         fee = _get_fee(delivery_type, platform, seller_name)
         if comp_price:
-            comp_net = round(float(comp_price) * (1.0 - fee) / 1.1, 0)
+            comp_net = round(float(comp_price) * (1.0 - fee) / 1.1 / multiplier, 0)
         else:
             comp_net = None
 
@@ -1406,6 +1410,8 @@ async def api_competition(request: Request, plant: str = "ALL"):
             "product_key":       pk,
             "ext_product_name":  pf_data.get("product_name", ""),
             "delivery_type":     delivery_type,
+            "tag":               tag,
+            "multiplier":        multiplier,
         })
 
     # ── 셀러 요약 빌드 ──
@@ -1576,8 +1582,10 @@ async def api_simulation(
         _sn           = seller_name
         fee           = _get_fee(delivery_type, platform, _sn)
         buy_price     = (price_map.get(p_code) or {}).get("avg_buy_price")
+        multiplier    = float(m.get("multiplier") or 1.0)
+        tag           = m.get("tag", "normal")
 
-        comp_net = round(float(comp_price) * (1.0 - fee) / 1.1, 0) if comp_price else None
+        comp_net = round(float(comp_price) * (1.0 - fee) / 1.1 / multiplier, 0) if comp_price else None
         if comp_net and buy_price:
             match_margin = round((float(comp_net) - float(buy_price)) / float(comp_net) * 100, 1)
         else:
@@ -1594,6 +1602,8 @@ async def api_simulation(
             "delivery_type":    delivery_type,
             "fee_pct":          round(fee * 100, 1),
             "status":           status,
+            "tag":              tag,
+            "multiplier":       multiplier,
         })
 
     # ── 상품 목록 빌드 ──
@@ -1782,6 +1792,356 @@ async def api_debug_baemin(request: Request):
             results["product_api"][sid] = {"error": str(e)}
 
     return JSONResponse({"ok": True, "results": results})
+
+
+# ── 화면 8: 매핑 워크스페이스 ────────────────────────────────────────────────
+
+@router.get("/mapping-workspace", response_class=HTMLResponse)
+async def pm_mapping_workspace(
+    request: Request,
+    platform: str = "",
+    seller_name: str = "",
+    seller_id: str = "",
+    plant: str = "ALL",
+):
+    """AI 매핑 제안 워크스페이스 화면."""
+    _require_pm_access(request)
+    if plant not in PLANTS:
+        plant = "ALL"
+    return _render(request, "pm_mapping_workspace.html",
+                   active_page="mapping",
+                   platform=platform,
+                   seller_name=seller_name,
+                   seller_id=seller_id,
+                   plant=plant, plants=PLANTS)
+
+
+# ── AI 유사도 매핑 엔진 헬퍼 ────────────────────────────────────────────────
+
+def _tokenize(name: str) -> set[str]:
+    """상품명을 의미 토큰으로 분리. 숫자+단위 조합 보존."""
+    import re
+    name = (name or "").strip()
+    # 괄호 내용 포함, 특수문자 제거 후 분리
+    name = re.sub(r'[/·•\-_,]', ' ', name)
+    tokens = set()
+    for t in re.split(r'\s+', name):
+        t = t.strip('()[]{}')
+        if len(t) >= 2:
+            tokens.add(t.lower())
+    return tokens
+
+
+def _score_mapping(platform_name: str, platform_price: float | None,
+                   our_name: str, our_sale_price: float | None,
+                   buy_price: float | None,
+                   delivery_type: str, platform: str, seller_name: str,
+                   pattern_bonus: float = 0.0) -> float:
+    """플랫폼 상품 ↔ 우리 상품 유사도 점수 (0~100)."""
+    score = 0.0
+
+    # 1. 토큰 겹침 (40점)
+    pt = _tokenize(platform_name)
+    ot = _tokenize(our_name)
+    if pt and ot:
+        jaccard = len(pt & ot) / len(pt | ot)
+        score += jaccard * 40.0
+
+    # 2. 가격 유사도 (35점): 플랫폼 실판매가 vs 우리 공급가
+    if platform_price and our_sale_price and our_sale_price > 0:
+        try:
+            fee = _get_fee(delivery_type, platform, seller_name)
+            comp_net = float(platform_price) * (1.0 - fee) / 1.1
+            ratio = comp_net / float(our_sale_price)
+            # 0.7~1.4 범위에서 최고점, 벗어날수록 감점
+            if 0.7 <= ratio <= 1.4:
+                price_score = 35.0 * (1.0 - abs(ratio - 1.0) / 0.7)
+            else:
+                price_score = max(0.0, 35.0 * (1.0 - abs(ratio - 1.0) / 2.0))
+            score += price_score
+        except Exception:
+            pass
+
+    # 3. 기존 매핑 패턴 보너스 (15점)
+    score += min(15.0, pattern_bonus * 15.0)
+
+    # 4. 이름 길이 패널티: 너무 짧은 토큰만 겹치면 신뢰도 낮춤
+    common = pt & ot
+    short_ratio = sum(1 for t in common if len(t) <= 2) / max(len(common), 1)
+    score -= short_ratio * 5.0
+
+    return round(max(0.0, min(100.0, score)), 1)
+
+
+def _build_pattern_map(all_mappings: list[dict], our_products: list[dict]) -> dict[str, float]:
+    """기존 매핑에서 (플랫폼상품명 토큰 → 우리상품코드) 패턴 추출.
+    반환: {our_product_code → pattern_strength(0~1)}"""
+    from collections import Counter
+    our_name_map = {p["product_code"]: (p.get("product_name") or "") for p in our_products}
+    token_code: dict[str, Counter] = {}
+    for m in all_mappings:
+        code = m.get("our_product_code", "")
+        pname = m.get("product_name", "")
+        for t in _tokenize(pname):
+            if t not in token_code:
+                token_code[t] = Counter()
+            token_code[t][code] += 1
+    # code → 토큰 매칭 강도 합산
+    code_strength: dict[str, float] = {}
+    for t, counter in token_code.items():
+        total = sum(counter.values())
+        for code, cnt in counter.items():
+            code_strength[code] = code_strength.get(code, 0) + cnt / total
+    return code_strength
+
+
+# ── API: AI 매핑 제안 ─────────────────────────────────────────────────────
+
+@router.get("/api/mapping/ai-suggest")
+async def api_mapping_ai_suggest(
+    request: Request,
+    platform: str = "",
+    seller_name: str = "",
+    seller_id: str = "",
+    plant: str = "ALL",
+    limit: int = 100,
+):
+    """선택 셀러의 미매핑 플랫폼 SKU에 대해 우리 상품 Top3 AI 제안 반환.
+
+    반환:
+      items: [{
+        product_key, product_name, spec, price_sale, net_price,
+        delivery_type, is_mapped,
+        suggestions: [{our_product_code, product_name, score,
+                       our_sale_price, buy_price, net_comp_price}]
+      }]
+    """
+    _require_pm_access(request)
+    if not platform or not seller_name:
+        return JSONResponse({"items": [], "error": "platform/seller_name 필요"})
+
+    safe_seller = seller_name.replace("'", "''")
+
+    # 셀러의 최신 플랫폼 SKU 전체 조회
+    try:
+        plat_rows = _q(f"""
+            SELECT p.product_key, p.product_name, p.spec,
+                   p.price_sale, p.price_original, p.delivery_type, p.is_free_delivery
+            FROM {T_SILVER} p
+            INNER JOIN (
+                SELECT MAX(crawl_date) AS max_date
+                FROM {T_SILVER}
+                WHERE platform = '{platform}' AND platform_seller_name = '{safe_seller}'
+            ) md ON p.crawl_date = md.max_date
+            WHERE p.platform = '{platform}' AND p.platform_seller_name = '{safe_seller}'
+            ORDER BY p.product_name
+        """) or []
+    except Exception as e:
+        return JSONResponse({"items": [], "error": str(e)})
+
+    # 이미 매핑된 product_key 집합
+    all_mappings = portal_db.pm_list_all_mappings(plant)
+    mapped_keys: set[str] = {m["product_key"] for m in all_mappings if m.get("is_active", 1)}
+
+    # 미매핑만 필터
+    unmapped = [r for r in plat_rows if r["product_key"] not in mapped_keys]
+
+    # 우리 상품 목록 + 가격
+    our_products = _get_our_products(plant)
+    price_totals = _get_prev_month_sales_totals(plant)
+    base_prices = {r["product_code"]: r for r in _get_base_prices(plant)}
+
+    # 기존 매핑 패턴
+    pattern_strength = _build_pattern_map(all_mappings, our_products)
+
+    items = []
+    for row in unmapped[:limit * 3]:   # 여유분 처리 후 상위 limit개
+        p_price = row.get("price_sale")
+        d_type  = row.get("delivery_type") or "직배송"
+        fee     = _get_fee(d_type, platform, seller_name)
+        net_price = round(float(p_price) * (1.0 - fee) / 1.1, 0) if p_price else None
+
+        # 우리 상품별 점수 계산
+        scored = []
+        for p in our_products:
+            code = p["product_code"]
+            bp   = base_prices.get(code, {})
+            our_sale = bp.get("avg_sale_price")
+            buy_p    = bp.get("avg_buy_price")
+            pat_bonus = min(1.0, pattern_strength.get(code, 0) / 3.0)
+            sc = _score_mapping(
+                row.get("product_name", ""), p_price,
+                p.get("product_name", ""), our_sale, buy_p,
+                d_type, platform, seller_name, pat_bonus
+            )
+            if sc >= 20.0:  # 최소 임계값
+                scored.append({
+                    "our_product_code": code,
+                    "product_name":     p.get("product_name", code),
+                    "category":         p.get("category", ""),
+                    "unit":             p.get("unit", ""),
+                    "score":            sc,
+                    "our_sale_price":   int(our_sale) if our_sale else None,
+                    "buy_price":        int(buy_p)    if buy_p    else None,
+                    "net_comp_price":   int(net_price) if net_price else None,
+                    "prev_sales_amt":   int(price_totals.get(code, {}).get("prev_sales_amt") or 0),
+                })
+        scored.sort(key=lambda x: x["score"], reverse=True)
+        top3 = scored[:3]
+
+        if not top3:
+            continue  # 제안 없는 상품은 제외
+
+        items.append({
+            "product_key":   row["product_key"],
+            "product_name":  row.get("product_name", ""),
+            "spec":          row.get("spec", ""),
+            "price_sale":    int(p_price) if p_price else None,
+            "net_price":     int(net_price) if net_price else None,
+            "delivery_type": d_type,
+            "fee_pct":       round(fee * 100, 1),
+            "suggestions":   top3,
+        })
+
+    # 신뢰도 높은 순 정렬
+    items.sort(key=lambda x: x["suggestions"][0]["score"] if x["suggestions"] else 0, reverse=True)
+    return JSONResponse({"items": items[:limit], "total_unmapped": len(unmapped)})
+
+
+# ── API: 유사 플랫폼 상품 조회 (팝업용, 전체 셀러) ─────────────────────────
+
+@router.get("/api/mapping/similar-platform")
+async def api_mapping_similar_platform(
+    request: Request,
+    product_name: str = "",
+    platform: str = "",
+    exclude_key: str = "",
+):
+    """특정 플랫폼 상품명과 유사한 전체 셀러 플랫폼 상품 반환 (매핑 팝업용).
+    - 동일 product_name 포함 상품을 전 셀러에서 조회
+    - 이미 매핑된 product_key는 is_mapped=True 표시
+    """
+    _require_pm_access(request)
+    if not product_name:
+        return JSONResponse({"data": []})
+
+    # 핵심 토큰 추출 (2글자 이상)
+    tokens = [t for t in _tokenize(product_name) if len(t) >= 2]
+    if not tokens:
+        return JSONResponse({"data": []})
+
+    # 가장 긴 토큰 2개로 LIKE 조건 (너무 많으면 느림)
+    top_tokens = sorted(tokens, key=len, reverse=True)[:2]
+    like_parts = [f"p.product_name LIKE '%{t.replace(chr(39), chr(39)*2)}%'" for t in top_tokens]
+    like_clause = " AND ".join(like_parts)
+
+    # 플랫폼 필터 옵션
+    plat_filter = f"AND p.platform = '{platform}'" if platform else ""
+
+    try:
+        # 2단계 조회 (플랫폼별 최신일)
+        max_rows = _q(f"SELECT platform, MAX(crawl_date) AS max_date FROM {T_SILVER} GROUP BY platform") or []
+        if not max_rows:
+            return JSONResponse({"data": []})
+        date_clauses = " OR ".join(
+            f"(p.platform='{r['platform']}' AND p.crawl_date='{r['max_date']}')"
+            for r in max_rows if r.get("platform") and r.get("max_date")
+        )
+        rows = _q(f"""
+            SELECT p.product_key, p.platform, p.platform_seller_name,
+                   p.product_name, p.spec, p.price_sale, p.delivery_type, p.is_free_delivery
+            FROM {T_SILVER} p
+            WHERE ({date_clauses})
+              AND ({like_clause})
+              {plat_filter}
+            ORDER BY p.platform, p.platform_seller_name, p.price_sale
+            LIMIT 200
+        """) or []
+    except Exception as e:
+        return JSONResponse({"data": [], "error": str(e)})
+
+    # 매핑 여부 표시
+    all_mappings = portal_db.pm_list_all_mappings("ALL")
+    mapped_keys = {m["product_key"] for m in all_mappings}
+
+    result = []
+    for r in _serialize_rows(rows):
+        p_price   = r.get("price_sale")
+        d_type    = r.get("delivery_type") or "직배송"
+        _sn       = r.get("platform_seller_name", "")
+        _pf       = r.get("platform", "")
+        fee       = _get_fee(d_type, _pf, _sn)
+        net_price = round(float(p_price) * (1.0 - fee) / 1.1, 0) if p_price else None
+        r["net_price"]   = int(net_price) if net_price else None
+        r["fee_pct"]     = round(fee * 100, 1)
+        r["is_mapped"]   = r["product_key"] in mapped_keys
+        r["is_excluded"] = (r["product_key"] == exclude_key)
+        result.append(r)
+
+    return JSONResponse({"data": result})
+
+
+# ── API: 일괄 매핑 추가 (팝업 확정) ─────────────────────────────────────────
+
+@router.post("/api/mapping/bulk-add")
+async def api_mapping_bulk_add(request: Request):
+    """팝업에서 선택한 여러 플랫폼 상품을 한 번에 매핑 등록.
+
+    body: {
+      our_product_code: str,
+      plant: str,
+      tag: str,          -- 'normal' | 'substitute' | 'multiple'
+      multiplier: float, -- 배수 (직접 입력)
+      items: [{
+        product_key, platform, platform_seller_id, platform_product_id,
+        product_name, seller_name
+      }]
+    }
+    """
+    _require_pm_access(request)
+    session = _get_session(request)
+    body = await request.json()
+
+    our_product_code = body.get("our_product_code", "").strip()
+    plant            = body.get("plant", "ALL").strip()
+    tag              = body.get("tag", "normal")
+    try:
+        multiplier = float(body.get("multiplier", 1.0))
+        if multiplier <= 0:
+            multiplier = 1.0
+    except (TypeError, ValueError):
+        multiplier = 1.0
+    items = body.get("items", [])
+
+    if not our_product_code or not items:
+        return JSONResponse({"ok": False, "error": "필수값 누락"}, status_code=400)
+
+    results = []
+    for item in items:
+        pk = (item.get("product_key") or "").strip()
+        pf = (item.get("platform") or "").strip()
+        if not pk or not pf:
+            continue
+        try:
+            mid = portal_db.pm_add_mapping(
+                our_product_code=our_product_code,
+                plant=plant,
+                product_key=pk,
+                platform=pf,
+                platform_seller_id=str(item.get("platform_seller_id") or ""),
+                platform_product_id=str(item.get("platform_product_id") or ""),
+                product_name=item.get("product_name", ""),
+                seller_name=item.get("seller_name", ""),
+                created_by=session.get("emp_code", ""),
+                tag=tag,
+                multiplier=multiplier,
+            )
+            results.append({"product_key": pk, "mapping_id": mid, "ok": True})
+        except Exception as e:
+            results.append({"product_key": pk, "ok": False, "error": str(e)})
+
+    ok_count = sum(1 for r in results if r["ok"])
+    return JSONResponse({"ok": True, "added": ok_count, "results": results})
 
 
 

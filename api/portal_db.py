@@ -214,6 +214,8 @@ def init_db() -> None:
                 platform_product_id TEXT,
                 product_name        TEXT,
                 seller_name         TEXT,
+                tag                 TEXT NOT NULL DEFAULT 'normal',
+                multiplier          REAL NOT NULL DEFAULT 1.0,
                 created_by          TEXT,
                 created_at          TEXT DEFAULT (datetime('now','localtime')),
                 is_active           INTEGER DEFAULT 1
@@ -387,6 +389,16 @@ def init_db() -> None:
                 (1725,'에그랑에프엔비','direct',1),
                 (3384,'하늘농원','direct',1);
         """)
+        # price_map_product_link: tag/multiplier 컬럼 마이그레이션
+        for col, typedef in [
+            ("tag",        "TEXT NOT NULL DEFAULT 'normal'"),
+            ("multiplier", "REAL NOT NULL DEFAULT 1.0"),
+        ]:
+            try:
+                conn.execute(f"ALTER TABLE price_map_product_link ADD COLUMN {col} {typedef}")
+            except Exception:
+                pass
+
         # announcements 데이터 → notice_posts 자동 이관 (중복 방지)
         try:
             migrated = conn.execute("SELECT COUNT(*) FROM notice_posts").fetchone()[0]
@@ -1072,8 +1084,16 @@ def pm_list_all_mappings(plant: str) -> list[dict]:
 
 def pm_add_mapping(our_product_code: str, plant: str, product_key: str,
                    platform: str, platform_seller_id: str, platform_product_id: str,
-                   product_name: str, seller_name: str, created_by: str) -> int:
+                   product_name: str, seller_name: str, created_by: str,
+                   tag: str = 'normal', multiplier: float = 1.0) -> int:
     """매핑 즉시 추가 (ADD — 승인 불필요). 이미 존재하면 재활성화."""
+    tag = tag if tag in ('normal', 'substitute', 'multiple') else 'normal'
+    try:
+        multiplier = float(multiplier)
+        if multiplier <= 0:
+            multiplier = 1.0
+    except (TypeError, ValueError):
+        multiplier = 1.0
     init_db()
     with _connect() as conn:
         existing = conn.execute(
@@ -1083,19 +1103,22 @@ def pm_add_mapping(our_product_code: str, plant: str, product_key: str,
         ).fetchone()
         if existing:
             conn.execute(
-                "UPDATE price_map_product_link SET is_active=1, created_by=?, created_at=datetime('now','localtime') WHERE mapping_id=?",
-                (created_by, existing["mapping_id"]),
+                """UPDATE price_map_product_link
+                   SET is_active=1, created_by=?, created_at=datetime('now','localtime'),
+                       tag=?, multiplier=?
+                   WHERE mapping_id=?""",
+                (created_by, tag, multiplier, existing["mapping_id"]),
             )
             return existing["mapping_id"]
         cur = conn.execute(
             """INSERT INTO price_map_product_link
                (our_product_code, plant, product_key, platform,
                 platform_seller_id, platform_product_id,
-                product_name, seller_name, created_by)
-               VALUES (?,?,?,?,?,?,?,?,?)""",
+                product_name, seller_name, tag, multiplier, created_by)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
             (our_product_code, plant, product_key, platform,
              platform_seller_id, platform_product_id,
-             product_name, seller_name, created_by),
+             product_name, seller_name, tag, multiplier, created_by),
         )
         return cur.lastrowid
 
