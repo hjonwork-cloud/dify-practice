@@ -1,6 +1,7 @@
-{% extends "base_portal.html" %}
+{% extends "pm_base.html" %}
 {% block title %}AI 매핑 워크스페이스{% endblock %}
-{% block content %}
+{% block page_title %}🤖 AI 매핑 워크스페이스{% endblock %}
+{% block head %}
 <style>
 .ws-header { background:#fff; border-bottom:1px solid #e5e7eb; padding:16px 24px; }
 .ws-selector { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
@@ -115,6 +116,8 @@
 .tag-badge.substitute { background:#fef3c7; color:#b45309; }
 .tag-badge.multiple   { background:#ede9fe; color:#7c3aed; }
 </style>
+{% endblock %}
+{% block content %}
 
 <div class="ws-header">
   <div class="ws-selector">

@@ -1809,7 +1809,7 @@ async def pm_mapping_workspace(
     if plant not in PLANTS:
         plant = "ALL"
     return _render(request, "pm_mapping_workspace.html",
-                   active_page="mapping",
+                   active_page="mapping-workspace",
                    platform=platform,
                    seller_name=seller_name,
                    seller_id=seller_id,
