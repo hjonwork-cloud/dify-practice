@@ -1902,6 +1902,7 @@ def _tokenize(name: str) -> set[str]:
                     tokens.add(korean[i:i+2])
                 for i in range(len(korean) - 2):
                     tokens.add(korean[i:i+3])
+    return tokens
 
 
 def _score_mapping(platform_name: str, platform_price: float | None,
