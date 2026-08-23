@@ -1952,6 +1952,53 @@ def _build_pattern_map(all_mappings: list[dict], our_products: list[dict]) -> di
 
 # ── API: AI 매핑 제안 ─────────────────────────────────────────────────────
 
+@router.get("/api/mapping/ai-debug")
+async def api_mapping_ai_debug(
+    request: Request,
+    platform: str = "",
+    seller_name: str = "",
+    plant: str = "ALL",
+):
+    """AI 매핑 진단용 엔드포인트: 데이터 건수 및 샘플 점수 반환."""
+    _require_pm_access(request)
+    safe_seller = seller_name.replace("'", "''")
+    try:
+        plat_count = _q(f"""
+            SELECT COUNT(*) AS cnt FROM {T_SILVER}
+            WHERE platform='{platform}' AND platform_seller_name='{safe_seller}'
+        """) or []
+        plat_sample = _q(f"""
+            SELECT product_key, product_name, price_sale, delivery_type FROM {T_SILVER}
+            WHERE platform='{platform}' AND platform_seller_name='{safe_seller}'
+            LIMIT 3
+        """) or []
+    except Exception as e:
+        return JSONResponse({"error": str(e)})
+    all_mappings = portal_db.pm_list_all_mappings(plant)
+    mapped_keys = {m["product_key"] for m in all_mappings if m.get("is_active", 1)}
+    our_products = _get_our_products(plant)
+    base_prices  = {r["product_code"]: r for r in _get_base_prices(plant)}
+    sample_scores = []
+    if plat_sample and our_products:
+        p_row = plat_sample[0]
+        for op in our_products[:5]:
+            bp = base_prices.get(op["product_code"], {})
+            sc = _score_mapping(
+                p_row.get("product_name",""), p_row.get("price_sale"),
+                op.get("product_name",""), bp.get("avg_sale_price"), bp.get("avg_buy_price"),
+                p_row.get("delivery_type","직배송"), platform, seller_name
+            )
+            sample_scores.append({"plat": p_row["product_name"], "our": op["product_name"], "score": sc})
+    return JSONResponse({
+        "plat_total_rows":    plat_count[0]["cnt"] if plat_count else 0,
+        "plat_sample":        plat_sample,
+        "mapped_count":       len(mapped_keys),
+        "our_products_count": len(our_products),
+        "base_prices_count":  len(base_prices),
+        "sample_scores":      sample_scores,
+    })
+
+
 @router.get("/api/mapping/ai-suggest")
 async def api_mapping_ai_suggest(
     request: Request,
@@ -1962,35 +2009,48 @@ async def api_mapping_ai_suggest(
     limit: int = 100,
 ):
     """선택 셀러의 미매핑 플랫폼 SKU에 대해 우리 상품 Top3 AI 제안 반환.
-
-    반환:
-      items: [{
-        product_key, product_name, spec, price_sale, net_price,
-        delivery_type, is_mapped,
-        suggestions: [{our_product_code, product_name, score,
-                       our_sale_price, buy_price, net_comp_price}]
-      }]
+    seller_name='__ALL__' 이면 해당 플랫폼 전체 셀러를 대상으로 분석.
     """
     _require_pm_access(request)
     if not platform or not seller_name:
         return JSONResponse({"items": [], "error": "platform/seller_name 필요"})
 
+    all_sellers = (seller_name == "__ALL__")
     safe_seller = seller_name.replace("'", "''")
 
-    # 셀러의 최신 플랫폼 SKU 전체 조회
+    # 플랫폼 SKU 조회 (전체 셀러 or 특정 셀러)
     try:
-        plat_rows = _q(f"""
-            SELECT p.product_key, p.product_name, p.spec,
-                   p.price_sale, p.price_original, p.delivery_type, p.is_free_delivery
-            FROM {T_SILVER} p
-            INNER JOIN (
-                SELECT MAX(crawl_date) AS max_date
-                FROM {T_SILVER}
-                WHERE platform = '{platform}' AND platform_seller_name = '{safe_seller}'
-            ) md ON p.crawl_date = md.max_date
-            WHERE p.platform = '{platform}' AND p.platform_seller_name = '{safe_seller}'
-            ORDER BY p.product_name
-        """) or []
+        if all_sellers:
+            plat_rows = _q(f"""
+                SELECT p.product_key, p.product_name, p.spec,
+                       p.price_sale, p.price_original, p.delivery_type,
+                       p.is_free_delivery, p.platform_seller_name
+                FROM {T_SILVER} p
+                INNER JOIN (
+                    SELECT platform_seller_name, MAX(crawl_date) AS max_date
+                    FROM {T_SILVER}
+                    WHERE platform = '{platform}'
+                    GROUP BY platform_seller_name
+                ) md ON p.platform_seller_name = md.platform_seller_name
+                      AND p.crawl_date = md.max_date
+                WHERE p.platform = '{platform}'
+                ORDER BY p.product_name
+                LIMIT 5000
+            """) or []
+        else:
+            plat_rows = _q(f"""
+                SELECT p.product_key, p.product_name, p.spec,
+                       p.price_sale, p.price_original, p.delivery_type,
+                       p.is_free_delivery, p.platform_seller_name
+                FROM {T_SILVER} p
+                INNER JOIN (
+                    SELECT MAX(crawl_date) AS max_date
+                    FROM {T_SILVER}
+                    WHERE platform = '{platform}' AND platform_seller_name = '{safe_seller}'
+                ) md ON p.crawl_date = md.max_date
+                WHERE p.platform = '{platform}' AND p.platform_seller_name = '{safe_seller}'
+                ORDER BY p.product_name
+            """) or []
     except Exception as e:
         return JSONResponse({"items": [], "error": str(e)})
 
@@ -2010,10 +2070,12 @@ async def api_mapping_ai_suggest(
     pattern_strength = _build_pattern_map(all_mappings, our_products)
 
     items = []
-    for row in unmapped[:limit * 3]:   # 여유분 처리 후 상위 limit개
+    scan_count = min(len(unmapped), limit * 5)  # 최대 limit*5 스캔
+    for row in unmapped[:scan_count]:
+        sname = row.get("platform_seller_name") or ("" if all_sellers else seller_name)
         p_price = row.get("price_sale")
         d_type  = row.get("delivery_type") or "직배송"
-        fee     = _get_fee(d_type, platform, seller_name)
+        fee     = _get_fee(d_type, platform, sname)
         net_price = round(float(p_price) * (1.0 - fee) / 1.1, 0) if p_price else None
 
         # 우리 상품별 점수 계산
@@ -2027,9 +2089,9 @@ async def api_mapping_ai_suggest(
             sc = _score_mapping(
                 row.get("product_name", ""), p_price,
                 p.get("product_name", ""), our_sale, buy_p,
-                d_type, platform, seller_name, pat_bonus
+                d_type, platform, sname, pat_bonus
             )
-            if sc >= 5.0:  # 최소 임계값
+            if sc >= 5.0:
                 scored.append({
                     "our_product_code": code,
                     "product_name":     p.get("product_name", code),
@@ -2044,22 +2106,22 @@ async def api_mapping_ai_suggest(
         scored.sort(key=lambda x: x["score"], reverse=True)
         top3 = scored[:3]
 
-        if not top3:
-            continue  # 제안 없는 상품은 제외
-
+        # 제안 없는 상품도 포함 (has_suggestions=False)
         items.append({
-            "product_key":   row["product_key"],
-            "product_name":  row.get("product_name", ""),
-            "spec":          row.get("spec", ""),
-            "price_sale":    int(p_price) if p_price else None,
-            "net_price":     int(net_price) if net_price else None,
-            "delivery_type": d_type,
-            "fee_pct":       round(fee * 100, 1),
-            "suggestions":   top3,
+            "product_key":    row["product_key"],
+            "product_name":   row.get("product_name", ""),
+            "spec":           row.get("spec", ""),
+            "price_sale":     int(p_price) if p_price else None,
+            "net_price":      int(net_price) if net_price else None,
+            "delivery_type":  d_type,
+            "fee_pct":        round(fee * 100, 1),
+            "seller_name":    sname,
+            "suggestions":    top3,
+            "has_suggestions": len(top3) > 0,
         })
 
-    # 신뢰도 높은 순 정렬
-    items.sort(key=lambda x: x["suggestions"][0]["score"] if x["suggestions"] else 0, reverse=True)
+    # 신뢰도 높은 순 정렬 (제안 없는 항목은 뒤로)
+    items.sort(key=lambda x: x["suggestions"][0]["score"] if x["suggestions"] else -1, reverse=True)
     return JSONResponse({"items": items[:limit], "total_unmapped": len(unmapped)})
 
 

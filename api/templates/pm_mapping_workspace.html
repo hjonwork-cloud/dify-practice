@@ -137,6 +137,7 @@
       {% endfor %}
     </select>
     <button class="btn-ai" id="btnAnalyze" onclick="runAISuggest()" disabled>🤖 AI 매핑 분석</button>
+    <button class="btn-debug" id="btnDebug" onclick="runDebug()" style="display:none;padding:8px 14px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;border:1px solid #d1d5db;background:#f9fafb;color:#374151">🔍 진단</button>
   </div>
 </div>
 
@@ -170,6 +171,11 @@
       <div class="modal-right">
         <div class="modal-section-title">우리 상품</div>
         <div id="modalOurCandidate"></div>
+        <!-- AI 제안 없는 경우: 직접 검색 폼 -->
+        <div id="ourSearchArea" style="display:none">
+          <input type="text" class="search-box" id="ourSearchInput" placeholder="우리 상품명 or 코드 검색..." oninput="searchOurProducts()" style="margin-top:4px">
+          <div id="ourSearchResults" style="max-height:200px;overflow-y:auto"></div>
+        </div>
         <hr style="border:none;border-top:1px solid #e5e7eb;margin:14px 0">
         <div class="modal-section-title">태그</div>
         <div class="tag-row">
@@ -234,6 +240,16 @@ async function loadSellers(platform) {
     const r = await fetch(`/portal/price-monitor/api/sellers-from-silver?platform=${encodeURIComponent(platform)}`);
     const d = await r.json();
     sel.innerHTML = '<option value="">-- 셀러 선택 --</option>';
+    // 전체 셀러 옵션
+    const totalSku = (d.sellers||[]).reduce((s,x)=>s+x.sku_count,0);
+    const totalUnmapped = (d.sellers||[]).reduce((s,x)=>s+x.unmapped,0);
+    const allOpt = document.createElement('option');
+    allOpt.value = '__ALL__';
+    allOpt.dataset.name = '__ALL__';
+    allOpt.textContent = `★ 전체 셀러 (전체 ${totalSku}개 | 미매핑 ${totalUnmapped}개)`;
+    sel.appendChild(allOpt);
+    // 구분선 역할의 비활성 옵션
+    const sep = document.createElement('option'); sep.disabled = true; sep.textContent = '──────────────────'; sel.appendChild(sep);
     (d.sellers || []).forEach(s => {
       const o = document.createElement('option');
       o.value = s.seller_name;
@@ -264,11 +280,34 @@ document.getElementById('selSeller').addEventListener('change', function() {
   currentSeller   = opt.dataset.name || opt.value || opt.text;
   currentSellerId = '';
   document.getElementById('btnAnalyze').disabled = !this.value;
+  // 진단 버튼은 특정 셀러 선택 시만 표시 (전체는 너무 느림)
+  document.getElementById('btnDebug').style.display =
+    (this.value && this.value !== '__ALL__') ? 'inline-block' : 'none';
 });
 
 document.getElementById('selPlant').addEventListener('change', function() {
   currentPlant = this.value;
 });
+
+// ══ 진단 실행 ══
+async function runDebug() {
+  const url = `/portal/price-monitor/api/mapping/ai-debug?platform=${encodeURIComponent(currentPlatform)}&seller_name=${encodeURIComponent(currentSeller)}&plant=${currentPlant}`;
+  try {
+    const r = await fetch(url);
+    const d = await r.json();
+    let msg = `[진단 결과]\n`
+      + `플랫폼 전체 행: ${d.plat_total_rows}\n`
+      + `이미 매핑된 수: ${d.mapped_count}\n`
+      + `우리 상품 수: ${d.our_products_count}\n`
+      + `기준가 보유 상품: ${d.base_prices_count}\n\n`
+      + `[샘플 점수 (플랫폼상품 vs 우리상품)]\n`;
+    (d.sample_scores||[]).forEach(s => {
+      msg += `  "${s.plat}" vs "${s.our}" → ${s.score}점\n`;
+    });
+    if (d.error) msg += `\n오류: ${d.error}`;
+    alert(msg);
+  } catch(e) { alert('진단 실패: ' + e.message); }
+}
 
 // ══ AI 분석 실행 ══
 async function runAISuggest() {
@@ -294,21 +333,23 @@ async function runAISuggest() {
 // ══ 리스트 렌더 ══
 function renderSuggestList(items, totalUnmapped) {
   if (!items.length) {
-    document.getElementById('wsContent').innerHTML = '<div class="ws-empty">AI 제안 가능한 미매핑 상품이 없습니다.<br><small style="color:#9ca3af">미매핑 상품이 있더라도 유사한 우리 상품이 없으면 표시되지 않습니다.</small></div>';
+    document.getElementById('wsContent').innerHTML = '<div class="ws-empty">AI 제안 가능한 미매핑 상품이 없습니다.<br><small style="color:#9ca3af">🔍 진단 버튼으로 데이터를 확인하거나, 전체 셀러를 선택해 보세요.</small></div>';
     return;
   }
 
   // KPI
-  const high = items.filter(i => i.suggestions[0]?.score >= 80).length;
-  const mid  = items.filter(i => { const s=i.suggestions[0]?.score||0; return s>=50 && s<80; }).length;
+  const hasSug = items.filter(i => i.has_suggestions);
+  const high = hasSug.filter(i => i.suggestions[0]?.score >= 80).length;
+  const mid  = hasSug.filter(i => { const s=i.suggestions[0]?.score||0; return s>=50 && s<80; }).length;
+  const noSug = items.filter(i => !i.has_suggestions).length;
   document.getElementById('kpiTotal').textContent = totalUnmapped.toLocaleString();
   document.getElementById('kpiShown').textContent = items.length.toLocaleString();
   document.getElementById('kpiHigh').textContent  = high.toLocaleString();
   document.getElementById('kpiMid').textContent   = mid.toLocaleString();
   document.getElementById('kpiBar').style.display = 'flex';
 
-  const platLabel = currentPlatform === 'baemin' ? '배민상회' : '식봄';
-  const platClass = currentPlatform === 'baemin' ? 'badge-baemin' : 'badge-food';
+  const platLabel = p => p === 'baemin' ? '배민상회' : '식봄';
+  const platClass = p => p === 'baemin' ? 'badge-baemin' : 'badge-food';
 
   let html = '<div class="suggest-list">';
   items.forEach((item, idx) => {
@@ -317,50 +358,61 @@ function renderSuggestList(items, totalUnmapped) {
     const scoreClass = score >= 80 ? 'high' : score >= 50 ? 'mid' : 'low';
     const netDisp = item.net_price ? item.net_price.toLocaleString()+'원' : '-';
     const saleDisp = item.price_sale ? item.price_sale.toLocaleString()+'원' : '-';
+    const sellerLabel = (currentSeller === '__ALL__' && item.seller_name) ? `<span style="color:#7c3aed;font-weight:600">${escHtml(item.seller_name)}</span>` : escHtml(currentSeller);
+    const noSugBadge = !item.has_suggestions ? '<span style="font-size:11px;background:#fef3c7;color:#b45309;padding:2px 8px;border-radius:10px;font-weight:600">제안없음</span>' : '';
 
     html += `<div class="suggest-card" data-idx="${idx}">
       <div class="suggest-card-header">
-        <span class="plat-badge ${platClass}">${platLabel}</span>
+        <span class="plat-badge ${platClass(currentPlatform)}">${platLabel(currentPlatform)}</span>
         <div class="plat-info">
-          <div class="plat-name">${escHtml(item.product_name)}${item.spec ? ' <small style="color:#9ca3af">'+escHtml(item.spec)+'</small>' : ''}</div>
+          <div class="plat-name">${escHtml(item.product_name)}${item.spec ? ' <small style="color:#9ca3af">'+escHtml(item.spec)+'</small>' : ''} ${noSugBadge}</div>
           <div class="plat-meta">
-            <span>${escHtml(currentSeller)}</span>
+            <span>${sellerLabel}</span>
             <span class="price-main">${saleDisp}</span>
             <span class="price-net">실판매가 ${netDisp} <small>(${item.delivery_type}, 수수료 ${item.fee_pct}%+VAT)</small></span>
           </div>
         </div>
         <div class="confidence">
-          <div class="conf-score ${scoreClass}">${score.toFixed(0)}점</div>
+          <div class="conf-score ${scoreClass}">${item.has_suggestions ? score.toFixed(0)+'점' : '-'}</div>
           <div style="font-size:11px;color:#9ca3af">신뢰도</div>
         </div>
         <button class="btn-map-open" onclick="openMappingModal(${idx})">매핑하기 →</button>
       </div>
       <div class="suggest-card-body">`;
 
-    item.suggestions.forEach((s, si) => {
-      const barPct = Math.round(s.score);
-      const barColor = s.score>=80?'#059669':s.score>=50?'#d97706':'#9ca3af';
-      const saleV  = s.our_sale_price ? s.our_sale_price.toLocaleString()+'원' : '-';
-      const buyV   = s.buy_price      ? s.buy_price.toLocaleString()+'원'      : '-';
-      const salesV = s.prev_sales_amt > 0 ? Math.round(s.prev_sales_amt/10000)+'만원' : '-';
-      html += `<div class="sug-item" onclick="selectSuggest(${idx},${si})" id="sug-${idx}-${si}">
-        <span class="sug-rank">#${si+1}</span>
-        <div class="sug-code">${escHtml(s.our_product_code)}</div>
-        <div class="sug-name">${escHtml(s.product_name)}</div>
-        <div class="sug-prices">
-          <span><span class="lbl">공급가</span> <span class="val sale">${saleV}</span></span>
-          <span><span class="lbl">구매가</span> <span class="val">${buyV}</span></span>
-          <span><span class="lbl">전월매출</span> <span class="val">${salesV}</span></span>
-        </div>
-        <div class="sug-score-bar"><div class="sug-score-fill" style="width:${barPct}%;background:${barColor}"></div></div>
-      </div>`;
-    });
+    if (item.has_suggestions) {
+      item.suggestions.forEach((s, si) => {
+        const barPct = Math.round(s.score);
+        const barColor = s.score>=80?'#059669':s.score>=50?'#d97706':'#9ca3af';
+        const saleV  = s.our_sale_price ? s.our_sale_price.toLocaleString()+'원' : '-';
+        const buyV   = s.buy_price      ? s.buy_price.toLocaleString()+'원'      : '-';
+        const salesV = s.prev_sales_amt > 0 ? Math.round(s.prev_sales_amt/10000)+'만원' : '-';
+        html += `<div class="sug-item" onclick="selectSuggest(${idx},${si})" id="sug-${idx}-${si}">
+          <span class="sug-rank">#${si+1}</span>
+          <div class="sug-code">${escHtml(s.our_product_code)}</div>
+          <div class="sug-name">${escHtml(s.product_name)}</div>
+          <div class="sug-prices">
+            <span><span class="lbl">공급가</span> <span class="val sale">${saleV}</span></span>
+            <span><span class="lbl">구매가</span> <span class="val">${buyV}</span></span>
+            <span><span class="lbl">전월매출</span> <span class="val">${salesV}</span></span>
+          </div>
+          <div class="sug-score-bar"><div class="sug-score-fill" style="width:${barPct}%;background:${barColor}"></div></div>
+        </div>`;
+      });
+    } else {
+      html += `<div style="padding:12px;color:#9ca3af;font-size:13px">유사한 우리 상품을 찾지 못했습니다. 매핑하기 버튼에서 직접 선택할 수 있습니다.</div>`;
+    }
 
     html += `</div></div>`;
   });
   html += '</div>';
+  if (noSug > 0) html += `<div style="padding:8px 24px 20px;font-size:12px;color:#9ca3af">※ 제안없음 ${noSug}개는 유사도가 낮은 항목으로, 팝업에서 직접 우리 상품을 선택해 매핑할 수 있습니다.</div>`;
   document.getElementById('wsContent').innerHTML = html;
 }
+
+// 우리 상품 직접 검색 (제안없는 상품 팝업용)
+let _ourSearchTimer = null;
+async function searchOurProducts() {\n  const q = (document.getElementById('ourSearchInput').value || '').trim();\n  clearTimeout(_ourSearchTimer);\n  if (q.length < 1) { document.getElementById('ourSearchResults').innerHTML = ''; return; }\n  _ourSearchTimer = setTimeout(async () => {\n    try {\n      const r = await fetch(`/portal/price-monitor/api/our-products?plant=${currentPlant}&keyword=${encodeURIComponent(q)}`);\n      const d = await r.json();\n      const products = d.data || [];\n      const res = document.getElementById('ourSearchResults');\n      if (!products.length) { res.innerHTML = '<p style=\"font-size:12px;color:#9ca3af;padding:8px\">결과 없음</p>'; return; }\n      let html = '';\n      products.slice(0, 20).forEach(p => {\n        const encoded = encodeURIComponent(JSON.stringify({product_code:p.product_code,product_name:p.product_name||p.product_code}));\n        html += `<div onclick=\"selectOurProductEncoded('${encoded}')\" style=\"padding:8px 10px;border-radius:6px;border:1px solid #e5e7eb;margin-bottom:6px;cursor:pointer;font-size:13px;background:#fff\" onmouseover=\"this.style.borderColor='#4f46e5'\" onmouseout=\"this.style.borderColor='#e5e7eb'\">\n          <span style=\"font-weight:700\">${escHtml(p.product_name||p.product_code)}</span>\n          <span style=\"color:#9ca3af;margin-left:8px\">${escHtml(p.product_code)}</span>\n        </div>`;\n      });\n      res.innerHTML = html;\n    } catch(e) { console.warn(e); }\n  }, 300);\n}\nfunction selectOurProductEncoded(encoded) {\n  const p = JSON.parse(decodeURIComponent(encoded));\n  modalOurItem = { our_product_code: p.product_code, product_name: p.product_name, our_sale_price: null, buy_price: null, prev_sales_amt: 0, score: 0 };\n  renderOurCandidate(modalOurItem);\n  document.getElementById('ourSearchArea').style.display = 'none';\n  updateConfirmBtn();\n}
 
 // 카드 내 제안 선택 하이라이트
 function selectSuggest(cardIdx, sugIdx) {
@@ -384,10 +436,12 @@ async function openMappingModal(cardIdx) {
   document.getElementById('mappingModal').classList.add('open');
   document.getElementById('modalTitle').textContent = `매핑 확정 — ${item.product_name}`;
 
-  // 우리 상품 후보 렌더 (top1)
-  const top = item.suggestions[0] || {};
+  // 우리 상품 후보 렌더 (top1, 없으면 직접검색 모드)
+  const top = item.suggestions[0] || null;
   modalOurItem = top;
   renderOurCandidate(top);
+  // 우리 상품 직접 검색 입력창 표시 여부
+  document.getElementById('ourSearchArea').style.display = top ? 'none' : 'block';
 
   // 유사 플랫폼 상품 로드 (전체 셀러)
   document.getElementById('modalPlatList').innerHTML = '<div style="text-align:center;padding:20px"><div class="spinner"></div></div>';
