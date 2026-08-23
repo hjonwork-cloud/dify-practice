@@ -1939,9 +1939,10 @@ def _score_mapping(platform_name: str, platform_price: float | None,
     score += min(15.0, pattern_bonus * 15.0)
 
     # 4. 이름 길이 패널티: 너무 짧은 토큰만 겹치면 신뢰도 낮춤
-    common = pt & ot
-    short_ratio = sum(1 for t in common if len(t) <= 2) / max(len(common), 1)
-    score -= short_ratio * 5.0
+    common = (pt & ot) if (pt and ot) else set()
+    if common:
+        short_ratio = sum(1 for t in common if len(t) <= 2) / max(len(common), 1)
+        score -= short_ratio * 5.0
 
     return round(max(0.0, min(100.0, score)), 1)
 
