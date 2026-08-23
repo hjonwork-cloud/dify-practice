@@ -638,6 +638,45 @@ async def api_debug_pub(request: Request):
         result["check_175301"] = rows
     except Exception as e:
         result["check_175301_error"] = str(e)
+    # 414624 직접 조회 - 배치/플랜트/자재그룹 확인
+    try:
+        rows = _q(f"""
+            SELECT
+                z.`상품코드`,
+                z.`플랜트`,
+                z.`배치`,
+                z.`사용보류`,
+                m.`상품명`,
+                m.`자재그룹`,
+                m.`자재그룹명`
+            FROM {T_ZSDR} z
+            LEFT JOIN {T_ZMM60} m ON z.`상품코드` = m.`상품코드`
+            WHERE z.`상품코드` = '414624'
+        """)
+        result["check_414624"] = rows
+    except Exception as e:
+        result["check_414624_error"] = str(e)
+    # 414624가 필터에 걸리는지 시뮬레이션
+    try:
+        rows = _q(f"""
+            SELECT
+                z.`상품코드`,
+                z.`플랜트`,
+                z.`배치`,
+                COALESCE(m.`자재그룹`, '') AS 자재그룹,
+                CASE
+                    WHEN z.`플랜트` NOT IN ('4120','4123','4121') THEN '플랜트 제외'
+                    WHEN z.`배치` NOT IN ('01','03')              THEN '배치 제외'
+                    WHEN COALESCE(m.`자재그룹`,'') = '5140'       THEN '자재그룹5140 제외'
+                    ELSE '통과 가능'
+                END AS 필터결과
+            FROM {T_ZSDR} z
+            LEFT JOIN {T_ZMM60} m ON z.`상품코드` = m.`상품코드`
+            WHERE z.`상품코드` = '414624'
+        """)
+        result["check_414624_filter"] = rows
+    except Exception as e:
+        result["check_414624_filter_error"] = str(e)
     # 4120 플랜트 전체 건수
     try:
         rows = _q(f"SELECT COUNT(*) AS cnt FROM {T_ZSDR} WHERE `플랜트`='4120'")
