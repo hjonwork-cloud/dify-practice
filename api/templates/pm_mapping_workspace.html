@@ -634,10 +634,13 @@ function renderModalPlatList() {
     const netDisp   = r.net_price ? r.net_price.toLocaleString()+'원' : '-';
     const saleDisp  = r.price_sale ? r.price_sale.toLocaleString()+'원' : '-';
     const mappedTxt = r.is_mapped ? '<span class="already-mapped">✅ 이미 매핑됨</span>' : '';
+    const sim       = r.similarity_score ?? 0;
+    const simColor  = sim >= 70 ? '#059669' : sim >= 40 ? '#d97706' : '#9ca3af';
+    const simBadge  = `<span style="font-size:11px;font-weight:700;color:${simColor};margin-left:4px">${sim.toFixed(0)}%</span>`;
     html += `<label class="plat-check-item ${checked?'checked':''}" data-key="${escHtml(r.product_key)}">
       <input type="checkbox" ${checked?'checked':''} ${r.is_mapped?'disabled':''} onchange="togglePlatCheck('${escHtml(r.product_key)}', this.checked)">
       <div style="flex:1;min-width:0">
-        <div class="plat-check-name">${escHtml(r.product_name||'')}${r.spec?' <small style=color:#9ca3af>'+escHtml(r.spec)+'</small>':''}</div>
+        <div class="plat-check-name">${escHtml(r.product_name||'')}${r.spec?' <small style=color:#9ca3af>'+escHtml(r.spec)+'</small>':''} ${simBadge}</div>
         <div class="plat-check-meta">
           <span>${platLabelOf(r.platform)} / ${escHtml(r.platform_seller_name||'')}</span>
           <span class="net-price">${netDisp}</span>

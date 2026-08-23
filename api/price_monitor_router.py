@@ -2223,29 +2223,59 @@ async def api_mapping_similar_platform(
     if not product_name:
         return JSONResponse({"data": []})
 
-    # 핵심 토큰 추출 (2글자 이상)
-    tokens = [t for t in _tokenize(product_name) if len(t) >= 2]
-    if not tokens:
+    import re as _re
+
+    def _word_tokens(name: str):
+        """공백 분리 단어만 (bi/tri-gram 제외). 한글 2자+, 영문/숫자 2자+ 허용."""
+        name = _re.sub(r'[/·•\-_,\(\)\[\]{}]', ' ', name or '')
+        parts = []
+        for t in _re.split(r'\s+', name):
+            t = t.strip()
+            if not t:
+                continue
+            # 숫자+단위(1.8L, 500g 등)는 검색 노이즈 → 제외
+            if _re.fullmatch(r'[\d]+[\d.,]*[a-zA-Z]*', t):
+                continue
+            if len(t) >= 2:
+                parts.append(t.lower())
+        return parts
+
+    def _name_similarity(q: str, target: str) -> float:
+        """두 상품명 간 토큰 유사도(0~100). Overlap Coefficient 기반."""
+        qt = _tokenize(q)
+        tt = _tokenize(target)
+        if not qt or not tt:
+            return 0.0
+        overlap = len(qt & tt) / min(len(qt), len(tt))
+        # 단어 단위 직접 포함 보너스: 긴 단어일수록 신뢰
+        for w in _word_tokens(q):
+            if len(w) >= 3 and w in (target or '').lower():
+                overlap = min(1.0, overlap + 0.15)
+        return round(overlap * 100.0, 1)
+
+    word_toks = _word_tokens(product_name)
+    if not word_toks:
         return JSONResponse({"data": []})
 
-    # 가장 긴 토큰 2개로 LIKE 조건 (너무 많으면 느림)
-    top_tokens = sorted(tokens, key=len, reverse=True)[:2]
-    like_parts = [f"p.product_name LIKE '%{t.replace(chr(39), chr(39)*2)}%'" for t in top_tokens]
-    like_clause = " AND ".join(like_parts)
+    def _escape_sql(s):
+        return s.replace("'", "''")
+
+    def _build_like_clause(toks, operator="OR"):
+        parts = [f"p.product_name LIKE '%{_escape_sql(t)}%'" for t in toks]
+        return f" {operator} ".join(parts) if parts else "1=1"
 
     # 플랫폼 필터 옵션
     plat_filter = f"AND p.platform = '{platform}'" if platform else ""
 
-    try:
-        # 2단계 조회 (플랫폼별 최신일)
+    def _run_query(like_clause):
         max_rows = _q(f"SELECT platform, MAX(crawl_date) AS max_date FROM {T_SILVER} GROUP BY platform") or []
         if not max_rows:
-            return JSONResponse({"data": []})
+            return []
         date_clauses = " OR ".join(
             f"(p.platform='{r['platform']}' AND p.crawl_date='{r['max_date']}')"
             for r in max_rows if r.get("platform") and r.get("max_date")
         )
-        rows = _q(f"""
+        return _q(f"""
             SELECT p.product_key, p.platform, p.platform_seller_name,
                    p.product_name, p.spec, p.price_sale, p.delivery_type, p.is_free_delivery
             FROM {T_SILVER} p
@@ -2253,8 +2283,17 @@ async def api_mapping_similar_platform(
               AND ({like_clause})
               {plat_filter}
             ORDER BY p.platform, p.platform_seller_name, p.price_sale
-            LIMIT 200
+            LIMIT 300
         """) or []
+
+    try:
+        # 1차: 단어 토큰 OR 조건으로 넓게 조회
+        like_or = _build_like_clause(word_toks, "OR")
+        rows = _run_query(like_or)
+        # 2차 fallback: 결과가 없으면 가장 긴 단어 1개로 재시도
+        if not rows and word_toks:
+            longest = sorted(word_toks, key=len, reverse=True)[0]
+            rows = _run_query(f"p.product_name LIKE '%{_escape_sql(longest)}%'")
     except Exception as e:
         return JSONResponse({"data": [], "error": str(e)})
 
@@ -2270,11 +2309,15 @@ async def api_mapping_similar_platform(
         _pf       = r.get("platform", "")
         fee       = _get_fee(d_type, _pf, _sn)
         net_price = round(float(p_price) * (1.0 - fee) / 1.1, 0) if p_price else None
-        r["net_price"]   = int(net_price) if net_price else None
-        r["fee_pct"]     = round(fee * 100, 1)
-        r["is_mapped"]   = r["product_key"] in mapped_keys
-        r["is_excluded"] = (r["product_key"] == exclude_key)
+        r["net_price"]       = int(net_price) if net_price else None
+        r["fee_pct"]         = round(fee * 100, 1)
+        r["is_mapped"]       = r["product_key"] in mapped_keys
+        r["is_excluded"]     = (r["product_key"] == exclude_key)
+        r["similarity_score"] = _name_similarity(product_name, r.get("product_name", ""))
         result.append(r)
+
+    # 유사도 높은 순 정렬
+    result.sort(key=lambda x: x["similarity_score"], reverse=True)
 
     return JSONResponse({"data": result})
 
