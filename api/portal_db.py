@@ -1059,7 +1059,7 @@ def pm_list_mappings(our_product_code: str, plant: str) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def pm_list_all_mappings(plant: str) -> list[dict]:
+def pm_list_all_mappings(plant: str):
     """플랜트 기준 전체 활성 매핑 목록.
     plant='ALL'(전체센터)이면 모든 활성 매핑 반환.
     plant='ALL'로 등록된 공통 매핑도 함께 포함.

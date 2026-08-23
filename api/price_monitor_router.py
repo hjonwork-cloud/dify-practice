@@ -1947,7 +1947,7 @@ def _score_mapping(platform_name: str, platform_price: float | None,
     return round(max(0.0, min(100.0, score)), 1)
 
 
-def _build_pattern_map(all_mappings: list[dict], our_products: list[dict]) -> dict[str, float]:
+def _build_pattern_map(all_mappings, our_products):
     """기존 매핑에서 (플랫폼상품명 토큰 → 우리상품코드) 패턴 추출.
     반환: {our_product_code → pattern_strength(0~1)}"""
     from collections import Counter
@@ -2125,24 +2125,23 @@ async def _do_ai_suggest(request, platform, seller_name, plant, limit):
         return JSONResponse({"items": [], "error": str(e)})
 
     # 이미 매핑된 product_key 집합
-    all_mappings = portal_db.pm_list_all_mappings(plant)
+    all_mappings = portal_db.pm_list_all_mappings(plant) or []
     mapped_keys = {m["product_key"] for m in all_mappings if m.get("is_active", 1)}
 
     # 미매핑만 필터
     unmapped = [r for r in plat_rows if r["product_key"] not in mapped_keys]
 
     # 우리 상품 목록 + 가격
-    our_products = _get_our_products(plant)
-    # 성능을 위해 전월매출이 있는 상품만 사용 (base_prices 없으면 전체)
-    price_totals = _get_prev_month_sales_totals(plant)
-    base_prices = {r["product_code"]: r for r in _get_base_prices(plant)}
+    our_products = _get_our_products(plant) or []
+    price_totals = _get_prev_month_sales_totals(plant) or {}
+    base_prices  = {r["product_code"]: r for r in (_get_base_prices(plant) or [])}
     # 매출데이터 있는 상품 우선, 없으면 전체 (max 3000개)
     our_with_sales = [p for p in our_products if p["product_code"] in base_prices]
     our_no_sales   = [p for p in our_products if p["product_code"] not in base_prices]
     our_scan = (our_with_sales + our_no_sales)[:3000]
 
     # 기존 매핑 패턴
-    pattern_strength = _build_pattern_map(all_mappings, our_scan)
+    pattern_strength = _build_pattern_map(all_mappings, our_scan) or {}
 
     items = []
     scan_count = min(len(unmapped), limit)  # limit개만 스캔
