@@ -2072,10 +2072,16 @@ async def api_mapping_ai_suggest(
     plant: str = "ALL",
     limit: int = 100,
 ):
-    """선택 셀러의 미매핑 플랫폼 SKU에 대해 우리 상품 Top3 AI 제안 반환.
-    seller_name='__ALL__' 이면 해당 플랫폼 전체 셀러를 대상으로 분석.
-    """
     _require_pm_access(request)
+    try:
+        return await _do_ai_suggest(request, platform, seller_name, plant, limit)
+    except Exception as e:
+        import traceback
+        return JSONResponse({"items": [], "total_unmapped": 0,
+                             "error": str(e), "traceback": traceback.format_exc()[-2000:]})
+
+
+async def _do_ai_suggest(request, platform, seller_name, plant, limit):
     if not platform or not seller_name:
         return JSONResponse({"items": [], "error": "platform/seller_name 필요"})
 
