@@ -1839,7 +1839,8 @@ async def api_sellers_from_silver(request: Request, platform: str = ""):
         return JSONResponse({"sellers": result, "crawl_date": str(max_date)})
     except Exception as e:
         logger.warning(f"[sellers-from-silver] 실패: {e}")
-        return JSONResponse({"sellers": [], "error": str(e)})
+        import traceback
+        return JSONResponse({"sellers": [], "error": str(e), "traceback": traceback.format_exc()[-1000:]})
 
 
 # ── 화면 8: 매핑 워크스페이스 ────────────────────────────────────────────────

@@ -139,6 +139,13 @@
     <button class="btn-ai" id="btnAnalyze" onclick="runAISuggest()" disabled>🤖 AI 매핑 분석</button>
     <button class="btn-debug" id="btnDebug" onclick="runDebug()" style="display:none;padding:8px 14px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;border:1px solid #d1d5db;background:#f9fafb;color:#374151">🔍 진단</button>
   </div>
+  <!-- 셀러 로드 실패 시 직접 입력 영역 -->
+  <div id="sellerDirectArea" style="display:none;margin-top:10px;align-items:center;gap:8px;flex-wrap:wrap">
+    <span style="font-size:13px;color:#374151;font-weight:600">셀러 직접 입력:</span>
+    <input type="text" id="sellerDirectInput" placeholder="셀러명 입력 후 Enter" style="border:1px solid #d1d5db;border-radius:8px;padding:7px 12px;font-size:13px;min-width:240px">
+    <button onclick="applyDirectSeller()" style="padding:7px 14px;border-radius:8px;background:#4f46e5;color:#fff;font-size:13px;font-weight:600;border:none;cursor:pointer">적용</button>
+  </div>
+  <div id="sellerErrorMsg" style="font-size:12px;color:#ef4444;margin-top:6px;padding:0 2px"></div>
 </div>
 
 <div class="kpi-bar" id="kpiBar" style="display:none">
@@ -232,25 +239,42 @@ document.addEventListener('DOMContentLoaded', () => {
 async function loadSellers(platform) {
   const sel = document.getElementById('selSeller');
   sel.innerHTML = '<option value="">-- 셀러 선택 (로딩중...) --</option>';
+  document.getElementById('sellerErrorMsg').textContent = '';
+  document.getElementById('sellerDirectArea').style.display = 'none';
   if (!platform) {
     sel.innerHTML = '<option value="">-- 셀러 선택 --</option>';
     return;
   }
   try {
     const r = await fetch(`/portal/price-monitor/api/sellers-from-silver?platform=${encodeURIComponent(platform)}`);
+    if (!r.ok) {
+      const txt = await r.text();
+      throw new Error(`HTTP ${r.status}: ${txt.slice(0,200)}`);
+    }
     const d = await r.json();
+    if (d.error) {
+      sel.innerHTML = '<option value="">-- 셀러 목록 오류 (직접 입력 사용) --</option>';
+      document.getElementById('sellerErrorMsg').textContent = `⚠️ ${d.error}`;
+      document.getElementById('sellerDirectArea').style.display = 'flex';
+      return;
+    }
+    if (!d.sellers || d.sellers.length === 0) {
+      sel.innerHTML = '<option value="">-- 셀러 없음 (크롤링 데이터 확인 필요) --</option>';
+      document.getElementById('sellerErrorMsg').textContent = '⚠️ 해당 플랫폼 크롤링 데이터가 없습니다.';
+      document.getElementById('sellerDirectArea').style.display = 'flex';
+      return;
+    }
     sel.innerHTML = '<option value="">-- 셀러 선택 --</option>';
     // 전체 셀러 옵션
-    const totalSku = (d.sellers||[]).reduce((s,x)=>s+x.sku_count,0);
-    const totalUnmapped = (d.sellers||[]).reduce((s,x)=>s+x.unmapped,0);
+    const totalSku = d.sellers.reduce((s,x)=>s+x.sku_count,0);
+    const totalUnmapped = d.sellers.reduce((s,x)=>s+x.unmapped,0);
     const allOpt = document.createElement('option');
     allOpt.value = '__ALL__';
     allOpt.dataset.name = '__ALL__';
     allOpt.textContent = `★ 전체 셀러 (전체 ${totalSku}개 | 미매핑 ${totalUnmapped}개)`;
     sel.appendChild(allOpt);
-    // 구분선 역할의 비활성 옵션
     const sep = document.createElement('option'); sep.disabled = true; sep.textContent = '──────────────────'; sel.appendChild(sep);
-    (d.sellers || []).forEach(s => {
+    d.sellers.forEach(s => {
       const o = document.createElement('option');
       o.value = s.seller_name;
       o.dataset.name = s.seller_name;
@@ -262,8 +286,10 @@ async function loadSellers(platform) {
       for (let o of sel.options) if (o.dataset.name === currentSeller) o.selected = true;
     }
   } catch(e) {
-    sel.innerHTML = '<option value="">-- 셀러 로드 실패 --</option>';
-    console.warn('셀러 목록 로드 실패', e);
+    sel.innerHTML = '<option value="">-- 셀러 로드 실패 (직접 입력 사용) --</option>';
+    document.getElementById('sellerErrorMsg').textContent = `⚠️ fetch 오류: ${e.message}`;
+    document.getElementById('sellerDirectArea').style.display = 'flex';
+    console.error('셀러 목록 로드 실패', e);
   }
 }
 
@@ -284,6 +310,27 @@ document.getElementById('selSeller').addEventListener('change', function() {
   document.getElementById('btnDebug').style.display =
     (this.value && this.value !== '__ALL__') ? 'inline-block' : 'none';
 });
+
+// 셀러 직접 입력 적용
+function applyDirectSeller() {
+  const v = (document.getElementById('sellerDirectInput').value || '').trim();
+  if (!v) return;
+  currentSeller   = v;
+  currentSellerId = '';
+  document.getElementById('btnAnalyze').disabled = false;
+  document.getElementById('btnDebug').style.display = 'inline-block';
+  // select에 수동 옵션 추가
+  const sel = document.getElementById('selSeller');
+  let found = false;
+  for (let o of sel.options) if (o.value === v) { o.selected = true; found = true; break; }
+  if (!found) {
+    const o = document.createElement('option');
+    o.value = v; o.dataset.name = v; o.textContent = v + ' (직접입력)'; o.selected = true;
+    sel.appendChild(o);
+  }
+  document.getElementById('wsContent').innerHTML = `<div class="ws-empty">셀러 "<b>${v}</b>" 설정됨. AI 매핑 분석 버튼을 클릭하세요.</div>`;
+}
+document.getElementById('sellerDirectInput')?.addEventListener('keydown', e => { if (e.key==='Enter') applyDirectSeller(); });
 
 document.getElementById('selPlant').addEventListener('change', function() {
   currentPlant = this.value;
