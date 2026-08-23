@@ -421,7 +421,7 @@ async function runAISuggest() {
       btn.disabled = false; btn.textContent = '🤖 AI 매핑 분석'; return;
     }
     if (d.error) {
-      document.getElementById('wsContent').innerHTML = `<div class="ws-empty" style="color:#ef4444">API 오류: ${escHtml(d.error)}</div>`;
+      document.getElementById('wsContent').innerHTML = `<div class="ws-empty" style="color:#ef4444">API 오류: ${escHtml(d.error)}<br><details><summary style="cursor:pointer;color:#6b7280;font-size:12px">traceback 보기</summary><pre style="font-size:11px;text-align:left;color:#374151;white-space:pre-wrap">${escHtml(d.traceback||'(없음)')}</pre></details></div>`;
       btn.disabled = false; btn.textContent = '🤖 AI 매핑 분석'; return;
     }
     suggestItems = d.items || [];

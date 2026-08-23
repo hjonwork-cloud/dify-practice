@@ -2194,7 +2194,9 @@ async def _do_ai_suggest(request, platform, seller_name, plant, limit):
                 "has_suggestions": len(top3) > 0,
             })
     except Exception as e:
-        return JSONResponse({"items": items, "total_unmapped": len(unmapped), "error": str(e)})
+        import traceback as _tb
+        return JSONResponse({"items": items, "total_unmapped": len(unmapped),
+                             "error": str(e), "traceback": _tb.format_exc()[-3000:]})
 
     # 신뢰도 높은 순 정렬 (제안 없는 항목은 뒤로)
     items.sort(key=lambda x: x["suggestions"][0]["score"] if x["suggestions"] else -1, reverse=True)

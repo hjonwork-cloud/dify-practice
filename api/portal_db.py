@@ -481,7 +481,7 @@ def record_dm_log_v2(
         )
 
 
-def list_login_logs(limit: int = 200) -> list[dict]:
+def list_login_logs(limit: int = 200):
     init_db()
     with _connect() as conn:
         rows = conn.execute(
@@ -492,7 +492,7 @@ def list_login_logs(limit: int = 200) -> list[dict]:
 
 
 def list_dm_logs(limit: int = 200, emp_code: str | None = None,
-                 brand_code: str | None = None, action_ym: str | None = None) -> list[dict]:
+                 brand_code: str | None = None, action_ym: str | None = None):
     init_db()
     conds, params = [], []
     if emp_code:
@@ -511,7 +511,7 @@ def list_dm_logs(limit: int = 200, emp_code: str | None = None,
         return [dict(row) for row in rows]
 
 
-def list_action_logs(limit: int = 200) -> list[dict]:
+def list_action_logs(limit: int = 200):
     init_db()
     with _connect() as conn:
         rows = conn.execute(
@@ -657,7 +657,7 @@ def unlock_account(emp_code: str) -> None:
         )
 
 
-def list_password_status(emp_codes: list[str]) -> dict[str, dict]:
+def list_password_status(emp_codes):
     """emp_code 목록의 비밀번호 상태 반환."""
     init_db()
     with _connect() as conn:
@@ -674,7 +674,7 @@ def list_password_status(emp_codes: list[str]) -> dict[str, dict]:
     return result
 
 
-def list_login_users() -> list[dict]:
+def list_login_users():
     """로그인 성공 기록이 있는 고유 사용자 목록 반환."""
     init_db()
     with _connect() as conn:
@@ -687,7 +687,7 @@ def list_login_users() -> list[dict]:
         return [dict(r) for r in rows]
 
 
-def list_login_logs(limit: int = 200) -> list[dict]:
+def list_login_logs(limit: int = 200):
     """최근 로그인 기록 반환."""
     init_db()
     with _connect() as conn:
@@ -726,7 +726,7 @@ def get_notice_post(post_id: int) -> dict | None:
         return dict(row) if row else None
 
 
-def list_notice_active_for_popup() -> list[dict]:
+def list_notice_active_for_popup():
     """팝업 기간이 명시적으로 설정된 공지 중 현재 날짜가 기간 내인 목록."""
     init_db()
     today = _now()[:10]
@@ -801,7 +801,7 @@ def delete_notice_post(post_id: int) -> None:
         conn.execute("DELETE FROM notice_posts WHERE id=?", (post_id,))
 
 
-def list_notice_comments(post_id: int) -> list[dict]:
+def list_notice_comments(post_id: int):
     init_db()
     with _connect() as conn:
         rows = conn.execute(
@@ -838,7 +838,7 @@ def delete_notice_comment(comment_id: int, emp_code: str, is_admin: bool = False
 
 # ── 공지 관리 (announcements — 하위호환 유지) ──────────────────────────────
 
-def list_announcements(active_only: bool = False) -> list[dict]:
+def list_announcements(active_only: bool = False):
     init_db()
     where = "WHERE is_active = 1" if active_only else ""
     with _connect() as conn:
@@ -956,7 +956,7 @@ def delete_voc_post(post_id: int, emp_code: str, is_admin: bool = False) -> bool
     return True
 
 
-def list_voc_comments(post_id: int) -> list[dict]:
+def list_voc_comments(post_id: int):
     init_db()
     with _connect() as conn:
         rows = conn.execute(
@@ -966,7 +966,7 @@ def list_voc_comments(post_id: int) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def toggle_voc_like(target_type: str, target_id: int, emp_code: str) -> tuple[bool, int]:
+def toggle_voc_like(target_type: str, target_id: int, emp_code: str):
     """좋아요 토글. (is_liked_now, total_count) 반환."""
     init_db()
     with _connect() as conn:
@@ -993,7 +993,7 @@ def toggle_voc_like(target_type: str, target_id: int, emp_code: str) -> tuple[bo
     return liked, count
 
 
-def get_voc_likes(target_type: str, target_ids: list[int], emp_code: str) -> dict:
+def get_voc_likes(target_type: str, target_ids, emp_code: str) -> dict:
     """다수 target의 (count, my_like) 정보 반환. {id: {count, liked}} 형태."""
     if not target_ids:
         return {}
@@ -1044,7 +1044,7 @@ def delete_voc_comment(comment_id: int, emp_code: str, is_admin: bool = False) -
 
 # ── 가격 모니터링 DB 함수 ──────────────────────────────────────────────────
 
-def pm_list_mappings(our_product_code: str, plant: str) -> list[dict]:
+def pm_list_mappings(our_product_code: str, plant: str):
     """특정 상품+플랜트의 활성 매핑 목록.
     plant='ALL'로 등록된 공통 매핑도 함께 반환.
     """
@@ -1155,7 +1155,7 @@ def pm_create_change_request(our_product_code: str, plant: str, request_type: st
         return cur.lastrowid
 
 
-def pm_list_change_requests(status: str | None = None) -> list[dict]:
+def pm_list_change_requests(status: str | None = None):
     """수정요청 목록"""
     import json
     init_db()
@@ -1241,7 +1241,7 @@ def pm_review_change_request(request_id: int, action: str,
     return pm_list_change_requests()[0] if False else {"request_id": request_id, "status": action}
 
 
-def pm_list_baemin_sellers() -> list[dict]:
+def pm_list_baemin_sellers():
     init_db()
     with _connect() as conn:
         rows = conn.execute("SELECT * FROM price_baemin_sellers ORDER BY seller_id").fetchall()
@@ -1257,7 +1257,7 @@ def pm_toggle_seller(seller_id: int, is_active: int) -> None:
         )
 
 
-def pm_list_foodspring_sellers(active_only: bool = True) -> list[dict]:
+def pm_list_foodspring_sellers(active_only: bool = True):
     """식봄 셀러 목록 반환. delivery_type: 'direct'|'singsing'|''"""
     init_db()
     with _connect() as conn:
