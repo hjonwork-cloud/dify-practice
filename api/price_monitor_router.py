@@ -1884,6 +1884,28 @@ async def pm_mapping_workspace(
 
 # ── AI 유사도 매핑 엔진 헬퍼 ────────────────────────────────────────────────
 
+def _strip_seller(name: str, seller_name: str) -> str:
+    """상품명에서 셀러명(브랜드/회사명)을 제거한 정제 상품명 반환.
+    예) '현대그린푸드 사과식초 1.8L' + '현대그린푸드' → '사과식초 1.8L'
+    """
+    import re as _re
+    if not name or not seller_name:
+        return (name or "").strip()
+    # 셀러명을 공백 기준 단어로 분리 (2글자 이상만)
+    seller_words = [w.strip() for w in _re.split(r'[\s\-_/·]+', seller_name) if len(w.strip()) >= 2]
+    cleaned = name
+    for word in seller_words:
+        # 단어 경계: 앞뒤가 공백이거나 문자열 시작/끝
+        cleaned = _re.sub(
+            r'(?<![가-힣a-zA-Z0-9])' + _re.escape(word) + r'(?![가-힣a-zA-Z0-9])',
+            ' ', cleaned, flags=_re.IGNORECASE
+        )
+    # 남은 공백 정리
+    cleaned = _re.sub(r'\s+', ' ', cleaned).strip()
+    # 정제 후 너무 짧으면 원본 반환
+    return cleaned if len(cleaned) >= 2 else (name or "").strip()
+
+
 def _tokenize(name: str) -> set[str]:
     """상품명을 의미 토큰으로 분리. 한국어 bi/tri-gram 포함."""
     import re
@@ -2156,6 +2178,10 @@ async def _do_ai_suggest(request, platform, seller_name, plant, limit):
             fee     = _get_fee(d_type, platform, sname)
             net_price = round(float(p_price) * (1.0 - fee) / 1.1, 0) if p_price else None
 
+            # 상품명에서 셀러명 제거 (유사도 계산 정밀도 향상)
+            raw_pname    = row.get("product_name", "")
+            clean_pname  = _strip_seller(raw_pname, sname)
+
             # 우리 상품별 점수 계산
             scored = []
             for p in our_scan:
@@ -2165,7 +2191,7 @@ async def _do_ai_suggest(request, platform, seller_name, plant, limit):
                 buy_p    = bp.get("avg_buy_price")
                 pat_bonus = min(1.0, pattern_strength.get(code, 0) / 3.0)
                 sc = _score_mapping(
-                    row.get("product_name", ""), p_price,
+                    clean_pname, p_price,
                     p.get("product_name", ""), our_sale, buy_p,
                     d_type, platform, sname, pat_bonus
                 )
@@ -2186,7 +2212,8 @@ async def _do_ai_suggest(request, platform, seller_name, plant, limit):
 
             items.append({
                 "product_key":    row["product_key"],
-                "product_name":   row.get("product_name", ""),
+                "product_name":   raw_pname,
+                "display_name":   clean_pname,
                 "spec":           row.get("spec", ""),
                 "price_sale":     int(p_price) if p_price else None,
                 "net_price":      int(net_price) if net_price else None,
@@ -2309,11 +2336,15 @@ async def api_mapping_similar_platform(
         _pf       = r.get("platform", "")
         fee       = _get_fee(d_type, _pf, _sn)
         net_price = round(float(p_price) * (1.0 - fee) / 1.1, 0) if p_price else None
-        r["net_price"]       = int(net_price) if net_price else None
-        r["fee_pct"]         = round(fee * 100, 1)
-        r["is_mapped"]       = r["product_key"] in mapped_keys
-        r["is_excluded"]     = (r["product_key"] == exclude_key)
-        r["similarity_score"] = _name_similarity(product_name, r.get("product_name", ""))
+        r["net_price"]    = int(net_price) if net_price else None
+        r["fee_pct"]      = round(fee * 100, 1)
+        r["is_mapped"]    = r["product_key"] in mapped_keys
+        r["is_excluded"]  = (r["product_key"] == exclude_key)
+        # 셀러명 제거 후 정제 이름으로 유사도 계산
+        clean_q      = _strip_seller(product_name, _sn)
+        clean_target = _strip_seller(r.get("product_name", ""), _sn)
+        r["display_name"]    = clean_target
+        r["similarity_score"] = _name_similarity(clean_q, clean_target)
         result.append(r)
 
     # 유사도 높은 순 정렬
