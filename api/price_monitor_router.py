@@ -1907,19 +1907,21 @@ def _strip_seller(name: str, seller_name: str) -> str:
 
 
 def _tokenize(name: str) -> set[str]:
-    """상품명을 의미 토큰으로 분리. 한국어 bi/tri-gram 포함."""
+    """상품명을 의미 토큰으로 분리.
+    bi/tri-gram은 한글 6자 이상 단어에만 적용
+    ('슬라이스' 4자 등 짧은 단어의 n-gram 오염 방지).
+    """
     import re
     name = (name or "").strip()
     name = re.sub(r'[/·•\-_,\(\)\[\]{}]', ' ', name)
     tokens = set()
-    # 공백 분리 단어 토큰
     for t in re.split(r'\s+', name):
         t = t.strip()
         if len(t) >= 2:
             tokens.add(t.lower())
-            # 한글 포함 단어는 bi-gram / tri-gram 추가
             korean = re.sub(r'[^가-힣]', '', t)
-            if len(korean) >= 4:
+            # bi/tri-gram은 6자 이상 한글 단어에만 (주요 상품명 단어)
+            if len(korean) >= 6:
                 for i in range(len(korean) - 1):
                     tokens.add(korean[i:i+2])
                 for i in range(len(korean) - 2):
@@ -1932,40 +1934,90 @@ def _score_mapping(platform_name: str, platform_price: float | None,
                    buy_price: float | None,
                    delivery_type: str, platform: str, seller_name: str,
                    pattern_bonus: float = 0.0) -> float:
-    """플랫폼 상품 ↔ 우리 상품 유사도 점수 (0~100)."""
+    """플랫폼 상품 ↔ 우리 상품 유사도 점수 (0~100).
+
+    가중치: 텍스트 60 + 키워드보너스 15 + 가격 20 + 패턴 10 = max 100
+    게이트: 텍스트+키워드 < 10점 시 0 반환 (가격만으로는 제안 불가)
+    """
+    import re as _re
     score = 0.0
 
-    # 1. 토큰 겹침 (40점) - Overlap Coefficient: 교집합 / min(|pt|,|ot|)
-    #    부분 포함(짧은 이름이 긴 이름의 일부)도 높은 점수 부여
     pt = _tokenize(platform_name)
     ot = _tokenize(our_name)
-    if pt and ot:
-        overlap = len(pt & ot) / min(len(pt), len(ot))
-        score += overlap * 40.0
 
-    # 2. 가격 유사도 (35점): 플랫폼 실판매가 vs 우리 공급가
+    # 1. 토큰 겹침 (60점) - Overlap Coefficient
+    #    숫자+단위 토큰(1kg, 836g 등)과 범용 수식어(슬라이스, 냉동 등)는 텍스트 점수에서 제외
+    _unit_pat2 = __import__('re').compile(r'^\d[\d.]*[a-zA-Z]*$')
+    _STOP = {
+        '슬라이스', '냉동', '냉장', '신선', '건조', '원물', '국산', '수입',
+        '일반', '특대', '대용량', '소포장', '개별', '낱개', '원터치', '직배송',
+        '무료배송', '당일배송', '묶음', '세트', '팩', '개입', '입점',
+        '필리핀산', '국내산', '수입산', '베트남산', '미국산', '호주산',
+        'new', 'ea',
+    }
+    text_score = 0.0
+    common = set()
+    if pt and ot:
+        common = pt & ot
+        # 텍스트 점수용 공통 토큰: 숫자단위·범용수식어 제외
+        common_text = {t for t in common if not _unit_pat2.match(t) and t not in _STOP}
+        if common_text:
+            overlap = len(common_text) / min(len(pt), len(ot))
+            text_score = overlap * 60.0
+            short_ratio = sum(1 for t in common_text if len(t) <= 2) / max(len(common_text), 1)
+            text_score -= short_ratio * 8.0
+        text_score = max(0.0, text_score)
+
+    # 2. 핵심 키워드 직접 포함 보너스 (15점)
+    #    3자 이상 의미 토큰이 상대방 상품명에 substring으로 포함되면 부여
+    #    범용 식품/상품 수식어(슬라이스, 냉동, 국산 등)는 _STOP으로 제외
+    keyword_bonus = 0.0
+    our_lower  = (our_name or "").lower()
+    plat_lower = (platform_name or "").lower()
+    plat_meaningful = [
+        t for t in pt
+        if len(t) >= 3
+        and t not in _STOP
+        and not _re.match(r'^[\d\.]+', t)
+    ]
+    our_meaningful = [
+        t for t in ot
+        if len(t) >= 3
+        and t not in _STOP
+        and not _re.match(r'^[\d\.]+', t)
+    ]
+    for w in plat_meaningful:
+        if w in our_lower:
+            keyword_bonus = 15.0
+            break
+    if keyword_bonus == 0.0:
+        for w in our_meaningful:
+            if w in plat_lower:
+                keyword_bonus = 15.0
+                break
+
+    # 게이트: 텍스트+키워드 점수 10 미만 → 가격 유사도만으로는 제안하지 않음
+    if text_score + keyword_bonus < 10.0:
+        return 0.0
+
+    score = text_score + keyword_bonus
+
+    # 3. 가격 유사도 (20점): 플랫폼 실판매가 vs 우리 공급가
     if platform_price and our_sale_price and our_sale_price > 0:
         try:
             fee = _get_fee(delivery_type, platform, seller_name)
             comp_net = float(platform_price) * (1.0 - fee) / 1.1
             ratio = comp_net / float(our_sale_price)
-            # 0.7~1.4 범위에서 최고점, 벗어날수록 감점
             if 0.7 <= ratio <= 1.4:
-                price_score = 35.0 * (1.0 - abs(ratio - 1.0) / 0.7)
+                price_score = 20.0 * (1.0 - abs(ratio - 1.0) / 0.7)
             else:
-                price_score = max(0.0, 35.0 * (1.0 - abs(ratio - 1.0) / 2.0))
+                price_score = max(0.0, 20.0 * (1.0 - abs(ratio - 1.0) / 2.0))
             score += price_score
         except Exception:
             pass
 
-    # 3. 기존 매핑 패턴 보너스 (15점)
-    score += min(15.0, pattern_bonus * 15.0)
-
-    # 4. 이름 길이 패널티: 너무 짧은 토큰만 겹치면 신뢰도 낮춤
-    common = (pt & ot) if (pt and ot) else set()
-    if common:
-        short_ratio = sum(1 for t in common if len(t) <= 2) / max(len(common), 1)
-        score -= short_ratio * 5.0
+    # 4. 기존 매핑 패턴 보너스 (10점)
+    score += min(10.0, pattern_bonus * 10.0)
 
     return round(max(0.0, min(100.0, score)), 1)
 
@@ -2195,7 +2247,7 @@ async def _do_ai_suggest(request, platform, seller_name, plant, limit):
                     p.get("product_name", ""), our_sale, buy_p,
                     d_type, platform, sname, pat_bonus
                 )
-                if sc >= 5.0:
+                if sc >= 20.0:
                     scored.append({
                         "our_product_code": code,
                         "product_name":     p.get("product_name", code),
