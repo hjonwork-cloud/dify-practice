@@ -2003,6 +2003,7 @@ def _score_mapping(platform_name: str, platform_price: float | None,
     score = text_score + keyword_bonus
 
     # 3. 가격 유사도 (20점): 플랫폼 실판매가 vs 우리 공급가
+    #    우리 공급가 데이터 없으면 중립점수(10점) 부여 → 가격 데이터 없는 상품이 부당하게 밀리지 않도록
     if platform_price and our_sale_price and our_sale_price > 0:
         try:
             fee = _get_fee(delivery_type, platform, seller_name)
@@ -2014,7 +2015,9 @@ def _score_mapping(platform_name: str, platform_price: float | None,
                 price_score = max(0.0, 20.0 * (1.0 - abs(ratio - 1.0) / 2.0))
             score += price_score
         except Exception:
-            pass
+            score += 10.0  # 계산 실패 시 중립
+    elif platform_price and not our_sale_price:
+        score += 10.0  # 가격 데이터 없는 상품 → 중립 10점 (0점으로 패널티 X)
 
     # 4. 기존 매핑 패턴 보너스 (10점)
     score += min(10.0, pattern_bonus * 10.0)

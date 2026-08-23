@@ -600,7 +600,7 @@ async function openMappingModal(cardIdx) {
     const d = await r.json();
     modalPlatItemsBase = d.data || []; // 고정 목록 저장
     modalPlatItems = [...modalPlatItemsBase];
-    renderModalPlatList();
+    renderModalPlatList('');
   } catch(e) {
     document.getElementById('modalPlatList').innerHTML = `<p style="color:#ef4444;font-size:13px">로드 실패: ${e.message}</p>`;
   }
@@ -626,9 +626,24 @@ function renderOurCandidate(s) {
     </div>`;
 }
 
-function renderModalPlatList() {
-  // query 필터링은 filterModalList()(검색 API호출)에서 수행 → 여기서는 modalPlatItems 그대로 렌더
-  const filtered = modalPlatItems;
+function renderModalPlatList(query) {
+  // 체크된(locked) 항목은 검색어와 무관하게 항상 표시
+  const lockedItems = modalPlatItemsBase.filter(r => modalChecked.has(r.product_key));
+  let displayItems;
+  if (!query) {
+    displayItems = modalPlatItems;
+  } else {
+    const q = query.toLowerCase();
+    const filtered = modalPlatItems.filter(r =>
+      (r.display_name || r.product_name || '').toLowerCase().includes(q) ||
+      (r.product_name || '').toLowerCase().includes(q)
+    );
+    // 체크된 항목이 필터에서 빠졌으면 앞에 강제 추가
+    const filteredKeys = new Set(filtered.map(r => r.product_key));
+    const extraLocked = lockedItems.filter(r => !filteredKeys.has(r.product_key));
+    displayItems = [...extraLocked, ...filtered];
+  }
+  const filtered = displayItems;
   if (!filtered.length) {
     document.getElementById('modalPlatList').innerHTML = '<p style="color:#9ca3af;font-size:13px;text-align:center;padding:20px">유사 상품 없음</p>';
     return;
@@ -664,30 +679,32 @@ function renderModalPlatList() {
   updateSelCount();
 }
 
-// filterModalList: 입력 없으면 base목록, 있으면 API 검색 후 병합
+// filterModalList: 즉각 로컬 필터 → 300ms 후 API 확장
 let _modalSearchTimer = null;
 function filterModalList() {
   clearTimeout(_modalSearchTimer);
   const query = (document.getElementById('modalSearch').value || '').trim();
   if (!query) {
     modalPlatItems = [...modalPlatItemsBase];
-    renderModalPlatList();
+    renderModalPlatList('');
     return;
   }
+  // 즉각 로컬 필터: 기존 항목에서 먼저 반응
+  renderModalPlatList(query);
+  // 300ms 후 API 호출로 추가 결과 병합
   _modalSearchTimer = setTimeout(async () => {
     try {
       const r = await fetch(`/portal/price-monitor/api/pm-ai/similar?product_name=${encodeURIComponent(query)}&platform=${currentPlatform}`);
       const d = await r.json();
       const searchResults = d.data || [];
-      // base 항목은 항상 앞에 고정, 검색 결과에서 중복 제외 후 추가
       const baseKeys = new Set(modalPlatItemsBase.map(i => i.product_key));
       const newItems = searchResults.filter(r => !baseKeys.has(r.product_key));
       modalPlatItems = [...modalPlatItemsBase, ...newItems];
     } catch(e) {
-      modalPlatItems = [...modalPlatItemsBase];
+      // 실패해도 로컬 필터 결과 유지
     }
-    renderModalPlatList();
-  }, 300);
+    renderModalPlatList(query);
+  }, 400);
 }
 
 function togglePlatCheck(key, checked) {
