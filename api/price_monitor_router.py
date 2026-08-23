@@ -1991,11 +1991,18 @@ async def api_mapping_ai_debug(
             LIMIT 3
         """) or []
     except Exception as e:
-        return JSONResponse({"error": str(e)})
+        import traceback
+        return JSONResponse({"error": str(e), "traceback": traceback.format_exc()[-2000:]})
     all_mappings = portal_db.pm_list_all_mappings(plant)
     mapped_keys = {m["product_key"] for m in all_mappings if m.get("is_active", 1)}
     our_products = _get_our_products(plant)
     base_prices  = {r["product_code"]: r for r in _get_base_prices(plant)}
+    # plat_count 세이프 추출 - 콼럼명 과계로 첫번째 값 사용
+    if plat_count:
+        row0 = plat_count[0]
+        total_rows = list(row0.values())[0] if row0 else 0
+    else:
+        total_rows = 0
     sample_scores = []
     if plat_sample and our_products:
         p_row = plat_sample[0]
@@ -2006,10 +2013,10 @@ async def api_mapping_ai_debug(
                 op.get("product_name",""), bp.get("avg_sale_price"), bp.get("avg_buy_price"),
                 p_row.get("delivery_type","직배송"), platform, seller_name
             )
-            sample_scores.append({"plat": p_row["product_name"], "our": op["product_name"], "score": sc})
+            sample_scores.append({"plat": p_row.get("product_name",""), "our": op.get("product_name",""), "score": sc})
     return JSONResponse({
-        "plat_total_rows":    plat_count[0]["cnt"] if plat_count else 0,
-        "plat_sample":        plat_sample,
+        "plat_total_rows":    total_rows,
+        "plat_sample":        _serialize_rows(plat_sample),
         "mapped_count":       len(mapped_keys),
         "our_products_count": len(our_products),
         "base_prices_count":  len(base_prices),

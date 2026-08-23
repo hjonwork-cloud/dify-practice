@@ -371,16 +371,30 @@ async function runDebug() {
   try {
     const r = await fetch(url);
     const d = await r.json();
+    // 에러가 있으면 먼저 표시
+    if (d.error) {
+      alert(`[진단 API 오류]\n${d.error}\n\n[traceback]\n${d.traceback||''}`);
+      return;
+    }
     let msg = `[진단 결과]\n`
-      + `플랫폼 전체 행: ${d.plat_total_rows}\n`
-      + `이미 매핑된 수: ${d.mapped_count}\n`
-      + `우리 상품 수: ${d.our_products_count}\n`
-      + `기준가 보유 상품: ${d.base_prices_count}\n\n`
+      + `플랫폼 전체 행: ${d.plat_total_rows ?? 'N/A'}\n`
+      + `이미 매핑된 수: ${d.mapped_count ?? 'N/A'}\n`
+      + `우리 상품 수: ${d.our_products_count ?? 'N/A'}\n`
+      + `기준가 보유 상품: ${d.base_prices_count ?? 'N/A'}\n\n`
       + `[샘플 점수 (플랫폼상품 vs 우리상품)]\n`;
-    (d.sample_scores||[]).forEach(s => {
-      msg += `  "${s.plat}" vs "${s.our}" → ${s.score}점\n`;
-    });
-    if (d.error) msg += `\n오류: ${d.error}`;
+    if (d.sample_scores && d.sample_scores.length) {
+      d.sample_scores.forEach(s => {
+        msg += `  "${s.plat}" vs "${s.our}" → ${s.score}점\n`;
+      });
+    } else {
+      msg += `  (샘플 없음 — 플랫폼 데이터 또는 우리 상품이 비어있음)`;
+    }
+    if (d.plat_sample && d.plat_sample.length) {
+      msg += `\n\n[샘플 플랫폼 SKU]\n`;
+      d.plat_sample.forEach(p => {
+        msg += `  ${p.product_name} / 가격:${p.price_sale} / 배송:${p.delivery_type}\n`;
+      });
+    }
     alert(msg);
   } catch(e) { alert('진단 실패: ' + e.message); }
 }
