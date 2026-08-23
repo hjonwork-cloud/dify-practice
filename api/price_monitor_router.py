@@ -2120,69 +2120,80 @@ async def api_mapping_ai_suggest(
 
     # 이미 매핑된 product_key 집합
     all_mappings = portal_db.pm_list_all_mappings(plant)
-    mapped_keys: set[str] = {m["product_key"] for m in all_mappings if m.get("is_active", 1)}
+    mapped_keys = {m["product_key"] for m in all_mappings if m.get("is_active", 1)}
 
     # 미매핑만 필터
     unmapped = [r for r in plat_rows if r["product_key"] not in mapped_keys]
 
     # 우리 상품 목록 + 가격
     our_products = _get_our_products(plant)
+    # 성능을 위해 전월매출이 있는 상품만 사용 (base_prices 없으면 전체)
     price_totals = _get_prev_month_sales_totals(plant)
     base_prices = {r["product_code"]: r for r in _get_base_prices(plant)}
+    # 매출데이터 있는 상품 우선, 없으면 전체 (max 3000개)
+    our_with_sales = [p for p in our_products if p["product_code"] in base_prices]
+    our_no_sales   = [p for p in our_products if p["product_code"] not in base_prices]
+    our_scan = (our_with_sales + our_no_sales)[:3000]
 
     # 기존 매핑 패턴
-    pattern_strength = _build_pattern_map(all_mappings, our_products)
+    pattern_strength = _build_pattern_map(all_mappings, our_scan)
 
     items = []
-    scan_count = min(len(unmapped), limit * 5)  # 최대 limit*5 스캔
-    for row in unmapped[:scan_count]:
-        sname = row.get("platform_seller_name") or ("" if all_sellers else seller_name)
-        p_price = row.get("price_sale")
-        d_type  = row.get("delivery_type") or "직배송"
-        fee     = _get_fee(d_type, platform, sname)
-        net_price = round(float(p_price) * (1.0 - fee) / 1.1, 0) if p_price else None
+    scan_count = min(len(unmapped), limit)  # limit개만 스캔
+    try:
+        for row in unmapped[:scan_count]:
+            sname = row.get("platform_seller_name") or ("" if all_sellers else seller_name)
+            p_price = row.get("price_sale")
+            d_type  = row.get("delivery_type") or "직배송"
+            fee     = _get_fee(d_type, platform, sname)
+            net_price = round(float(p_price) * (1.0 - fee) / 1.1, 0) if p_price else None
 
-        # 우리 상품별 점수 계산
-        scored = []
-        for p in our_products:
-            code = p["product_code"]
-            bp   = base_prices.get(code, {})
-            our_sale = bp.get("avg_sale_price")
-            buy_p    = bp.get("avg_buy_price")
-            pat_bonus = min(1.0, pattern_strength.get(code, 0) / 3.0)
-            sc = _score_mapping(
-                row.get("product_name", ""), p_price,
-                p.get("product_name", ""), our_sale, buy_p,
-                d_type, platform, sname, pat_bonus
-            )
-            if sc >= 5.0:
-                scored.append({
-                    "our_product_code": code,
-                    "product_name":     p.get("product_name", code),
-                    "category":         p.get("category", ""),
-                    "unit":             p.get("unit", ""),
-                    "score":            sc,
-                    "our_sale_price":   int(our_sale) if our_sale else None,
-                    "buy_price":        int(buy_p)    if buy_p    else None,
-                    "net_comp_price":   int(net_price) if net_price else None,
-                    "prev_sales_amt":   int(price_totals.get(code, {}).get("prev_sales_amt") or 0),
-                })
-        scored.sort(key=lambda x: x["score"], reverse=True)
-        top3 = scored[:3]
+            # 우리 상품별 점수 계산
+            scored = []
+            for p in our_scan:
+                code = p["product_code"]
+                bp   = base_prices.get(code, {})
+                our_sale = bp.get("avg_sale_price")
+                buy_p    = bp.get("avg_buy_price")
+                pat_bonus = min(1.0, pattern_strength.get(code, 0) / 3.0)
+                sc = _score_mapping(
+                    row.get("product_name", ""), p_price,
+                    p.get("product_name", ""), our_sale, buy_p,
+                    d_type, platform, sname, pat_bonus
+                )
+                if sc >= 5.0:
+                    scored.append({
+                        "our_product_code": code,
+                        "product_name":     p.get("product_name", code),
+                        "category":         p.get("category", ""),
+                        "unit":             p.get("unit", ""),
+                        "score":            sc,
+                        "our_sale_price":   int(our_sale) if our_sale else None,
+                        "buy_price":        int(buy_p)    if buy_p    else None,
+                        "net_comp_price":   int(net_price) if net_price else None,
+                        "prev_sales_amt":   int(price_totals.get(code, {}).get("prev_sales_amt") or 0),
+                    })
+            scored.sort(key=lambda x: x["score"], reverse=True)
+            top3 = scored[:3]
 
-        # 제안 없는 상품도 포함 (has_suggestions=False)
-        items.append({
-            "product_key":    row["product_key"],
-            "product_name":   row.get("product_name", ""),
-            "spec":           row.get("spec", ""),
-            "price_sale":     int(p_price) if p_price else None,
-            "net_price":      int(net_price) if net_price else None,
-            "delivery_type":  d_type,
-            "fee_pct":        round(fee * 100, 1),
-            "seller_name":    sname,
-            "suggestions":    top3,
-            "has_suggestions": len(top3) > 0,
-        })
+            items.append({
+                "product_key":    row["product_key"],
+                "product_name":   row.get("product_name", ""),
+                "spec":           row.get("spec", ""),
+                "price_sale":     int(p_price) if p_price else None,
+                "net_price":      int(net_price) if net_price else None,
+                "delivery_type":  d_type,
+                "fee_pct":        round(fee * 100, 1),
+                "seller_name":    sname,
+                "suggestions":    top3,
+                "has_suggestions": len(top3) > 0,
+            })
+    except Exception as e:
+        return JSONResponse({"items": items, "total_unmapped": len(unmapped), "error": str(e)})
+
+    # 신뢰도 높은 순 정렬 (제안 없는 항목은 뒤로)
+    items.sort(key=lambda x: x["suggestions"][0]["score"] if x["suggestions"] else -1, reverse=True)
+    return JSONResponse({"items": items[:limit], "total_unmapped": len(unmapped)})
 
     # 신뢰도 높은 순 정렬 (제안 없는 항목은 뒤로)
     items.sort(key=lambda x: x["suggestions"][0]["score"] if x["suggestions"] else -1, reverse=True)

@@ -414,7 +414,16 @@ async function runAISuggest() {
   try {
     const url = `/portal/price-monitor/api/pm-ai/suggest?platform=${encodeURIComponent(currentPlatform)}&seller_name=${encodeURIComponent(currentSeller)}&seller_id=${encodeURIComponent(currentSellerId)}&plant=${currentPlant}&limit=200`;
     const r   = await fetch(url);
-    const d   = await r.json();
+    const raw = await r.text();
+    let d;
+    try { d = JSON.parse(raw); } catch(e) {
+      document.getElementById('wsContent').innerHTML = `<div class="ws-empty" style="color:#ef4444">서버 오류 (HTTP ${r.status})<br><small style="color:#9ca3af">${escHtml(raw.slice(0,300))}</small></div>`;
+      btn.disabled = false; btn.textContent = '🤖 AI 매핑 분석'; return;
+    }
+    if (d.error) {
+      document.getElementById('wsContent').innerHTML = `<div class="ws-empty" style="color:#ef4444">API 오류: ${escHtml(d.error)}</div>`;
+      btn.disabled = false; btn.textContent = '🤖 AI 매핑 분석'; return;
+    }
     suggestItems = d.items || [];
     renderSuggestList(suggestItems, d.total_unmapped || 0);
   } catch(e) {
