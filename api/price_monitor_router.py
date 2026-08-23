@@ -143,8 +143,8 @@ def _get_base_prices(plant: str) -> list[dict]:
 _prev_sales_cache: dict[str, tuple[float, list]] = {}
 
 
-def _get_prev_month_sales(plant: str) -> dict[str, dict]:
-    """전월(1개월 전) 상품별 매출액·수량 합계 반환 (product_code → dict)"""
+def _get_prev_month_sales(plant: str) -> dict[tuple, dict]:
+    """전월(1개월 전) 상품·플랜트별 매출액·수량 합계 반환 ((product_code, plant) → dict)"""
     cache_key = f"prev_sales_{plant}"
     if cache_key in _prev_sales_cache:
         ts, data = _prev_sales_cache[cache_key]
@@ -157,6 +157,7 @@ def _get_prev_month_sales(plant: str) -> dict[str, dict]:
         rows = _q(f"""
             SELECT
                 `자재`                                   AS product_code,
+                `플랜트`                                  AS plant,
                 SUM(CAST(`매출액`   AS DOUBLE)) * 100    AS prev_sales_amt,
                 SUM(CAST(`매출수량` AS DOUBLE))          AS prev_sales_qty
             FROM {_main.T_MAIN}
@@ -164,14 +165,27 @@ def _get_prev_month_sales(plant: str) -> dict[str, dict]:
               AND CAST(`년월` AS INT) = CAST(DATE_FORMAT(ADD_MONTHS(CURRENT_DATE(), -1), 'yyyyMM') AS INT)
               AND `자재` IS NOT NULL
               AND `매출수량` > 0
-            GROUP BY `자재`
+            GROUP BY `자재`, `플랜트`
         """)
-        result = {r["product_code"]: r for r in (rows or [])}
+        result = {(r["product_code"], r["plant"]): r for r in (rows or [])}
         _prev_sales_cache[cache_key] = (time.time(), result)
         return result
     except Exception as e:
         logger.warning(f"[price_monitor] prev_month_sales 조회 실패 ({plant}): {e}")
         return {}
+
+
+def _get_prev_month_sales_totals(plant: str) -> dict[str, dict]:
+    """전월 매출을 product_code 단위로 플랜트 합산 반환 (product_code → dict).
+    매핑 모달, 대시보드 등 플랜트 구분 불필요한 조회에 사용."""
+    per_plant = _get_prev_month_sales(plant)
+    totals: dict[str, dict] = {}
+    for (code, _plant), v in per_plant.items():
+        if code not in totals:
+            totals[code] = {"product_code": code, "prev_sales_amt": 0.0, "prev_sales_qty": 0.0}
+        totals[code]["prev_sales_amt"] = (totals[code]["prev_sales_amt"] or 0) + (v.get("prev_sales_amt") or 0)
+        totals[code]["prev_sales_qty"] = (totals[code]["prev_sales_qty"] or 0) + (v.get("prev_sales_qty") or 0)
+    return totals
 
 
 # ── 운영상품 목록 캐시 (1시간) ─────────────────────────────────────────────
@@ -270,7 +284,7 @@ def _get_our_products_with_batch(plant: str) -> list[dict]:
         if plant == 'ALL':
             plant_cond_wb = f"z.`플랜트` IN ({', '.join(repr(p) for p in PLANTS_REAL)})"
             batch_filter = "AND z.`배치` IN ('01','03')"
-            group_by_wb = "z.`상품코드`, z.`배치`"
+            group_by_wb = "z.`상품코드`, z.`배치`, z.`플랜트`"  # 플랜트 포함: 4120/01 vs 4123/01 분리
         else:
             plant_cond_wb = f"z.`플랜트` = '{plant}'"
             batch_filter = "AND z.`배치` = '01'" if plant == '4120' else "AND z.`배치` IN ('01','03')"
@@ -436,8 +450,8 @@ async def pm_dashboard(
             pass
         return p_code
 
-    # 전월 매출 데이터
-    prev_sales_map = _get_prev_month_sales(plant)
+    # 전월 매출 데이터 (product_code 단위 합산)
+    prev_sales_map = _get_prev_month_sales_totals(plant)
 
     # 전체 매핑 목록
     all_mappings = portal_db.pm_list_all_mappings(plant)
@@ -569,7 +583,9 @@ async def pm_products(
         if map_filter == "unmapped" and mc["total"] > 0:
             continue
 
-        ps = prev_sales.get(code, {})
+        # (product_code, plant) 키로 플랜트별 정확한 매출 조회
+        _plant_key = p.get("plant", "")
+        ps = prev_sales.get((code, _plant_key), {})
         all_rows.append({
             **p,
             "mapping_baemin":     mc["baemin"],
@@ -735,9 +751,9 @@ async def api_our_products(request: Request, plant: str = "ALL", keyword: str = 
     except Exception as e:
         error_msg = str(e)
         products = []
-    # 전체센터 매출 합산 (ALL 고정)
+    # 전체센터 매출 합산 (ALL 고정, product_code 단위)
     try:
-        sales_map = _get_prev_month_sales('ALL')
+        sales_map = _get_prev_month_sales_totals('ALL')
     except Exception:
         sales_map = {}
     # 매출 데이터 합치
@@ -1514,7 +1530,7 @@ async def api_simulation(
 
     # ── 기준가 / 전월 매출 ──
     price_map  = {r["product_code"]: r for r in _get_base_prices(plant)}
-    prev_sales = _get_prev_month_sales(plant)
+    prev_sales = _get_prev_month_sales_totals(plant)
 
     # 상품명 맵
     our_name_map: dict[str, str] = {
