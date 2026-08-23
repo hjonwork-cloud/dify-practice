@@ -1867,17 +1867,23 @@ async def pm_mapping_workspace(
 # ── AI 유사도 매핑 엔진 헬퍼 ────────────────────────────────────────────────
 
 def _tokenize(name: str) -> set[str]:
-    """상품명을 의미 토큰으로 분리. 숫자+단위 조합 보존."""
+    """상품명을 의미 토큰으로 분리. 한국어 bi/tri-gram 포함."""
     import re
     name = (name or "").strip()
-    # 괄호 내용 포함, 특수문자 제거 후 분리
-    name = re.sub(r'[/·•\-_,]', ' ', name)
+    name = re.sub(r'[/·•\-_,\(\)\[\]{}]', ' ', name)
     tokens = set()
+    # 공백 분리 단어 토큰
     for t in re.split(r'\s+', name):
-        t = t.strip('()[]{}')
+        t = t.strip()
         if len(t) >= 2:
             tokens.add(t.lower())
-    return tokens
+            # 한글 포함 단어는 bi-gram / tri-gram 추가
+            korean = re.sub(r'[^가-힣]', '', t)
+            if len(korean) >= 4:
+                for i in range(len(korean) - 1):
+                    tokens.add(korean[i:i+2])
+                for i in range(len(korean) - 2):
+                    tokens.add(korean[i:i+3])
 
 
 def _score_mapping(platform_name: str, platform_price: float | None,
@@ -1888,12 +1894,13 @@ def _score_mapping(platform_name: str, platform_price: float | None,
     """플랫폼 상품 ↔ 우리 상품 유사도 점수 (0~100)."""
     score = 0.0
 
-    # 1. 토큰 겹침 (40점)
+    # 1. 토큰 겹침 (40점) - Overlap Coefficient: 교집합 / min(|pt|,|ot|)
+    #    부분 포함(짧은 이름이 긴 이름의 일부)도 높은 점수 부여
     pt = _tokenize(platform_name)
     ot = _tokenize(our_name)
     if pt and ot:
-        jaccard = len(pt & ot) / len(pt | ot)
-        score += jaccard * 40.0
+        overlap = len(pt & ot) / min(len(pt), len(ot))
+        score += overlap * 40.0
 
     # 2. 가격 유사도 (35점): 플랫폼 실판매가 vs 우리 공급가
     if platform_price and our_sale_price and our_sale_price > 0:
@@ -2022,7 +2029,7 @@ async def api_mapping_ai_suggest(
                 p.get("product_name", ""), our_sale, buy_p,
                 d_type, platform, seller_name, pat_bonus
             )
-            if sc >= 20.0:  # 최소 임계값
+            if sc >= 5.0:  # 최소 임계값
                 scored.append({
                     "our_product_code": code,
                     "product_name":     p.get("product_name", code),
