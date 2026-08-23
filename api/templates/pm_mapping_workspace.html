@@ -222,28 +222,31 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
-// ══ 셀러 목록 로드 ══
+// ══ 셀러 목록 로드 (T_SILVER 기준 전체 셀러) ══
 async function loadSellers(platform) {
   const sel = document.getElementById('selSeller');
-  sel.innerHTML = '<option value="">-- 셀러 선택 --</option>';
-  if (!platform) return;
+  sel.innerHTML = '<option value="">-- 셀러 선택 (로딩중...) --</option>';
+  if (!platform) {
+    sel.innerHTML = '<option value="">-- 셀러 선택 --</option>';
+    return;
+  }
   try {
-    const endpoint = platform === 'baemin'
-      ? '/portal/price-monitor/api/sellers/baemin'
-      : '/portal/price-monitor/api/sellers/foodspring';
-    // 셀러 목록은 기존 시뮬레이션 데이터에서 가져옴 (competition API 활용)
-    const r = await fetch(`/portal/price-monitor/api/competition?plant=${currentPlant}`);
+    const r = await fetch(`/portal/price-monitor/api/sellers-from-silver?platform=${encodeURIComponent(platform)}`);
     const d = await r.json();
-    const sellers = (d.sellers || []).filter(s => s.platform === platform);
-    sellers.forEach(s => {
+    sel.innerHTML = '<option value="">-- 셀러 선택 --</option>';
+    (d.sellers || []).forEach(s => {
       const o = document.createElement('option');
-      o.value = s.seller_id || s.seller_name;
-      o.textContent = `${s.seller_name} (${s.total}개)`;
+      o.value = s.seller_name;
       o.dataset.name = s.seller_name;
-      o.dataset.id   = s.seller_id || '';
+      const unmapped = s.unmapped > 0 ? ` | 미매핑 ${s.unmapped}개` : ' | 전부 매핑됨';
+      o.textContent = `${s.seller_name} (전체 ${s.sku_count}개${unmapped})`;
       sel.appendChild(o);
     });
+    if (currentSeller) {
+      for (let o of sel.options) if (o.dataset.name === currentSeller) o.selected = true;
+    }
   } catch(e) {
+    sel.innerHTML = '<option value="">-- 셀러 로드 실패 --</option>';
     console.warn('셀러 목록 로드 실패', e);
   }
 }
@@ -258,8 +261,8 @@ function onPlatformChange() {
 
 document.getElementById('selSeller').addEventListener('change', function() {
   const opt = this.options[this.selectedIndex];
-  currentSeller   = opt.dataset.name || opt.text;
-  currentSellerId = opt.dataset.id   || '';
+  currentSeller   = opt.dataset.name || opt.value || opt.text;
+  currentSellerId = '';
   document.getElementById('btnAnalyze').disabled = !this.value;
 });
 

@@ -1794,6 +1794,54 @@ async def api_debug_baemin(request: Request):
     return JSONResponse({"ok": True, "results": results})
 
 
+# ── API: T_SILVER 기준 셀러 목록 (워크스페이스용) ────────────────────────────
+
+@router.get("/api/sellers-from-silver")
+async def api_sellers_from_silver(request: Request, platform: str = ""):
+    """실제 크롤링된 모든 셀러 목록 (T_SILVER 기준).
+    platform 필터링 가능. 각 셀러의 SKU 수 함께 반환.
+    """
+    _require_pm_access(request)
+    if not platform:
+        return JSONResponse({"sellers": []})
+    try:
+        max_row = _q(f"SELECT MAX(crawl_date) AS md FROM {T_SILVER} WHERE platform='{platform}'") or []
+        if not max_row or not max_row[0].get("md"):
+            return JSONResponse({"sellers": []})
+        max_date = max_row[0]["md"]
+        rows = _q(f"""
+            SELECT platform_seller_name AS seller_name,
+                   COUNT(*) AS sku_count
+            FROM {T_SILVER}
+            WHERE platform = '{platform}'
+              AND crawl_date = '{max_date}'
+            GROUP BY platform_seller_name
+            ORDER BY sku_count DESC
+        """) or []
+        # 매핑 수 포함
+        all_mappings = portal_db.pm_list_all_mappings("ALL")
+        mapped_cnt: dict[str, int] = {}
+        for m in all_mappings:
+            sn = m.get("seller_name", "")
+            if m.get("platform") == platform and sn:
+                mapped_cnt[sn] = mapped_cnt.get(sn, 0) + 1
+        result = []
+        for r in rows:
+            sn = r.get("seller_name", "")
+            total = r.get("sku_count", 0)
+            mapped = mapped_cnt.get(sn, 0)
+            result.append({
+                "seller_name": sn,
+                "sku_count":   total,
+                "mapped_count": mapped,
+                "unmapped":    total - mapped,
+            })
+        return JSONResponse({"sellers": result, "crawl_date": str(max_date)})
+    except Exception as e:
+        logger.warning(f"[sellers-from-silver] 실패: {e}")
+        return JSONResponse({"sellers": [], "error": str(e)})
+
+
 # ── 화면 8: 매핑 워크스페이스 ────────────────────────────────────────────────
 
 @router.get("/mapping-workspace", response_class=HTMLResponse)
