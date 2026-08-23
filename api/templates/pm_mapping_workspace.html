@@ -223,7 +223,9 @@ let modalTag        = 'normal';
 let modalChecked    = new Set(); // 체크된 product_key들
 
 // ══ 초기화 ══
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+  // T_SILVER 실제 플랫폼 목록 동적 로드
+  await loadPlatforms();
   if (currentPlatform) {
     loadSellers(currentPlatform).then(() => {
       if (currentSeller) {
@@ -234,6 +236,33 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 });
+
+// ══ 플랫폼 목록 동적 로드 ══
+async function loadPlatforms() {
+  const sel = document.getElementById('selPlatform');
+  try {
+    const r = await fetch('/portal/price-monitor/api/sellers-from-silver');
+    const d = await r.json();
+    if (d.platforms && d.platforms.length > 0) {
+      // 실제 platform 값으로 드롭다운 재구성
+      const current = sel.value || currentPlatform;
+      // 기존 하드코딩 옵션 레이블 매핑
+      const labelMap = { baemin: '배민상회', foodspring: '식봄' };
+      sel.innerHTML = '<option value="">-- 플랫폼 선택 --</option>';
+      d.platforms.forEach(p => {
+        const o = document.createElement('option');
+        o.value = p.platform;
+        o.textContent = `${labelMap[p.platform] || p.platform} (${p.sku_count.toLocaleString()}개, 최근: ${p.last_crawl})`;
+        if (p.platform === current) o.selected = true;
+        sel.appendChild(o);
+      });
+      if (current) currentPlatform = current;
+    }
+  } catch(e) {
+    console.warn('플랫폼 목록 로드 실패', e);
+    // 실패해도 기존 하드코딩 옵션 유지
+  }
+}
 
 // ══ 셀러 목록 로드 (T_SILVER 기준 전체 셀러) ══
 async function loadSellers(platform) {

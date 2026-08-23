@@ -1799,15 +1799,32 @@ async def api_debug_baemin(request: Request):
 @router.get("/api/sellers-from-silver")
 async def api_sellers_from_silver(request: Request, platform: str = ""):
     """실제 크롤링된 모든 셀러 목록 (T_SILVER 기준).
-    platform 필터링 가능. 각 셀러의 SKU 수 함께 반환.
+    platform 없으면 실제 platform 목록 반환.
     """
     _require_pm_access(request)
-    if not platform:
-        return JSONResponse({"sellers": []})
     try:
+        # platform 없으면 실제 플랫폼 리스트 반환
+        if not platform:
+            plat_rows = _q(f"""
+                SELECT platform, COUNT(DISTINCT platform_seller_name) AS seller_cnt,
+                       COUNT(*) AS sku_cnt, MAX(crawl_date) AS last_crawl
+                FROM {T_SILVER}
+                GROUP BY platform
+                ORDER BY sku_cnt DESC
+            """) or []
+            return JSONResponse({"platforms": [
+                {"platform": r.get("platform", ""),
+                 "seller_count": r.get("seller_cnt", 0),
+                 "sku_count": r.get("sku_cnt", 0),
+                 "last_crawl": str(r.get("last_crawl", ""))}
+                for r in plat_rows
+            ], "sellers": []})
         max_row = _q(f"SELECT MAX(crawl_date) AS md FROM {T_SILVER} WHERE platform='{platform}'") or []
         if not max_row or not max_row[0].get("md"):
-            return JSONResponse({"sellers": []})
+            # 플랫폼은 있는데 데이터 없음 → 실제 플랫폼 목록도 처럴 반환
+            plat_rows = _q(f"SELECT DISTINCT platform FROM {T_SILVER} ORDER BY platform") or []
+            real_platforms = [r.get("platform", "") for r in plat_rows]
+            return JSONResponse({"sellers": [], "error": f"'{platform}' 플랫폼 데이터 없음. 실제 플랫폼: {real_platforms}"})
         max_date = max_row[0]["md"]
         rows = _q(f"""
             SELECT platform_seller_name AS seller_name,
