@@ -1970,7 +1970,7 @@ def _build_pattern_map(all_mappings: list[dict], our_products: list[dict]) -> di
 
 # ── API: AI 매핑 제안 ─────────────────────────────────────────────────────
 
-@router.get("/api/mapping/ai-debug")
+@router.get("/api/pm-ai/debug")
 async def api_mapping_ai_debug(
     request: Request,
     platform: str = "",
@@ -2062,7 +2062,7 @@ async def api_mapping_ai_debug(
     })
 
 
-@router.get("/api/mapping/ai-suggest")
+@router.get("/api/pm-ai/suggest")
 async def api_mapping_ai_suggest(
     request: Request,
     platform: str = "",
@@ -2190,7 +2190,7 @@ async def api_mapping_ai_suggest(
 
 # ── API: 유사 플랫폼 상품 조회 (팝업용, 전체 셀러) ─────────────────────────
 
-@router.get("/api/mapping/similar-platform")
+@router.get("/api/pm-ai/similar")
 async def api_mapping_similar_platform(
     request: Request,
     product_name: str = "",

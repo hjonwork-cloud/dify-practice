@@ -367,25 +367,17 @@ document.getElementById('selPlant').addEventListener('change', function() {
 
 // ══ 진단 실행 ══
 async function runDebug() {
-  const url = `/portal/price-monitor/api/mapping/ai-debug?platform=${encodeURIComponent(currentPlatform)}&seller_name=${encodeURIComponent(currentSeller)}&plant=${currentPlant}`;
+  const url = `/portal/price-monitor/api/pm-ai/debug?platform=${encodeURIComponent(currentPlatform)}&seller_name=${encodeURIComponent(currentSeller)}&plant=${currentPlant}`;
   try {
     const r = await fetch(url);
-    const raw = await r.text();  // 먼저 텍스트로 받음
+    const raw = await r.text();
     let d;
     try { d = JSON.parse(raw); } catch(e) {
       alert(`[진단 API 응답 파싱 실패]\nHTTP ${r.status}\n\n${raw.slice(0, 500)}`);
       return;
     }
-    // FastAPI HTTPException: {"detail": "..."}
-    if (d.detail) {
-      alert(`[진단 API 접근 오류]\n${d.detail}\n\nURL: ${url}`);
-      return;
-    }
-    // 커스텀 에러
-    if (d.error) {
-      alert(`[진단 API 오류]\n${d.error}\n\n[traceback]\n${d.traceback||''}`);
-      return;
-    }
+    if (d.detail) { alert(`[진단 API 접근 오류]\n${d.detail}\n\nURL: ${url}`); return; }
+    if (d.error)  { alert(`[진단 API 오류]\n${d.error}\n\n[traceback]\n${d.traceback||''}`); return; }
     let msg = `[진단 결과]\n`
       + `플랫폼 전체 행: ${d.plat_total_rows ?? 'N/A'}\n`
       + `이미 매핑된 수: ${d.mapped_count ?? 'N/A'}\n`
@@ -395,21 +387,17 @@ async function runDebug() {
       msg += `\n[단계별 결과]\n`;
       Object.entries(d.steps).forEach(([k,v]) => { msg += `  ${k}: ${v}\n`; });
     } else {
-      msg += `\n(steps 키 없음 — 구버전 응답)\n응답 키: ${Object.keys(d).join(', ')}`;
+      msg += `\n(steps 키 없음)\n응답 키: ${Object.keys(d).join(', ')}`;
     }
-    msg += `\n[샘플 점수 (플랫폼상품 vs 우리상품)]\n`;
+    msg += `\n[샘플 점수]\n`;
     if (d.sample_scores && d.sample_scores.length) {
-      d.sample_scores.forEach(s => {
-        msg += `  "${s.plat}" vs "${s.our}" → ${s.score}점\n`;
-      });
+      d.sample_scores.forEach(s => { msg += `  "${s.plat}" vs "${s.our}" → ${s.score}점\n`; });
     } else {
-      msg += `  (샘플 없음 — 플랫폼 데이터 또는 우리 상품이 비어있음)`;
+      msg += `  (없음)`;
     }
     if (d.plat_sample && d.plat_sample.length) {
       msg += `\n\n[샘플 플랫폼 SKU]\n`;
-      d.plat_sample.forEach(p => {
-        msg += `  ${p.product_name} / 가격:${p.price_sale} / 배송:${p.delivery_type}\n`;
-      });
+      d.plat_sample.forEach(p => { msg += `  ${p.product_name} / 가격:${p.price_sale} / 배송:${p.delivery_type}\n`; });
     }
     alert(msg);
   } catch(e) { alert('진단 실패: ' + e.message + '\nURL: ' + url); }
@@ -424,7 +412,7 @@ async function runAISuggest() {
   document.getElementById('kpiBar').style.display = 'none';
 
   try {
-    const url = `/portal/price-monitor/api/mapping/ai-suggest?platform=${encodeURIComponent(currentPlatform)}&seller_name=${encodeURIComponent(currentSeller)}&seller_id=${encodeURIComponent(currentSellerId)}&plant=${currentPlant}&limit=200`;
+    const url = `/portal/price-monitor/api/pm-ai/suggest?platform=${encodeURIComponent(currentPlatform)}&seller_name=${encodeURIComponent(currentSeller)}&seller_id=${encodeURIComponent(currentSellerId)}&plant=${currentPlant}&limit=200`;
     const r   = await fetch(url);
     const d   = await r.json();
     suggestItems = d.items || [];
@@ -581,7 +569,7 @@ async function openMappingModal(cardIdx) {
   // 유사 플랫폼 상품 로드 (전체 셀러)
   document.getElementById('modalPlatList').innerHTML = '<div style="text-align:center;padding:20px"><div class="spinner"></div></div>';
   try {
-    const r = await fetch(`/portal/price-monitor/api/mapping/similar-platform?product_name=${encodeURIComponent(item.product_name)}&platform=${currentPlatform}&exclude_key=`);
+    const r = await fetch(`/portal/price-monitor/api/pm-ai/similar?product_name=${encodeURIComponent(item.product_name)}&platform=${currentPlatform}&exclude_key=`);
     const d = await r.json();
     modalPlatItems = d.data || [];
     renderModalPlatList();
