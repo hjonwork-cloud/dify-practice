@@ -250,7 +250,7 @@ def _get_our_products(plant: str) -> list[dict]:
               AND COALESCE(m.`자재그룹`, '') != '5140'
             GROUP BY {group_by}
             ORDER BY COALESCE(MAX(m.`상품명`), z.`상품코드`)
-            LIMIT 30000
+            LIMIT 100000
         """)
         _product_cache[cache_key] = (time.time(), rows)
         return rows
@@ -294,7 +294,7 @@ def _get_our_products_with_batch(plant: str) -> list[dict]:
               AND COALESCE(m.`자재그룹`, '') != '5140'
             GROUP BY {group_by_wb}
             ORDER BY COALESCE(MAX(m.`상품명`), z.`상품코드`), z.`배치`
-            LIMIT 30000
+            LIMIT 100000
         """)
         _product_cache[cache_key] = (time.time(), rows)
         return rows
