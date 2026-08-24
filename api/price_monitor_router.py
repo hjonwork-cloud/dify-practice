@@ -2540,7 +2540,7 @@ def poc_benchmark(n: int = 100, seed: int = 42, threshold: float = 20.0):
     }
     def _score_v2(platform_name: str, our_name: str, our_prod: dict) -> float:
         # 온도조건 하드필터
-        our_temp = (our_prod.get("온도조건") or "").strip()
+        our_temp = (our_prod.get("temp_cond") or "").strip()
         plat_frozen = "냉동" in (platform_name or "")
         our_frozen  = "냉동" in our_temp
         if plat_frozen and not our_frozen and our_temp:
@@ -2582,7 +2582,7 @@ def poc_benchmark(n: int = 100, seed: int = 42, threshold: float = 20.0):
 
         # 용량: 총중량 직접 비교 우선, 없으면 파싱
         try:
-            our_wg = float(our_prod.get("총중량") or our_prod.get("순중량") or 0) or None
+            our_wg = float(our_prod.get("total_weight") or our_prod.get("net_weight") or 0) or None
         except (TypeError, ValueError):
             our_wg = None
         if our_wg and our_wg > 0:
@@ -2603,9 +2603,9 @@ def poc_benchmark(n: int = 100, seed: int = 42, threshold: float = 20.0):
 
         # 카테고리 계층 보너스
         our_cat = " ".join(filter(None, [
-            our_prod.get("대분류") or "",
-            our_prod.get("중분류") or "",
-            our_prod.get("소분류") or "",
+            our_prod.get("cat1") or "",
+            our_prod.get("cat2") or "",
+            our_prod.get("cat3") or "",
             our_prod.get("product_group") or "",
         ]))
         if our_cat:
@@ -2626,12 +2626,12 @@ def poc_benchmark(n: int = 100, seed: int = 42, threshold: float = 20.0):
             MAX(m.`단위`)                                   AS unit,
             MAX(m.`자재그룹명`)                             AS product_group,
             MAX(m.`자재그룹`)                               AS material_group,
-            MAX(m.`대분류`)                                 AS 대분류,
-            MAX(m.`중분류`)                                 AS 중분류,
-            MAX(m.`소분류`)                                 AS 소분류,
-            MAX(m.`총중량`)                                 AS 총중량,
-            MAX(m.`순중량`)                                 AS 순중량,
-            MAX(m.`온도조건`)                               AS 온도조건
+            MAX(m.`대분류`)                                 AS cat1,
+            MAX(m.`중분류`)                                 AS cat2,
+            MAX(m.`소분류`)                                 AS cat3,
+            MAX(m.`총중량`)                                 AS total_weight,
+            MAX(m.`순중량`)                                 AS net_weight,
+            MAX(m.`온도조건`)                               AS temp_cond
         FROM {T_ZSDR} z
         LEFT JOIN {T_ZMM60} m ON z.`상품코드` = m.`상품코드`
         WHERE z.`플랜트` IN ({', '.join(repr(p) for p in PLANTS_REAL)})
@@ -2769,9 +2769,9 @@ def poc_diag():
         rows = _q(f"""
             SELECT z.`상품코드` AS product_code,
                    COALESCE(MAX(m.`상품명`), z.`상품코드`) AS product_name,
-                   MAX(m.`총중량`) AS 총중량,
-                   MAX(m.`온도조건`) AS 온도조건,
-                   MAX(m.`중분류`) AS 중분류
+                   MAX(m.`총중량`) AS total_weight,
+                   MAX(m.`온도조건`) AS temp_cond,
+                   MAX(m.`중분류`) AS cat2
             FROM {T_ZSDR} z
             LEFT JOIN {T_ZMM60} m ON z.`상품코드` = m.`상품코드`
             WHERE z.`플랜트` IN ('4120')
