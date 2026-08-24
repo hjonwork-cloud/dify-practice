@@ -2091,8 +2091,10 @@ def _score_mapping(platform_name: str, platform_price: float | None,
             pv, pu = _parse_volume(platform_name)
             if pv and pu == 'g':  # g↔g 비교만 (단위 불확실성 방지)
                 rv = min(pv, our_wg) / max(pv, our_wg)
-                score += 15.0 if rv >= 0.9 else (-5.0 if rv >= 0.6 else -8.0)
-                _vol_applied = True
+                if rv >= 0.9:
+                    score += 15.0
+                    _vol_applied = True
+                # 불일치 시 패널티 없음 (폴백: 상품명 파싱으로 판단)
     if not _vol_applied:
         pv, pu = _parse_volume(platform_name)
         ov, ou = _parse_volume(our_name)
