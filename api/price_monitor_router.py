@@ -2553,14 +2553,15 @@ def poc_benchmark(n: int = 100, seed: int = 42, threshold: float = 20.0):
         'new', 'ea',
     }
     def _score_v2(platform_name: str, our_name: str, our_prod: dict) -> float:
-        # 온도조건 하드필터
-        our_temp = (our_prod.get("temp_cond") or "").strip()
-        plat_frozen = "냉동" in (platform_name or "")
-        our_frozen  = "냉동" in our_temp
-        if plat_frozen and not our_frozen and our_temp:
-            return 0.0
-        if not plat_frozen and our_frozen:
-            return 0.0
+        # 온도조건 하드필터: 향후 코드 매핑 파악 후 활성화 예정
+        # (현재 ZMM60의 온도조건 값이 코드값이라 "냉동" 텍스트 비교 불가)
+        # our_temp = (our_prod.get("temp_cond") or "").strip()
+        # plat_frozen = "냉동" in (platform_name or "")
+        # our_frozen  = "냉동" in our_temp
+        # if plat_frozen and not our_frozen and our_temp:
+        #     return 0.0
+        # if not plat_frozen and our_frozen:
+        #     return 0.0
 
         # 텍스트 + 키워드 (v1과 동일 로직)
         _unit_pat = __import__('re').compile(r'^\d[\d.]*[a-zA-Z]*$')
@@ -2595,8 +2596,10 @@ def poc_benchmark(n: int = 100, seed: int = 42, threshold: float = 20.0):
         score = text_score + keyword_bonus
 
         # 용량: 총중량 직접 비교 우선, 없으면 파싱
+        # ZMM60 총중량은 KG 단위 → g으로 변환 (*1000)
         try:
-            our_wg = float(our_prod.get("total_weight") or our_prod.get("net_weight") or 0) or None
+            our_wkg = float(our_prod.get("total_weight") or our_prod.get("net_weight") or 0) or None
+            our_wg  = our_wkg * 1000 if our_wkg else None  # KG → g
         except (TypeError, ValueError):
             our_wg = None
         if our_wg and our_wg > 0:
