@@ -22,3 +22,12 @@ api/.token_cache
 api/action_store.db
 api/$null
 .env.local
+
+static_assets/
+
+_check_*.py
+_watch_*.py
+_verify_*.py
+_query_*.py
+_zmm_*.py
+_test_*.py

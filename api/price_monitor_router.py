@@ -716,6 +716,18 @@ async def api_debug_pub(request: Request):
         result["zmm60_temp_cond_dist"] = rows
     except Exception as e:
         result["zmm60_temp_cond_error"] = str(e)
+    # 온도조건 코드 의미 확인: 냉동 키워드 상품명 vs 코드 매핑
+    try:
+        rows = _q(f"""
+            SELECT `온도조건` AS temp_cond, `상품명` AS product_name, `상품코드` AS code
+            FROM {T_ZMM60}
+            WHERE (`상품명` LIKE '%냉동%' OR `상품명` LIKE '%냉장%' OR `상품명` LIKE '%실온%')
+              AND `온도조건` IS NOT NULL
+            LIMIT 15
+        """)
+        result["zmm60_temp_cond_samples"] = rows
+    except Exception as e:
+        result["zmm60_temp_cond_samples_error"] = str(e)
     return JSONResponse(result)
 
 
