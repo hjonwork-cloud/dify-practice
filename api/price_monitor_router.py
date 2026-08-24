@@ -2656,7 +2656,7 @@ async def poc_benchmark(n: int = 100, seed: int = 42, threshold: float = 20.0):
           AND z.`배치` IN ('01','03')
           AND COALESCE(m.`자재그룹`, '') != '5140'
         GROUP BY z.`상품코드`
-        LIMIT 10000
+        LIMIT 3000
       """)
 
       # ── 플랫폼 샘플 로드 ─────────────────────────────────────────────────────
