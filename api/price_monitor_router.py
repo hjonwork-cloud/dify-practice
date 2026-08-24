@@ -1906,6 +1906,38 @@ def _strip_seller(name: str, seller_name: str) -> str:
     return cleaned if len(cleaned) >= 2 else (name or "").strip()
 
 
+def _parse_volume(name: str):
+    """상품명에서 용량/중량을 ml 또는 g 단위로 추출.
+    포장수량(단위x개수)이 있으면 실용량(vol * qty)으로 계산.
+    반환: (ml_or_g: float, unit: str) 또는 (None, None)
+    """
+    import re as _r
+    text = (name or "").lower()
+    # 포장수량 패턴: 200g*10ea, 200g*10, 1.8l*6 등
+    qty = 1
+    m_qty = _r.search(r'(\d[\d.]*)[\s]*[\*x×][\s]*(\d+)[\s]*(?:ea|pk|pcs)?', text)
+    if m_qty:
+        try: qty = int(float(m_qty.group(2)))
+        except: qty = 1
+    patterns = [
+        (_r.compile(r'(\d[\d.]+)\s*l\b'),     lambda m: float(m.group(1)) * 1000, 'ml'),
+        (_r.compile(r'(\d[\d.]*)\s*ml\b'),    lambda m: float(m.group(1)),        'ml'),
+        (_r.compile(r'(\d[\d.]+)\s*kg\b'),    lambda m: float(m.group(1)) * 1000, 'g'),
+        (_r.compile(r'(\d[\d.]*)\s*g\b'),     lambda m: float(m.group(1)),        'g'),
+        (_r.compile(r'(\d[\d.]*)\s*키로\b'),  lambda m: float(m.group(1)) * 1000, 'g'),
+    ]
+    for pat, fn, unit in patterns:
+        m = pat.search(text)
+        if m:
+            try:
+                val = fn(m) * qty
+                if val > 0:
+                    return val, unit
+            except Exception:
+                pass
+    return None, None
+
+
 def _tokenize(name: str) -> set[str]:
     """상품명을 의미 토큰으로 분리.
     bi/tri-gram은 한글 6자 이상 단어에만 적용
@@ -2001,6 +2033,19 @@ def _score_mapping(platform_name: str, platform_price: float | None,
         return 0.0
 
     score = text_score + keyword_bonus
+
+    # 3-a. 용량/중량 정규화 매칭 (+15 / -5 / -20점)
+    #      md파일 관련: '규격 정규화' 단계 — 1.8L→1800ml, 18L→18000ml 후 비율 비교
+    pv, pu = _parse_volume(platform_name)
+    ov, ou = _parse_volume(our_name)
+    if pv and ov and pu == ou:          # 같은 단위계(ml vs ml, g vs g)
+        ratio_v = min(pv, ov) / max(pv, ov)
+        if ratio_v >= 0.9:              # ±10% 이내 → 일치 보너스
+            score += 15.0
+        elif ratio_v >= 0.6:            # ~2배 차이 → 소폭 패널티
+            score -= 5.0
+        else:                           # 2배 이상 차이 → 강한 패널티 (1.8L vs 18L)
+            score -= 20.0
 
     # 3. 가격 유사도 (20점): 플랫폼 실판매가 vs 우리 공급가
     #    우리 공급가 데이터 없으면 중립점수(10점) 부여 → 가격 데이터 없는 상품이 부당하게 밀리지 않도록
