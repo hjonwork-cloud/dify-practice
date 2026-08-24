@@ -2728,7 +2728,9 @@ async def poc_benchmark(n: int = 100, seed: int = 42, threshold: float = 20.0,
             pv, pu = _parse_volume(platform_name)
             if pv and pu == 'g':    # g ↔ g 비교만 (ml는 단위 불일치로 스킵)
                 rv = min(pv, our_wg) / max(pv, our_wg)
-                score += 15.0 if rv >= 0.9 else (-5.0 if rv >= 0.6 else -8.0)
+                if rv >= 0.9:
+                    score += 15.0
+                # 불일치해도 패널티 없음 (보너스만 적용)
         else:
             pv, pu = _parse_volume(platform_name)
             ov, ou = _parse_volume(our_name)
@@ -2738,9 +2740,9 @@ async def poc_benchmark(n: int = 100, seed: int = 42, threshold: float = 20.0,
 
         # 카테고리 계층 보너스
         our_cat = " ".join(filter(None, [
-            our_prod.get("cat1") or "",
-            our_prod.get("cat2") or "",
-            our_prod.get("cat3") or "",
+            our_prod.get("category") or "",
+            our_prod.get("mid_category") or "",
+            our_prod.get("sub_category") or "",
             our_prod.get("product_group") or "",
         ]))
         if our_cat:
