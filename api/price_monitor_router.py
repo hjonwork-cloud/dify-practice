@@ -258,6 +258,7 @@ def _get_our_products(plant: str) -> list[dict]:
                 MAX(m.`소분류`)                                AS sub_category,
                 MAX(m.`총중량`)                                AS total_weight,
                 MAX(m.`순중량`)                                AS net_weight,
+                MAX(m.`온도조건`)                               AS temp_cond,
                 MAX(COALESCE(m.`세금분류명`, '과세'))            AS tax_class,
                 MIN(z.`플랜트`)                                AS plant,
                 MAX(COALESCE(z.`사용보류`, ''))                AS use_hold
@@ -2005,6 +2006,18 @@ def _score_mapping(platform_name: str, platform_price: float | None,
     import re as _re
     score = 0.0
 
+    # 0. 온도조건 하드필터 (our_prod 있을 때)
+    # 코드: 10=상온, 20=냉장, 30=냉동, 40=초냉동
+    if our_prod:
+        _our_temp = (our_prod.get("temp_cond") or "").strip()
+        if _our_temp:
+            _plat_frozen = "냉동" in (platform_name or "")
+            _plat_chilled = "냉장" in (platform_name or "")
+            if _plat_frozen and _our_temp not in {"30", "40"}:
+                return 0.0  # 플랫폼=냉동, 우리=비냉동
+            if _plat_chilled and _our_temp not in {"20"}:
+                return 0.0  # 플랫폼=냉장, 우리=비냉장
+
     pt = _tokenize(platform_name)
     ot = _tokenize(our_name)
 
@@ -2649,7 +2662,19 @@ async def poc_benchmark(n: int = 100, seed: int = 42, threshold: float = 20.0,
     def _score_v2(platform_name: str, our_name: str, our_prod: dict) -> float:
         # 온도조건 하드필터: 향후 코드 매핑 파악 후 활성화 예정
         # (현재 ZMM60의 온도조건 값이 코드값이라 "냉동" 텍스트 비교 불가)
-        # our_temp = (our_prod.get("temp_cond") or "").strip()
+        our_temp = (our_prod.get("temp_cond") or "").strip()
+        plat_lower_tc = platform_name
+        plat_frozen = "냉동" in plat_lower_tc
+        plat_chilled = "냉장" in plat_lower_tc
+        if our_temp and (plat_frozen or plat_chilled):
+            _TEMP_FROZEN = {"30", "40"}  # 냉동/초냉동
+            _TEMP_CHILLED = {"20"}       # 냉장
+            our_is_frozen = our_temp in _TEMP_FROZEN
+            our_is_chilled = our_temp in _TEMP_CHILLED
+            if plat_frozen and not our_is_frozen:
+                return 0.0  # 플랫폼=냉동, 우리=비냉동 → 불일치
+            if plat_chilled and not our_is_chilled:
+                return 0.0  # 플랫폼=냉장, 우리=비냉장 → 불일치
         # plat_frozen = "냉동" in (platform_name or "")
         # our_frozen  = "냉동" in our_temp
         # if plat_frozen and not our_frozen and our_temp:
