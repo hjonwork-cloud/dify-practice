@@ -2661,11 +2661,11 @@ async def poc_benchmark(n: int = 100, seed: int = 42, threshold: float = 20.0):
 
       # ── 플랫폼 샘플 로드 ─────────────────────────────────────────────────────
       plat_rows = _q(f"""
-        SELECT p.product_id, p.product_name, p.seller_name,
-               p.platform, p.price, p.delivery_type
+        SELECT p.product_key, p.product_name, p.platform_seller_name AS seller_name,
+               p.platform, p.price_sale AS price, p.delivery_type
         FROM {T_SILVER} p
         INNER JOIN (SELECT MAX(crawl_date) AS md FROM {T_SILVER}) l ON p.crawl_date = l.md
-        WHERE p.product_name IS NOT NULL AND p.price > 0
+        WHERE p.product_name IS NOT NULL AND p.price_sale > 0
         ORDER BY RAND({seed})
         LIMIT {n}
       """)
