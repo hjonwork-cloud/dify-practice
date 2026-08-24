@@ -2631,6 +2631,7 @@ async def poc_benchmark(n: int = 100, seed: int = 42, threshold: float = 20.0,
 
         # 용량: 총중량 직접 비교 우선, 없으면 파싱
         # ZMM60 총중량은 KG 단위 → g으로 변환 (*1000)
+        # 페널티는 v1보다 완화 (-8pt): 단위 불확실성으로 인한 오패널티 방지
         try:
             our_wkg = float(our_prod.get("total_weight") or our_prod.get("net_weight") or 0) or None
             our_wg  = our_wkg * 1000 if our_wkg else None  # KG → g
@@ -2638,19 +2639,15 @@ async def poc_benchmark(n: int = 100, seed: int = 42, threshold: float = 20.0,
             our_wg = None
         if our_wg and our_wg > 0:
             pv, pu = _parse_volume(platform_name)
-            if pv and pu == 'g':
+            if pv and pu == 'g':    # g ↔ g 비교만 (ml는 단위 불일치로 스킵)
                 rv = min(pv, our_wg) / max(pv, our_wg)
-                score += 15.0 if rv >= 0.9 else (-5.0 if rv >= 0.6 else -20.0)
-            elif pv and pu == 'ml':
-                rv = min(pv, our_wg) / max(pv, our_wg)
-                if rv >= 0.9:   score += 10.0
-                elif rv < 0.5:  score -= 15.0
+                score += 15.0 if rv >= 0.9 else (-5.0 if rv >= 0.6 else -8.0)
         else:
             pv, pu = _parse_volume(platform_name)
             ov, ou = _parse_volume(our_name)
             if pv and ov and pu == ou:
                 rv = min(pv, ov) / max(pv, ov)
-                score += 15.0 if rv >= 0.9 else (-5.0 if rv >= 0.6 else -20.0)
+                score += 15.0 if rv >= 0.9 else (-5.0 if rv >= 0.6 else -8.0)  # -20 → -8 완화
 
         # 카테고리 계층 보너스
         our_cat = " ".join(filter(None, [
