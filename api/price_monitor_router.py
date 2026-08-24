@@ -2519,6 +2519,11 @@ async def api_mapping_bulk_add(request: Request):
 # ── POC 매칭 벤치마크 ────────────────────────────────────────────────────────
 # GET /portal/price-monitor/api/poc-benchmark?n=100&seed=42&threshold=20
 # 인증 불필요 (debug-pub과 동일하게 공개 엔드포인트로 운영)
+@router.get("/api/poc-ping")
+def poc_ping():
+    return JSONResponse({"ok": True, "msg": "poc ping works"})
+
+
 @router.get("/api/poc-benchmark")
 def poc_benchmark(n: int = 100, seed: int = 42, threshold: float = 20.0):
     """
