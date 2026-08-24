@@ -2529,6 +2529,15 @@ def poc_benchmark(n: int = 100, seed: int = 42, threshold: float = 20.0):
     """
     import time as _time
     import traceback as _tb
+    import decimal as _decimal
+
+    def _jsafe(v):
+        """JSON 직렬화 안전 변환"""
+        if isinstance(v, _decimal.Decimal):
+            return float(v)
+        if hasattr(v, 'isoformat'):   # date/datetime
+            return v.isoformat()
+        return v
 
     # ── v2 전용 개선 스코어링 ─────────────────────────────────────────────
     _STOP = {
@@ -2659,7 +2668,7 @@ def poc_benchmark(n: int = 100, seed: int = 42, threshold: float = 20.0):
     details = []
     for plat in plat_rows:
         pname  = plat.get("product_name", "")
-        pprice = plat.get("price")
+        pprice = _jsafe(plat.get("price"))
         seller = plat.get("seller_name", "")
 
         best_v1 = {"score": 0.0, "code": "", "name": ""}
@@ -2781,7 +2790,8 @@ def poc_diag():
             LIMIT 5
         """)
         result["step1_our_rows"] = "OK"
-        result["step1_sample"] = rows[:2]
+        result["step1_count"] = len(rows)
+        result["step1_sample"] = [str(r) for r in rows[:2]]
     except Exception as e:
         result["step1_our_rows"] = f"FAIL: {e}"
         result["step1_tb"] = _tb.format_exc()
@@ -2795,7 +2805,7 @@ def poc_diag():
             WHERE p.price > 0 LIMIT 3
         """)
         result["step2_plat_rows"] = "OK"
-        result["step2_sample"] = plat
+        result["step2_sample"] = [str(r) for r in plat]
     except Exception as e:
         result["step2_plat_rows"] = f"FAIL: {e}"
         result["step2_tb"] = _tb.format_exc()
