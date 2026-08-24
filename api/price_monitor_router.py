@@ -254,6 +254,10 @@ def _get_our_products(plant: str) -> list[dict]:
                 MAX(m.`자재그룹명`)                            AS product_group,
                 MAX(m.`자재그룹`)                              AS material_group,
                 MAX(m.`대분류`)                                AS category,
+                MAX(m.`중분류`)                                AS mid_category,
+                MAX(m.`소분류`)                                AS sub_category,
+                MAX(m.`총중량`)                                AS total_weight,
+                MAX(m.`순중량`)                                AS net_weight,
                 MAX(COALESCE(m.`세금분류명`, '과세'))            AS tax_class,
                 MIN(z.`플랜트`)                                AS plant,
                 MAX(COALESCE(z.`사용보류`, ''))                AS use_hold
@@ -1965,10 +1969,12 @@ def _score_mapping(platform_name: str, platform_price: float | None,
                    our_name: str, our_sale_price: float | None,
                    buy_price: float | None,
                    delivery_type: str, platform: str, seller_name: str,
-                   pattern_bonus: float = 0.0) -> float:
+                   pattern_bonus: float = 0.0,
+                   our_prod: dict | None = None) -> float:
     """플랫폼 상품 ↔ 우리 상품 유사도 점수 (0~100).
 
     가중치: 텍스트 60 + 키워드보너스 15 + 가격 20 + 패턴 10 = max 100
+    our_prod 제공 시 v2 개선 적용: 카테고리 동치 보너스 + 총중량 직접 비교
     게이트: 텍스트+키워드 < 10점 시 0 반환 (가격만으로는 제안 불가)
     """
     import re as _re
@@ -2034,18 +2040,46 @@ def _score_mapping(platform_name: str, platform_price: float | None,
 
     score = text_score + keyword_bonus
 
-    # 3-a. 용량/중량 정규화 매칭 (+15 / -5 / -20점)
-    #      md파일 관련: '규격 정규화' 단계 — 1.8L→1800ml, 18L→18000ml 후 비율 비교
-    pv, pu = _parse_volume(platform_name)
-    ov, ou = _parse_volume(our_name)
-    if pv and ov and pu == ou:          # 같은 단위계(ml vs ml, g vs g)
-        ratio_v = min(pv, ov) / max(pv, ov)
-        if ratio_v >= 0.9:              # ±10% 이내 → 일치 보너스
-            score += 15.0
-        elif ratio_v >= 0.6:            # ~2배 차이 → 소폭 패널티
-            score -= 5.0
-        else:                           # 2배 이상 차이 → 강한 패널티 (1.8L vs 18L)
-            score -= 20.0
+    # 3-a. 용량/중량 정규화 매칭 (+15 / -5 / -8점)
+    #      our_prod.total_weight(KG) 제공 시 직접 비교, 없으면 상품명 파싱
+    _vol_applied = False
+    if our_prod:
+        try:
+            our_wkg = float(our_prod.get("total_weight") or our_prod.get("net_weight") or 0) or None
+            our_wg  = our_wkg * 1000 if our_wkg else None  # KG → g
+        except (TypeError, ValueError):
+            our_wg = None
+        if our_wg and our_wg > 0:
+            pv, pu = _parse_volume(platform_name)
+            if pv and pu == 'g':  # g↔g 비교만 (단위 불확실성 방지)
+                rv = min(pv, our_wg) / max(pv, our_wg)
+                score += 15.0 if rv >= 0.9 else (-5.0 if rv >= 0.6 else -8.0)
+                _vol_applied = True
+    if not _vol_applied:
+        pv, pu = _parse_volume(platform_name)
+        ov, ou = _parse_volume(our_name)
+        if pv and ov and pu == ou:          # 같은 단위계(ml vs ml, g vs g)
+            ratio_v = min(pv, ov) / max(pv, ov)
+            if ratio_v >= 0.9:
+                score += 15.0
+            elif ratio_v >= 0.6:
+                score -= 5.0
+            else:                           # 2배 이상 차이 (1.8L vs 18L 등) → 패널티 완화 -20→-8
+                score -= 8.0
+
+    # 3-b. 카테고리 계층 보너스 (our_prod 제공 시, 최대 12점)
+    #      대분류/중분류/소분류가 플랫폼 상품명 토큰과 겹칠 때 부여
+    if our_prod:
+        _cat_str = " ".join(filter(None, [
+            our_prod.get("category") or "",
+            our_prod.get("mid_category") or "",
+            our_prod.get("sub_category") or "",
+            our_prod.get("product_group") or "",
+        ]))
+        if _cat_str:
+            _cat_tokens = _tokenize(_cat_str) & pt
+            _cat_m = {t for t in _cat_tokens if len(t) >= 2 and t not in _STOP}
+            score += min(len(_cat_m) * 4, 12)  # 토큰 1개당 4점, 최대 12점
 
     # 3. 가격 유사도 (20점): 플랫폼 실판매가 vs 우리 공급가
     #    우리 공급가 데이터 없으면 중립점수(10점) 부여 → 가격 데이터 없는 상품이 부당하게 밀리지 않도록
@@ -2293,7 +2327,8 @@ async def _do_ai_suggest(request, platform, seller_name, plant, limit):
                 sc = _score_mapping(
                     clean_pname, p_price,
                     p.get("product_name", ""), our_sale, buy_p,
-                    d_type, platform, sname, pat_bonus
+                    d_type, platform, sname, pat_bonus,
+                    our_prod=p
                 )
                 if sc >= 20.0:
                     scored.append({
