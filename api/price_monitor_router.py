@@ -2528,6 +2528,7 @@ def poc_benchmark(n: int = 100, seed: int = 42, threshold: float = 20.0):
     반환: 요약 통계 + 100건 상세 결과
     """
     import time as _time
+    import traceback as _tb
 
     # ── v2 전용 개선 스코어링 ─────────────────────────────────────────────
     _STOP = {
@@ -2756,3 +2757,53 @@ def poc_benchmark(n: int = 100, seed: int = 42, threshold: float = 20.0):
         },
         "details": details,
     })
+
+
+@router.get("/api/poc-diag")
+def poc_diag():
+    """POC 진단: 각 단계별 에러 확인"""
+    import traceback as _tb
+    result = {}
+    # step1: 자사 상품 쿼리
+    try:
+        rows = _q(f"""
+            SELECT z.`상품코드` AS product_code,
+                   COALESCE(MAX(m.`상품명`), z.`상품코드`) AS product_name,
+                   MAX(m.`총중량`) AS 총중량,
+                   MAX(m.`온도조건`) AS 온도조건,
+                   MAX(m.`중분류`) AS 중분류
+            FROM {T_ZSDR} z
+            LEFT JOIN {T_ZMM60} m ON z.`상품코드` = m.`상품코드`
+            WHERE z.`플랜트` IN ('4120')
+              AND z.`배치` = '01'
+              AND COALESCE(m.`자재그룹`, '') != '5140'
+            GROUP BY z.`상품코드`
+            LIMIT 5
+        """)
+        result["step1_our_rows"] = "OK"
+        result["step1_sample"] = rows[:2]
+    except Exception as e:
+        result["step1_our_rows"] = f"FAIL: {e}"
+        result["step1_tb"] = _tb.format_exc()
+        return JSONResponse(result)
+    # step2: 플랫폼 샘플
+    try:
+        plat = _q(f"""
+            SELECT p.product_name, p.price, p.platform
+            FROM {T_SILVER} p
+            INNER JOIN (SELECT MAX(crawl_date) AS md FROM {T_SILVER}) l ON p.crawl_date = l.md
+            WHERE p.price > 0 LIMIT 3
+        """)
+        result["step2_plat_rows"] = "OK"
+        result["step2_sample"] = plat
+    except Exception as e:
+        result["step2_plat_rows"] = f"FAIL: {e}"
+        result["step2_tb"] = _tb.format_exc()
+        return JSONResponse(result)
+    # step3: 스코어링 테스트
+    try:
+        test_s = _score_mapping("사과식초 1.8L", 5000, "사과식초1.8L", None, None, "직배송", "쿠팡", "", 0.0)
+        result["step3_score_v1"] = test_s
+    except Exception as e:
+        result["step3_score_v1"] = f"FAIL: {e}"
+    return JSONResponse(result)
