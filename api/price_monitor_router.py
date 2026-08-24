@@ -2524,13 +2524,47 @@ def poc_ping():
     return JSONResponse({"ok": True, "msg": "poc ping works"})
 
 
+@router.get("/api/poc-result")
+def poc_result():
+    """poc-benchmark?save=1 실행 후 저장된 결과 조회"""
+    import json as _json, os as _os
+    path = "/tmp/poc_latest.json"
+    if not _os.path.exists(path):
+        return JSONResponse({"error": "결과 없음. /api/poc-benchmark?save=1 먼저 실행"})
+    with open(path, encoding="utf-8") as f:
+        data = _json.load(f)
+    # summary + details[:20]만 반환 (크기 절약)
+    return JSONResponse({
+        "meta":    data.get("meta"),
+        "summary": data.get("summary"),
+        "details": data.get("details", [])[:20],
+        "total_details": len(data.get("details", [])),
+    })
+
+
+@router.get("/api/poc-run-async")
+def poc_run_async(n: int = 100, seed: int = 42, threshold: float = 20.0):
+    """백그라운드 스레드로 poc-benchmark 실행. 즉시 반환."""
+    import threading as _threading
+    def _run():
+        import requests as _req
+        url = f"http://localhost:8000/portal/price-monitor/api/poc-benchmark?n={n}&seed={seed}&threshold={threshold}&save=1"
+        try:
+            _req.get(url, timeout=700)
+        except Exception:
+            pass
+    _threading.Thread(target=_run, daemon=True).start()
+    return JSONResponse({"status": "started", "n": n, "seed": seed,
+                         "note": "2~3분 후 /api/poc-result 로 결과 조회"})
+
+
 @router.get("/api/poc-benchmark")
-async def poc_benchmark(n: int = 100, seed: int = 42, threshold: float = 20.0):
+async def poc_benchmark(n: int = 100, seed: int = 42, threshold: float = 20.0,
+                        save: int = 0):
     """
     현행(v1) vs 개선(v2) AI 매칭 알고리즘 POC 비교.
-    - v1: 현행 _score_mapping() 로직 (텍스트+용량 파싱)
-    - v2: 온도조건 하드필터 + 총중량 직접비교 + 카테고리 계층 보너스 추가
-    반환: 요약 통계 + 100건 상세 결과
+    save=1 이면 결과를 서버 파일(/tmp/poc_latest.json)에 저장하고 즉시 반환.
+    /api/poc-result 엔드포인트로 결과 조회.
     """
     import time as _time
     import traceback as _tb
@@ -2752,7 +2786,7 @@ async def poc_benchmark(n: int = 100, seed: int = 42, threshold: float = 20.0):
           return b
 
       elapsed = round(_time.time() - t0, 1)
-      return JSONResponse({
+      result_data = {
           "meta": {
               "sample_n": total, "our_products_n": len(our_rows),
               "threshold": threshold, "seed": seed, "elapsed_sec": elapsed,
@@ -2771,7 +2805,16 @@ async def poc_benchmark(n: int = 100, seed: int = 42, threshold: float = 20.0):
               "v2_distribution": _bucket([d["v2_score"] for d in details]),
           },
           "details": details,
-      })
+      }
+      if save:
+          import json as _json
+          with open("/tmp/poc_latest.json", "w", encoding="utf-8") as _f:
+              _json.dump(result_data, _f, ensure_ascii=False)
+          return JSONResponse({"status": "saved", "elapsed_sec": elapsed,
+                               "sample_n": total, "v1_match_rate": result_data["summary"]["v1_match_rate"],
+                               "v2_match_rate": result_data["summary"]["v2_match_rate"],
+                               "score_delta": result_data["summary"]["score_delta"]})
+      return JSONResponse(result_data)
     except Exception as _score_err:
         return JSONResponse({
             "error": f"스코어링 실패: {_score_err}",
