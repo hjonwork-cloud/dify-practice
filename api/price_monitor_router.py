@@ -2818,7 +2818,13 @@ async def poc_benchmark(n: int = 100, seed: int = 42, threshold: float = 20.0,
             )
             if s1 > best_v1["score"]:
                 best_v1 = {"score": s1, "code": op.get("product_code",""), "name": oname}
-            s2 = _score_v2(pname, oname, op)
+            s2 = _score_mapping(
+                platform_name=pname, platform_price=pprice,
+                our_name=oname, our_sale_price=None,
+                buy_price=None, delivery_type=plat.get("delivery_type", "직배송"),
+                platform=plat.get("platform", ""), seller_name=seller,
+                pattern_bonus=0.0, our_prod=op
+            )
             if s2 > best_v2["score"]:
                 best_v2 = {"score": s2, "code": op.get("product_code",""), "name": oname}
 
