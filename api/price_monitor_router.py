@@ -2007,16 +2007,18 @@ def _score_mapping(platform_name: str, platform_price: float | None,
     score = 0.0
 
     # 0. 온도조건 하드필터 (our_prod 있을 때)
-    # 코드: 10=상온, 20=냉장, 30=냉동, 40=초냉동
-    if our_prod:
-        _our_temp = (our_prod.get("temp_cond") or "").strip()
-        if _our_temp:
-            _plat_frozen = "냉동" in (platform_name or "")
-            _plat_chilled = "냉장" in (platform_name or "")
-            if _plat_frozen and _our_temp not in {"30", "40"}:
-                return 0.0  # 플랫폼=냉동, 우리=비냉동
-            if _plat_chilled and _our_temp not in {"20"}:
-                return 0.0  # 플랫폼=냉장, 우리=비냉장
+    # 코드: 10=상온(?), 20=냉장, 30=냉동, 40=초냉동 (확인 중)
+    # 현재 코드 10 상품에도 냉동 상품명이 존재하므로 잠정 비활성화
+    # TODO: 코드 의미 확인 후 재활성화
+    # if our_prod:
+    #     _our_temp = (our_prod.get("temp_cond") or "").strip()
+    #     if _our_temp:
+    #         _plat_frozen = "냉동" in (platform_name or "")
+    #         _plat_chilled = "냉장" in (platform_name or "")
+    #         if _plat_frozen and _our_temp not in {"30", "40"}:
+    #             return 0.0  # 플랫폼=냉동, 우리=비냉동
+    #         if _plat_chilled and _our_temp not in {"20"}:
+    #             return 0.0  # 플랫폼=냉장, 우리=비냉장
 
     pt = _tokenize(platform_name)
     ot = _tokenize(our_name)
