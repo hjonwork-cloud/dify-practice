@@ -703,6 +703,19 @@ async def api_debug_pub(request: Request):
         result["zsdr_4120_total"] = rows[0]["cnt"] if rows else 0
     except Exception as e:
         result["zsdr_4120_count_error"] = str(e)
+    # 온도조건 코드 분포 (냉동/냉장 필터 활성화용)
+    try:
+        rows = _q(f"""
+            SELECT `온도조건` AS temp_cond, COUNT(*) AS cnt
+            FROM {T_ZMM60}
+            WHERE `온도조건` IS NOT NULL
+            GROUP BY `온도조건`
+            ORDER BY cnt DESC
+            LIMIT 20
+        """)
+        result["zmm60_temp_cond_dist"] = rows
+    except Exception as e:
+        result["zmm60_temp_cond_error"] = str(e)
     return JSONResponse(result)
 
 
