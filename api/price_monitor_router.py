@@ -2525,7 +2525,7 @@ def poc_ping():
 
 
 @router.get("/api/poc-benchmark")
-def poc_benchmark(n: int = 100, seed: int = 42, threshold: float = 20.0):
+async def poc_benchmark(n: int = 100, seed: int = 42, threshold: float = 20.0):
     """
     현행(v1) vs 개선(v2) AI 매칭 알고리즘 POC 비교.
     - v1: 현행 _score_mapping() 로직 (텍스트+용량 파싱)
@@ -2671,7 +2671,7 @@ def poc_benchmark(n: int = 100, seed: int = 42, threshold: float = 20.0):
       """)
     except Exception as _load_err:
         return JSONResponse({"error": f"데이터 로드 실패: {_load_err}",
-                             "traceback": _tb.format_exc()}, status_code=500)
+                             "traceback": _tb.format_exc()}, status_code=200)  # 디버깅용 200
 
     if not our_rows or not plat_rows:
         return JSONResponse({"error": "데이터 로드 실패", "our_count": len(our_rows), "plat_count": len(plat_rows)})
