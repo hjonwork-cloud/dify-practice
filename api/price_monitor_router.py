@@ -2634,8 +2634,9 @@ def poc_benchmark(n: int = 100, seed: int = 42, threshold: float = 20.0):
         return round(max(0.0, min(100.0, score)), 1)
 
     # ── 자사 상품 로드 (신규 컬럼 포함) ──────────────────────────────────────
-    t0 = _time.time()
-    our_rows = _q(f"""
+    try:
+      t0 = _time.time()
+      our_rows = _q(f"""
         SELECT
             z.`상품코드`                                    AS product_code,
             COALESCE(MAX(m.`상품명`), z.`상품코드`)        AS product_name,
@@ -2656,10 +2657,10 @@ def poc_benchmark(n: int = 100, seed: int = 42, threshold: float = 20.0):
           AND COALESCE(m.`자재그룹`, '') != '5140'
         GROUP BY z.`상품코드`
         LIMIT 100000
-    """)
+      """)
 
-    # ── 플랫폼 샘플 로드 ─────────────────────────────────────────────────────
-    plat_rows = _q(f"""
+      # ── 플랫폼 샘플 로드 ─────────────────────────────────────────────────────
+      plat_rows = _q(f"""
         SELECT p.product_id, p.product_name, p.seller_name,
                p.platform, p.price, p.delivery_type
         FROM {T_SILVER} p
@@ -2667,14 +2668,18 @@ def poc_benchmark(n: int = 100, seed: int = 42, threshold: float = 20.0):
         WHERE p.product_name IS NOT NULL AND p.price > 0
         ORDER BY RAND({seed})
         LIMIT {n}
-    """)
+      """)
+    except Exception as _load_err:
+        return JSONResponse({"error": f"데이터 로드 실패: {_load_err}",
+                             "traceback": _tb.format_exc()}, status_code=500)
 
     if not our_rows or not plat_rows:
         return JSONResponse({"error": "데이터 로드 실패", "our_count": len(our_rows), "plat_count": len(plat_rows)})
 
     # ── 스코어링 ─────────────────────────────────────────────────────────────
     details = []
-    for plat in plat_rows:
+    try:
+      for plat in plat_rows:
         pname  = plat.get("product_name", "")
         pprice = _jsafe(plat.get("price"))
         seller = plat.get("seller_name", "")
@@ -2684,8 +2689,6 @@ def poc_benchmark(n: int = 100, seed: int = 42, threshold: float = 20.0):
 
         for op in our_rows:
             oname = op.get("product_name") or op.get("product_code", "")
-
-            # v1: 현행 _score_mapping (가격 파라미터 없이 텍스트+용량만)
             s1 = _score_mapping(
                 platform_name=pname, platform_price=pprice,
                 our_name=oname, our_sale_price=None,
@@ -2695,8 +2698,6 @@ def poc_benchmark(n: int = 100, seed: int = 42, threshold: float = 20.0):
             )
             if s1 > best_v1["score"]:
                 best_v1 = {"score": s1, "code": op.get("product_code",""), "name": oname}
-
-            # v2: 개선 알고리즘
             s2 = _score_v2(pname, oname, op)
             if s2 > best_v2["score"]:
                 best_v2 = {"score": s2, "code": op.get("product_code",""), "name": oname}
@@ -2704,7 +2705,6 @@ def poc_benchmark(n: int = 100, seed: int = 42, threshold: float = 20.0):
         v1_ok = best_v1["score"] >= threshold
         v2_ok = best_v2["score"] >= threshold
         diff  = round(best_v2["score"] - best_v1["score"], 1)
-
         if not v1_ok and v2_ok:       trans = "신규매칭"
         elif v1_ok and not v2_ok:     trans = "매칭손실"
         elif v1_ok and v2_ok:
@@ -2728,52 +2728,56 @@ def poc_benchmark(n: int = 100, seed: int = 42, threshold: float = 20.0):
             "transition":  trans,
         })
 
-    # ── 통계 ─────────────────────────────────────────────────────────────────
-    total = len(details)
-    v1_ok_n = sum(1 for d in details if d["v1_ok"])
-    v2_ok_n = sum(1 for d in details if d["v2_ok"])
-    v1_avg  = round(sum(d["v1_score"] for d in details) / total, 1)
-    v2_avg  = round(sum(d["v2_score"] for d in details) / total, 1)
-    v1_zero = sum(1 for d in details if d["v1_score"] == 0)
-    v2_zero = sum(1 for d in details if d["v2_score"] == 0)
+      # ── 통계 ───────────────────────────────────────────────────────────────
+      total = len(details)
+      v1_ok_n = sum(1 for d in details if d["v1_ok"])
+      v2_ok_n = sum(1 for d in details if d["v2_ok"])
+      v1_avg  = round(sum(d["v1_score"] for d in details) / max(total, 1), 1)
+      v2_avg  = round(sum(d["v2_score"] for d in details) / max(total, 1), 1)
+      v1_zero = sum(1 for d in details if d["v1_score"] == 0)
+      v2_zero = sum(1 for d in details if d["v2_score"] == 0)
+      trans_counts: dict = {}
+      for d in details:
+          trans_counts[d["transition"]] = trans_counts.get(d["transition"], 0) + 1
 
-    trans_counts: dict = {}
-    for d in details:
-        trans_counts[d["transition"]] = trans_counts.get(d["transition"], 0) + 1
+      def _bucket(scores):
+          b = {"0": 0, "1-20": 0, "21-40": 0, "41-60": 0, "61-80": 0, "81-100": 0}
+          for s in scores:
+              if s == 0:      b["0"] += 1
+              elif s <= 20:   b["1-20"] += 1
+              elif s <= 40:   b["21-40"] += 1
+              elif s <= 60:   b["41-60"] += 1
+              elif s <= 80:   b["61-80"] += 1
+              else:           b["81-100"] += 1
+          return b
 
-    def _bucket(scores):
-        b = {"0": 0, "1-20": 0, "21-40": 0, "41-60": 0, "61-80": 0, "81-100": 0}
-        for s in scores:
-            if s == 0:      b["0"] += 1
-            elif s <= 20:   b["1-20"] += 1
-            elif s <= 40:   b["21-40"] += 1
-            elif s <= 60:   b["41-60"] += 1
-            elif s <= 80:   b["61-80"] += 1
-            else:           b["81-100"] += 1
-        return b
-
-    elapsed = round(_time.time() - t0, 1)
-
-    return JSONResponse({
-        "meta": {
-            "sample_n": total, "our_products_n": len(our_rows),
-            "threshold": threshold, "seed": seed, "elapsed_sec": elapsed,
-        },
-        "summary": {
-            "v1_match_rate": f"{v1_ok_n}/{total} ({v1_ok_n/total*100:.1f}%)",
-            "v2_match_rate": f"{v2_ok_n}/{total} ({v2_ok_n/total*100:.1f}%)",
-            "match_delta":   f"{v2_ok_n - v1_ok_n:+d}건 ({(v2_ok_n-v1_ok_n)/total*100:+.1f}%p)",
-            "v1_avg_score":  v1_avg,
-            "v2_avg_score":  v2_avg,
-            "score_delta":   round(v2_avg - v1_avg, 1),
-            "v1_zero":       v1_zero,
-            "v2_zero":       v2_zero,
-            "transitions":   trans_counts,
-            "v1_distribution": _bucket([d["v1_score"] for d in details]),
-            "v2_distribution": _bucket([d["v2_score"] for d in details]),
-        },
-        "details": details,
-    })
+      elapsed = round(_time.time() - t0, 1)
+      return JSONResponse({
+          "meta": {
+              "sample_n": total, "our_products_n": len(our_rows),
+              "threshold": threshold, "seed": seed, "elapsed_sec": elapsed,
+          },
+          "summary": {
+              "v1_match_rate": f"{v1_ok_n}/{total} ({v1_ok_n/total*100:.1f}%)" if total else "0/0",
+              "v2_match_rate": f"{v2_ok_n}/{total} ({v2_ok_n/total*100:.1f}%)" if total else "0/0",
+              "match_delta":   f"{v2_ok_n - v1_ok_n:+d}건 ({(v2_ok_n-v1_ok_n)/total*100:+.1f}%p)" if total else "0",
+              "v1_avg_score":  v1_avg,
+              "v2_avg_score":  v2_avg,
+              "score_delta":   round(v2_avg - v1_avg, 1),
+              "v1_zero":       v1_zero,
+              "v2_zero":       v2_zero,
+              "transitions":   trans_counts,
+              "v1_distribution": _bucket([d["v1_score"] for d in details]),
+              "v2_distribution": _bucket([d["v2_score"] for d in details]),
+          },
+          "details": details,
+      })
+    except Exception as _score_err:
+        return JSONResponse({
+            "error": f"스코어링 실패: {_score_err}",
+            "partial_details": len(details),
+            "traceback": _tb.format_exc(),
+        }, status_code=200)  # 200으로 반환해 body 확인 가능하게
 
 
 @router.get("/api/poc-diag")
