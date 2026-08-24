@@ -2516,5 +2516,243 @@ async def api_mapping_bulk_add(request: Request):
     return JSONResponse({"ok": True, "added": ok_count, "results": results})
 
 
+# ── POC 매칭 벤치마크 ────────────────────────────────────────────────────────
+# GET /portal/price-monitor/api/poc-benchmark?n=100&seed=42&threshold=20
+# 인증 불필요 (debug-pub과 동일하게 공개 엔드포인트로 운영)
+@router.get("/api/poc-benchmark")
+def poc_benchmark(n: int = 100, seed: int = 42, threshold: float = 20.0):
+    """
+    현행(v1) vs 개선(v2) AI 매칭 알고리즘 POC 비교.
+    - v1: 현행 _score_mapping() 로직 (텍스트+용량 파싱)
+    - v2: 온도조건 하드필터 + 총중량 직접비교 + 카테고리 계층 보너스 추가
+    반환: 요약 통계 + 100건 상세 결과
+    """
+    import time as _time
 
+    # ── v2 전용 개선 스코어링 ─────────────────────────────────────────────
+    _STOP = {
+        '슬라이스', '냉동', '냉장', '신선', '건조', '원물', '국산', '수입',
+        '일반', '특대', '대용량', '소포장', '개별', '낱개', '원터치', '직배송',
+        '무료배송', '당일배송', '묶음', '세트', '팩', '개입', '입점',
+        '필리핀산', '국내산', '수입산', '베트남산', '미국산', '호주산',
+        'new', 'ea',
+    }
+    def _score_v2(platform_name: str, our_name: str, our_prod: dict) -> float:
+        # 온도조건 하드필터
+        our_temp = (our_prod.get("온도조건") or "").strip()
+        plat_frozen = "냉동" in (platform_name or "")
+        our_frozen  = "냉동" in our_temp
+        if plat_frozen and not our_frozen and our_temp:
+            return 0.0
+        if not plat_frozen and our_frozen:
+            return 0.0
 
+        # 텍스트 + 키워드 (v1과 동일 로직)
+        _unit_pat = __import__('re').compile(r'^\d[\d.]*[a-zA-Z]*$')
+        pt = _tokenize(platform_name)
+        ot = _tokenize(our_name)
+        text_score = 0.0
+        if pt and ot:
+            common = pt & ot
+            common_text = {t for t in common
+                           if not _unit_pat.match(t) and t not in _STOP}
+            if common_text:
+                overlap = len(common_text) / min(len(pt), len(ot))
+                text_score = overlap * 60.0
+                short_r = sum(1 for t in common_text if len(t) <= 2) / max(len(common_text), 1)
+                text_score -= short_r * 8.0
+            text_score = max(0.0, text_score)
+
+        import re as _re
+        keyword_bonus = 0.0
+        our_l  = (our_name or "").lower()
+        plat_l = (platform_name or "").lower()
+        for w in [t for t in pt if len(t) >= 3 and t not in _STOP and not _re.match(r'^[\d\.]+', t)]:
+            if w in our_l:
+                keyword_bonus = 15.0; break
+        if not keyword_bonus:
+            for w in [t for t in ot if len(t) >= 3 and t not in _STOP and not _re.match(r'^[\d\.]+', t)]:
+                if w in plat_l:
+                    keyword_bonus = 15.0; break
+
+        if text_score + keyword_bonus < 10.0:
+            return 0.0
+        score = text_score + keyword_bonus
+
+        # 용량: 총중량 직접 비교 우선, 없으면 파싱
+        try:
+            our_wg = float(our_prod.get("총중량") or our_prod.get("순중량") or 0) or None
+        except (TypeError, ValueError):
+            our_wg = None
+        if our_wg and our_wg > 0:
+            pv, pu = _parse_volume(platform_name)
+            if pv and pu == 'g':
+                rv = min(pv, our_wg) / max(pv, our_wg)
+                score += 15.0 if rv >= 0.9 else (-5.0 if rv >= 0.6 else -20.0)
+            elif pv and pu == 'ml':
+                rv = min(pv, our_wg) / max(pv, our_wg)
+                if rv >= 0.9:   score += 10.0
+                elif rv < 0.5:  score -= 15.0
+        else:
+            pv, pu = _parse_volume(platform_name)
+            ov, ou = _parse_volume(our_name)
+            if pv and ov and pu == ou:
+                rv = min(pv, ov) / max(pv, ov)
+                score += 15.0 if rv >= 0.9 else (-5.0 if rv >= 0.6 else -20.0)
+
+        # 카테고리 계층 보너스
+        our_cat = " ".join(filter(None, [
+            our_prod.get("대분류") or "",
+            our_prod.get("중분류") or "",
+            our_prod.get("소분류") or "",
+            our_prod.get("product_group") or "",
+        ]))
+        if our_cat:
+            cat_m = {t for t in (_tokenize(our_cat) & _tokenize(platform_name))
+                     if len(t) >= 2 and t not in _STOP}
+            score += min(len(cat_m) * 5, 15)
+
+        score += 10.0  # 가격 중립
+        return round(max(0.0, min(100.0, score)), 1)
+
+    # ── 자사 상품 로드 (신규 컬럼 포함) ──────────────────────────────────────
+    t0 = _time.time()
+    our_rows = _q(f"""
+        SELECT
+            z.`상품코드`                                    AS product_code,
+            COALESCE(MAX(m.`상품명`), z.`상품코드`)        AS product_name,
+            MAX(m.`자재유형명`)                             AS brand,
+            MAX(m.`단위`)                                   AS unit,
+            MAX(m.`자재그룹명`)                             AS product_group,
+            MAX(m.`자재그룹`)                               AS material_group,
+            MAX(m.`대분류`)                                 AS 대분류,
+            MAX(m.`중분류`)                                 AS 중분류,
+            MAX(m.`소분류`)                                 AS 소분류,
+            MAX(m.`총중량`)                                 AS 총중량,
+            MAX(m.`순중량`)                                 AS 순중량,
+            MAX(m.`온도조건`)                               AS 온도조건
+        FROM {T_ZSDR} z
+        LEFT JOIN {T_ZMM60} m ON z.`상품코드` = m.`상품코드`
+        WHERE z.`플랜트` IN ({', '.join(repr(p) for p in PLANTS_REAL)})
+          AND z.`배치` IN ('01','03')
+          AND COALESCE(m.`자재그룹`, '') != '5140'
+        GROUP BY z.`상품코드`
+        LIMIT 100000
+    """)
+
+    # ── 플랫폼 샘플 로드 ─────────────────────────────────────────────────────
+    plat_rows = _q(f"""
+        SELECT p.product_id, p.product_name, p.seller_name,
+               p.platform, p.price, p.delivery_type
+        FROM {T_SILVER} p
+        INNER JOIN (SELECT MAX(crawl_date) AS md FROM {T_SILVER}) l ON p.crawl_date = l.md
+        WHERE p.product_name IS NOT NULL AND p.price > 0
+        ORDER BY RAND({seed})
+        LIMIT {n}
+    """)
+
+    if not our_rows or not plat_rows:
+        return JSONResponse({"error": "데이터 로드 실패", "our_count": len(our_rows), "plat_count": len(plat_rows)})
+
+    # ── 스코어링 ─────────────────────────────────────────────────────────────
+    details = []
+    for plat in plat_rows:
+        pname  = plat.get("product_name", "")
+        pprice = plat.get("price")
+        seller = plat.get("seller_name", "")
+
+        best_v1 = {"score": 0.0, "code": "", "name": ""}
+        best_v2 = {"score": 0.0, "code": "", "name": ""}
+
+        for op in our_rows:
+            oname = op.get("product_name") or op.get("product_code", "")
+
+            # v1: 현행 _score_mapping (가격 파라미터 없이 텍스트+용량만)
+            s1 = _score_mapping(
+                platform_name=pname, platform_price=pprice,
+                our_name=oname, our_sale_price=None,
+                buy_price=None, delivery_type=plat.get("delivery_type", "직배송"),
+                platform=plat.get("platform", ""), seller_name=seller,
+                pattern_bonus=0.0
+            )
+            if s1 > best_v1["score"]:
+                best_v1 = {"score": s1, "code": op.get("product_code",""), "name": oname}
+
+            # v2: 개선 알고리즘
+            s2 = _score_v2(pname, oname, op)
+            if s2 > best_v2["score"]:
+                best_v2 = {"score": s2, "code": op.get("product_code",""), "name": oname}
+
+        v1_ok = best_v1["score"] >= threshold
+        v2_ok = best_v2["score"] >= threshold
+        diff  = round(best_v2["score"] - best_v1["score"], 1)
+
+        if not v1_ok and v2_ok:       trans = "신규매칭"
+        elif v1_ok and not v2_ok:     trans = "매칭손실"
+        elif v1_ok and v2_ok:
+            trans = "점수상승" if diff > 5 else ("점수하락" if diff < -5 else "동일")
+        else:                          trans = "미매칭유지"
+
+        details.append({
+            "plat_name":   pname[:60],
+            "platform":    plat.get("platform",""),
+            "seller":      seller[:20],
+            "plat_price":  pprice,
+            "v1_score":    best_v1["score"],
+            "v1_name":     best_v1["name"][:40],
+            "v1_code":     best_v1["code"],
+            "v1_ok":       v1_ok,
+            "v2_score":    best_v2["score"],
+            "v2_name":     best_v2["name"][:40],
+            "v2_code":     best_v2["code"],
+            "v2_ok":       v2_ok,
+            "diff":        diff,
+            "transition":  trans,
+        })
+
+    # ── 통계 ─────────────────────────────────────────────────────────────────
+    total = len(details)
+    v1_ok_n = sum(1 for d in details if d["v1_ok"])
+    v2_ok_n = sum(1 for d in details if d["v2_ok"])
+    v1_avg  = round(sum(d["v1_score"] for d in details) / total, 1)
+    v2_avg  = round(sum(d["v2_score"] for d in details) / total, 1)
+    v1_zero = sum(1 for d in details if d["v1_score"] == 0)
+    v2_zero = sum(1 for d in details if d["v2_score"] == 0)
+
+    trans_counts: dict = {}
+    for d in details:
+        trans_counts[d["transition"]] = trans_counts.get(d["transition"], 0) + 1
+
+    def _bucket(scores):
+        b = {"0": 0, "1-20": 0, "21-40": 0, "41-60": 0, "61-80": 0, "81-100": 0}
+        for s in scores:
+            if s == 0:      b["0"] += 1
+            elif s <= 20:   b["1-20"] += 1
+            elif s <= 40:   b["21-40"] += 1
+            elif s <= 60:   b["41-60"] += 1
+            elif s <= 80:   b["61-80"] += 1
+            else:           b["81-100"] += 1
+        return b
+
+    elapsed = round(_time.time() - t0, 1)
+
+    return JSONResponse({
+        "meta": {
+            "sample_n": total, "our_products_n": len(our_rows),
+            "threshold": threshold, "seed": seed, "elapsed_sec": elapsed,
+        },
+        "summary": {
+            "v1_match_rate": f"{v1_ok_n}/{total} ({v1_ok_n/total*100:.1f}%)",
+            "v2_match_rate": f"{v2_ok_n}/{total} ({v2_ok_n/total*100:.1f}%)",
+            "match_delta":   f"{v2_ok_n - v1_ok_n:+d}건 ({(v2_ok_n-v1_ok_n)/total*100:+.1f}%p)",
+            "v1_avg_score":  v1_avg,
+            "v2_avg_score":  v2_avg,
+            "score_delta":   round(v2_avg - v1_avg, 1),
+            "v1_zero":       v1_zero,
+            "v2_zero":       v2_zero,
+            "transitions":   trans_counts,
+            "v1_distribution": _bucket([d["v1_score"] for d in details]),
+            "v2_distribution": _bucket([d["v2_score"] for d in details]),
+        },
+        "details": details,
+    })
