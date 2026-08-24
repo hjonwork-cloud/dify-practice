@@ -2007,18 +2007,16 @@ def _score_mapping(platform_name: str, platform_price: float | None,
     score = 0.0
 
     # 0. 온도조건 하드필터 (our_prod 있을 때)
-    # 코드: 10=상온(?), 20=냉장, 30=냉동, 40=초냉동 (확인 중)
-    # 현재 코드 10 상품에도 냉동 상품명이 존재하므로 잠정 비활성화
-    # TODO: 코드 의미 확인 후 재활성화
-    # if our_prod:
-    #     _our_temp = (our_prod.get("temp_cond") or "").strip()
-    #     if _our_temp:
-    #         _plat_frozen = "냉동" in (platform_name or "")
-    #         _plat_chilled = "냉장" in (platform_name or "")
-    #         if _plat_frozen and _our_temp not in {"30", "40"}:
-    #             return 0.0  # 플랫폼=냉동, 우리=비냉동
-    #         if _plat_chilled and _our_temp not in {"20"}:
-    #             return 0.0  # 플랫폼=냉장, 우리=비냉장
+    # 코드: 10=상온, 20=냉장, 30=냉동, 40=초저온냉동
+    if our_prod:
+        _our_temp = (our_prod.get("temp_cond") or "").strip()
+        if _our_temp:
+            _plat_frozen = "냉동" in (platform_name or "")
+            _plat_chilled = "냉장" in (platform_name or "")
+            if _plat_frozen and _our_temp not in {"30", "40"}:
+                return 0.0  # 플랫폼=냉동, 우리=상온/냉장 → 불일치
+            if _plat_chilled and _our_temp not in {"20"}:
+                return 0.0  # 플랫폼=냉장, 우리=상온/냉동 → 불일치
 
     pt = _tokenize(platform_name)
     ot = _tokenize(our_name)
@@ -2027,7 +2025,8 @@ def _score_mapping(platform_name: str, platform_price: float | None,
     #    숫자+단위 토큰(1kg, 836g 등)과 범용 수식어(슬라이스, 냉동 등)는 텍스트 점수에서 제외
     _unit_pat2 = __import__('re').compile(r'^\d[\d.]*[a-zA-Z]*$')
     _STOP = {
-        '슬라이스', '냉동', '냉장', '신선', '건조', '원물', '국산', '수입',
+        # '냉동', '냉장' → 온도조건 하드필터로 처리, STOP에서 제거 (텍스트 점수에 반영)
+        '슬라이스', '신선', '건조', '원물', '국산', '수입',
         '일반', '특대', '대용량', '소포장', '개별', '낱개', '원터치', '직배송',
         '무료배송', '당일배송', '묶음', '세트', '팩', '개입', '입점',
         '필리핀산', '국내산', '수입산', '베트남산', '미국산', '호주산',
@@ -2828,7 +2827,8 @@ async def poc_benchmark(n: int = 100, seed: int = 42, threshold: float = 20.0,
                 pattern_bonus=0.0, our_prod=op
             )
             if s2 > best_v2["score"]:
-                best_v2 = {"score": s2, "code": op.get("product_code",""), "name": oname}
+                best_v2 = {"score": s2, "code": op.get("product_code",""), "name": oname,
+                           "temp": op.get("temp_cond","")}
 
         v1_ok = best_v1["score"] >= threshold
         v2_ok = best_v2["score"] >= threshold
@@ -2840,20 +2840,21 @@ async def poc_benchmark(n: int = 100, seed: int = 42, threshold: float = 20.0,
         else:                          trans = "미매칭유지"
 
         details.append({
-            "plat_name":   pname[:60],
+            "plat_name":   pname[:80],
             "platform":    plat.get("platform",""),
-            "seller":      seller[:20],
+            "seller":      seller[:30],
             "plat_price":  pprice,
             "v1_score":    best_v1["score"],
-            "v1_name":     best_v1["name"][:40],
+            "v1_name":     best_v1["name"][:60],
             "v1_code":     best_v1["code"],
             "v1_ok":       v1_ok,
             "v2_score":    best_v2["score"],
-            "v2_name":     best_v2["name"][:40],
+            "v2_name":     best_v2["name"][:60],
             "v2_code":     best_v2["code"],
             "v2_ok":       v2_ok,
             "diff":        diff,
             "transition":  trans,
+            "v2_temp":     best_v2.get("temp",""),
         })
 
       # ── 통계 ───────────────────────────────────────────────────────────────
