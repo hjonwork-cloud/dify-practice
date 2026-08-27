@@ -1977,8 +1977,8 @@ def _tokenize(name: str) -> set[str]:
         if len(t) >= 2:
             tokens.add(t.lower())
             korean = re.sub(r'[^가-힣]', '', t)
-            # bi/tri-gram은 6자 이상 한글 단어에만 (주요 상품명 단어)
-            if len(korean) >= 6:
+            # bi/tri-gram은 5자 이상 한글 단어에 적용 (불닭볶음, 치킨양념 등 5자 상품명 포함)
+            if len(korean) >= 5:
                 for i in range(len(korean) - 1):
                     tokens.add(korean[i:i+2])
                 for i in range(len(korean) - 2):
@@ -2098,12 +2098,23 @@ def _score_mapping(platform_name: str, platform_price: float | None,
         '대림', '롯데', '하인즈', '풍전', '해표', '샘표', '한성', '미성',
         '굿프랜즈', '면사랑', '칠갑', '뚜레반', '영풍', '사옹원', '농심',
         '신송', '청솔', 'be', 'chef', 'sf', 'k', 'new',
+        '범아', '조흥', '해인식품', '웅진', '룸모', '델가', '피니',
+        '분다버그', '시미루', '코다노', '다봄', '현대',
         '국내산', '중국산', '이탈리아산', '태국산', '베트남산', '호주산',
         '미국산', '필리핀산', '뉴질랜드산', '칠레산', '오스트리아산',
     }
     _plat_core = {t for t in plat_meaningful if t not in _BRAND_STOP and len(t) >= 3}
     _our_core  = {t for t in our_meaningful  if t not in _BRAND_STOP and len(t) >= 3}
-    if _plat_core and _our_core and not (_plat_core & _our_core):
+    # 포함 관계 체크: '자판기' ⊂ '자판기용' 처럼 한쪽이 다른 쪽을 포함하면 겹침으로 처리
+    def _has_core_overlap(pc: set, oc: set) -> bool:
+        if pc & oc:
+            return True
+        for _p in pc:
+            for _o in oc:
+                if _p in _o or _o in _p:
+                    return True
+        return False
+    if _plat_core and _our_core and not _has_core_overlap(_plat_core, _our_core):
         score -= 20.0   # 핵심어 0% 겹침 → 브랜드만 같은 다른 상품
 
     # 3-a. 용량/중량 정규화 매칭 (+15 / -5 / -8점)
