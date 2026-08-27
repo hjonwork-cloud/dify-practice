@@ -1937,18 +1937,13 @@ def _strip_seller(name: str, seller_name: str) -> str:
 
 
 def _parse_volume(name: str):
-    """상품명에서 용량/중량을 ml 또는 g 단위로 추출.
-    포장수량(단위x개수)이 있으면 실용량(vol * qty)으로 계산.
+    """상품명에서 단위 용량/중량을 ml 또는 g 단위로 추출.
+    *N 수량은 무시하고 단위 용량만 반환 (이중계산 방지).
+    예) 200g*10ea → 200g, 1.8l*6 → 1800ml
     반환: (ml_or_g: float, unit: str) 또는 (None, None)
     """
     import re as _r
     text = (name or "").lower()
-    # 포장수량 패턴: 200g*10ea, 200g*10, 1.8l*6 등
-    qty = 1
-    m_qty = _r.search(r'(\d[\d.]*)[\s]*[\*x×][\s]*(\d+)[\s]*(?:ea|pk|pcs)?', text)
-    if m_qty:
-        try: qty = int(float(m_qty.group(2)))
-        except: qty = 1
     patterns = [
         (_r.compile(r'(\d[\d.]+)\s*l\b'),     lambda m: float(m.group(1)) * 1000, 'ml'),
         (_r.compile(r'(\d[\d.]*)\s*ml\b'),    lambda m: float(m.group(1)),        'ml'),
@@ -1960,7 +1955,7 @@ def _parse_volume(name: str):
         m = pat.search(text)
         if m:
             try:
-                val = fn(m) * qty
+                val = fn(m)
                 if val > 0:
                     return val, unit
             except Exception:
@@ -2790,31 +2785,32 @@ async def poc_benchmark(n: int = 100, seed: int = 42, threshold: float = 20.0,
         score += 10.0  # 가격 중립
         return round(max(0.0, min(100.0, score)), 1)
 
-    # ── 자사 상품 로드 (신규 컬럼 포함) ──────────────────────────────────────
+    # ── 자사 상품 로드 (캐시 활용 — _get_our_products와 동일 전체 목록) ──────
     try:
       t0 = _time.time()
-      our_rows = _q(f"""
-        SELECT
-            z.`상품코드`                                    AS product_code,
-            COALESCE(MAX(m.`상품명`), z.`상품코드`)        AS product_name,
-            MAX(m.`자재유형명`)                             AS brand,
-            MAX(m.`단위`)                                   AS unit,
-            MAX(m.`자재그룹명`)                             AS product_group,
-            MAX(m.`자재그룹`)                               AS material_group,
-            MAX(m.`대분류`)                                 AS cat1,
-            MAX(m.`중분류`)                                 AS cat2,
-            MAX(m.`소분류`)                                 AS cat3,
-            MAX(m.`총중량`)                                 AS total_weight,
-            MAX(m.`순중량`)                                 AS net_weight,
-            MAX(m.`온도조건`)                               AS temp_cond
-        FROM {T_ZSDR} z
-        LEFT JOIN {T_ZMM60} m ON z.`상품코드` = m.`상품코드`
-        WHERE z.`플랜트` IN ({', '.join(repr(p) for p in PLANTS_REAL)})
-          AND z.`배치` IN ('01','03')
-          AND COALESCE(m.`자재그룹`, '') != '5140'
-        GROUP BY z.`상품코드`
-        LIMIT 5000
-      """)
+      # _get_our_products('ALL'): 이미 캐시된 전체 목록 사용 (LIMIT 100000)
+      # POC 전용 필드 보정: cat1/cat2/cat3 → category/mid_category/sub_category
+      _base_rows = _get_our_products('ALL')
+      our_rows = []
+      for _r in _base_rows:
+          our_rows.append({
+              "product_code":   _r.get("product_code", ""),
+              "product_name":   _r.get("product_name", ""),
+              "brand":          _r.get("brand", ""),
+              "unit":           _r.get("unit", ""),
+              "product_group":  _r.get("product_group", ""),
+              "material_group": _r.get("material_group", ""),
+              "cat1":           _r.get("category", ""),
+              "cat2":           _r.get("mid_category", ""),
+              "cat3":           _r.get("sub_category", ""),
+              "category":       _r.get("category", ""),
+              "mid_category":   _r.get("mid_category", ""),
+              "sub_category":   _r.get("sub_category", ""),
+              "total_weight":   _r.get("total_weight"),
+              "net_weight":     _r.get("net_weight"),
+              "temp_cond":      _r.get("temp_cond", ""),
+          })
+      logger.info(f"[poc] our_rows loaded from cache: {len(our_rows)}건")
 
       # ── 플랫폼 샘플 로드 ─────────────────────────────────────────────────────
       plat_rows = _q(f"""
