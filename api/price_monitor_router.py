@@ -2018,7 +2018,21 @@ def _score_mapping(platform_name: str, platform_price: float | None,
             if _plat_chilled and _our_temp not in {"20"}:
                 return 0.0  # 플랫폼=냉장, 우리=상온/냉동 → 불일치
 
-    pt = _tokenize(platform_name)
+    # 동의어(alias) 확장: 플랫폼 상품명의 별칭을 표준어로 병기
+    _ALIAS = {
+        '프리마': '프림',
+        '프림': '프리마',
+        '폰즈': '소스',
+        '자반': '조림',
+        '까르보': '까르보나라',
+        '크럼블': '칩 토핑',
+    }
+    _pname_expanded = platform_name
+    for _ak, _av in _ALIAS.items():
+        if _ak in _pname_expanded:
+            _pname_expanded = _pname_expanded.replace(_ak, _ak + ' ' + _av)
+
+    pt = _tokenize(_pname_expanded)
     ot = _tokenize(our_name)
 
     # 1. 토큰 겹침 (60점) - Overlap Coefficient
@@ -2063,21 +2077,39 @@ def _score_mapping(platform_name: str, platform_price: float | None,
         and t not in _STOP
         and not _re.match(r'^[\d\.]+', t)
     ]
+    # 매칭된 키워드 수 집계 (중복 제외)
+    _matched_kw: list = []
     for w in plat_meaningful:
         if w in our_lower:
-            keyword_bonus = 15.0
-            break
-    if keyword_bonus == 0.0:
-        for w in our_meaningful:
-            if w in plat_lower:
-                keyword_bonus = 15.0
-                break
+            _matched_kw.append(w)
+    for w in our_meaningful:
+        if w in plat_lower and w not in _matched_kw:
+            _matched_kw.append(w)
+    _n_matched = len(_matched_kw)
+    if _n_matched >= 3:   keyword_bonus = 15.0
+    elif _n_matched == 2: keyword_bonus = 10.0
+    elif _n_matched == 1: keyword_bonus = 5.0
+    else:                 keyword_bonus = 0.0
 
-    # 게이트: 텍스트+키워드 점수 10 미만 → 가격 유사도만으로는 제안하지 않음
-    if text_score + keyword_bonus < 10.0:
+    # 게이트: 텍스트+키워드 점수 15 미만 → 가격 유사도만으로는 제안하지 않음
+    if text_score + keyword_bonus < 15.0:
         return 0.0
 
     score = text_score + keyword_bonus
+
+    # 핵심 토큰 0겹침 패널티 (브랜드/산지 제외 후 비교 — 브랜드 낚임 방지)
+    _BRAND_STOP = {
+        'cj', '오뚜기', '청정원', '동원', '삼양', '사조', '오뗄', '에쓰푸드',
+        '대림', '롯데', '하인즈', '풍전', '해표', '샘표', '한성', '미성',
+        '굿프랜즈', '면사랑', '칠갑', '뚜레반', '영풍', '사옹원', '농심',
+        '신송', '청솔', 'be', 'chef', 'sf', 'k', 'new',
+        '국내산', '중국산', '이탈리아산', '태국산', '베트남산', '호주산',
+        '미국산', '필리핀산', '뉴질랜드산', '칠레산', '오스트리아산',
+    }
+    _plat_core = {t for t in plat_meaningful if t not in _BRAND_STOP and len(t) >= 3}
+    _our_core  = {t for t in our_meaningful  if t not in _BRAND_STOP and len(t) >= 3}
+    if _plat_core and _our_core and not (_plat_core & _our_core):
+        score -= 20.0   # 핵심어 0% 겹침 → 브랜드만 같은 다른 상품
 
     # 3-a. 용량/중량 정규화 매칭 (+15 / -5 / -8점)
     #      our_prod.total_weight(KG) 제공 시 직접 비교, 없으면 상품명 파싱
@@ -2103,10 +2135,14 @@ def _score_mapping(platform_name: str, platform_price: float | None,
             ratio_v = min(pv, ov) / max(pv, ov)
             if ratio_v >= 0.9:
                 score += 15.0
-            elif ratio_v >= 0.6:
-                score -= 5.0
-            else:                           # 2배 이상 차이 (1.8L vs 18L 등) → 패널티 완화 -20→-8
-                score -= 8.0
+            elif ratio_v >= 0.7:
+                pass                        # 10~30% 차이: 중립
+            elif ratio_v >= 0.4:
+                score -= 12.0               # 30~60% 차이
+            elif ratio_v >= 0.1:
+                score -= 25.0               # 5배↑ 차이: 강한 패널티
+            else:
+                score -= 40.0               # 10배↑: 사실상 탈락
 
     # 3-b. 카테고리 계층 보너스 (our_prod 제공 시, 최대 12점)
     #      대분류/중분류/소분류가 플랫폼 상품명 토큰과 겹칠 때 부여
@@ -2777,7 +2813,7 @@ async def poc_benchmark(n: int = 100, seed: int = 42, threshold: float = 20.0,
           AND z.`배치` IN ('01','03')
           AND COALESCE(m.`자재그룹`, '') != '5140'
         GROUP BY z.`상품코드`
-        LIMIT 3000
+        LIMIT 50000
       """)
 
       # ── 플랫폼 샘플 로드 ─────────────────────────────────────────────────────
