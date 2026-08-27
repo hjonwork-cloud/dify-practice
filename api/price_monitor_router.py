@@ -2675,7 +2675,14 @@ def poc_run_async(n: int = 100, seed: int = 42, threshold: float = 20.0):
         _loop = _asyncio.new_event_loop()
         _asyncio.set_event_loop(_loop)
         try:
-            _loop.run_until_complete(poc_benchmark(n=n, seed=seed, threshold=threshold, save=1))
+            resp = _loop.run_until_complete(poc_benchmark(n=n, seed=seed, threshold=threshold, save=1))
+            # JSONResponse 내부 오류 캡처
+            if hasattr(resp, 'body'):
+                import json as _json
+                _body = _json.loads(resp.body)
+                if 'error' in _body:
+                    with open("/tmp/poc_async_error.txt", "w") as _ef:
+                        _ef.write(f"poc_benchmark returned error:\n{_json.dumps(_body, ensure_ascii=False, indent=2)}")
         except Exception as _e:
             import traceback as _tb
             with open("/tmp/poc_async_error.txt", "w") as _ef:
