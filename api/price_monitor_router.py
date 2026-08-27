@@ -2647,8 +2647,14 @@ def poc_result():
     """poc-benchmark?save=1 실행 후 저장된 결과 조회"""
     import json as _json, os as _os
     path = "/tmp/poc_latest.json"
+    err_path = "/tmp/poc_async_error.txt"
     if not _os.path.exists(path):
-        return JSONResponse({"error": "결과 없음. /api/poc-benchmark?save=1 먼저 실행"})
+        err = ""
+        if _os.path.exists(err_path):
+            with open(err_path) as _ef:
+                err = _ef.read()
+        return JSONResponse({"error": "결과 없음. /api/poc-benchmark?save=1 먼저 실행",
+                             "async_error": err or None})
     with open(path, encoding="utf-8") as f:
         data = _json.load(f)
     # summary + details[:20]만 반환 (크기 절약)
@@ -2662,15 +2668,20 @@ def poc_result():
 
 @router.get("/api/poc-run-async")
 def poc_run_async(n: int = 100, seed: int = 42, threshold: float = 20.0):
-    """백그라운드 스레드로 poc-benchmark 실행. 즉시 반환."""
+    """백그라운드 스레드로 poc-benchmark 직접 실행 (localhost HTTP 호출 없음)."""
     import threading as _threading
+    import asyncio as _asyncio
     def _run():
-        import requests as _req
-        url = f"http://localhost:8000/portal/price-monitor/api/poc-benchmark?n={n}&seed={seed}&threshold={threshold}&save=1"
+        _loop = _asyncio.new_event_loop()
+        _asyncio.set_event_loop(_loop)
         try:
-            _req.get(url, timeout=700)
-        except Exception:
-            pass
+            _loop.run_until_complete(poc_benchmark(n=n, seed=seed, threshold=threshold, save=1))
+        except Exception as _e:
+            import traceback as _tb
+            with open("/tmp/poc_async_error.txt", "w") as _ef:
+                _ef.write(str(_e) + "\n" + _tb.format_exc())
+        finally:
+            _loop.close()
     _threading.Thread(target=_run, daemon=True).start()
     return JSONResponse({"status": "started", "n": n, "seed": seed,
                          "note": "2~3분 후 /api/poc-result 로 결과 조회"})
