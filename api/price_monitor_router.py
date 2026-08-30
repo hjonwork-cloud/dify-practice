@@ -36,6 +36,9 @@ PLANTS_REAL = ["4120", "4123", "4121"]  # ALL 제외 실제 플랜트
 GP_ALERT_PCT = 10.0   # GP < 10% → 경보
 GP_WARN_PCT  = 20.0   # GP < 20% → 주의
 
+# ── POC 결과 인메모리 저장소 (파일 대신 메모리 사용) ────────────────────────
+_POC_LATEST: dict | None = None  # poc-benchmark 완료 후 결과 저장
+
 # ── 인증 헬퍼 ──────────────────────────────────────────────────────────────
 
 def _get_session(request: Request) -> dict | None:
@@ -2644,8 +2647,19 @@ def poc_ping():
 
 @router.get("/api/poc-result")
 def poc_result():
-    """poc-benchmark?save=1 실행 후 저장된 결과 조회"""
+    """poc-benchmark 완료 후 저장된 결과 조회 (인메모리 우선, /tmp 백업)"""
+    global _POC_LATEST
     import json as _json, os as _os
+    # 1) 인메모리 결과 우선
+    if _POC_LATEST is not None:
+        return JSONResponse({
+            "meta":    _POC_LATEST.get("meta"),
+            "summary": _POC_LATEST.get("summary"),
+            "details": _POC_LATEST.get("details", [])[:20],
+            "total_details": len(_POC_LATEST.get("details", [])),
+            "source": "memory",
+        })
+    # 2) /tmp 파일 폴백
     path = "/tmp/poc_latest.json"
     err_path = "/tmp/poc_async_error.txt"
     if not _os.path.exists(path):
@@ -2663,6 +2677,7 @@ def poc_result():
         "summary": data.get("summary"),
         "details": data.get("details", [])[:20],
         "total_details": len(data.get("details", [])),
+        "source": "file",
     })
 
 
@@ -2969,8 +2984,13 @@ async def poc_benchmark(n: int = 100, seed: int = 42, threshold: float = 20.0,
       }
       if save:
           import json as _json
-          with open("/tmp/poc_latest.json", "w", encoding="utf-8") as _f:
-              _json.dump(result_data, _f, ensure_ascii=False)
+          global _POC_LATEST
+          _POC_LATEST = result_data  # 인메모리 저장 (우선)
+          try:
+              with open("/tmp/poc_latest.json", "w", encoding="utf-8") as _f:
+                  _json.dump(result_data, _f, ensure_ascii=False)
+          except Exception:
+              pass  # /tmp 저장 실패해도 메모리엔 있음
           return JSONResponse({"status": "saved", "elapsed_sec": elapsed,
                                "sample_n": total, "v1_match_rate": result_data["summary"]["v1_match_rate"],
                                "v2_match_rate": result_data["summary"]["v2_match_rate"],
