@@ -2820,6 +2820,11 @@ async def poc_benchmark(n: int = 100, seed: int = 42, threshold: float = 20.0,
       # _get_our_products('ALL'): 이미 캐시된 전체 목록 사용 (LIMIT 100000)
       # POC 전용 필드 보정: cat1/cat2/cat3 → category/mid_category/sub_category
       _base_rows = _get_our_products('ALL')
+      # POC 실행 시간 제한: 8000건으로 샘플링 (100 × 8000 = 800K 스코어링 ≒ 4분)
+      import random as _random
+      _rng = _random.Random(seed)
+      if len(_base_rows) > 8000:
+          _base_rows = _rng.sample(_base_rows, 8000)
       our_rows = []
       for _r in _base_rows:
           our_rows.append({
