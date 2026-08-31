@@ -2480,6 +2480,57 @@ async def api_suggest_poll(request: Request, job_id: str):
     return JSONResponse(job)
 
 
+# ── Databricks 웨어하우스 웜업 (분석 전 연결 확인) ──────────────────────────────
+# 웨어하우스가 꺼진 상태에서 분석을 바로 시작하면 8분 타임아웃도 부족할 수 있음.
+# 분석 전 SELECT 1로 웨어하우스를 먼저 깨우고, 완료 후 분석 시작.
+_warmup_store: dict = {}  # warmup_id → {status, error}
+
+
+@router.get("/api/pm-ai/warmup")
+async def api_warmup_start(request: Request):
+    """Databricks 웨어하우스 웜업 시작. 즉시 warmup_id 반환 → /warmup/poll/{id}로 폴링."""
+    _require_pm_access(request)
+    import uuid as _uuid
+    wid = _uuid.uuid4().hex
+    _warmup_store[wid] = {"status": "running"}
+
+    # 오래된 웜업 잡 정리
+    done = [k for k, v in list(_warmup_store.items())
+            if v.get("status") != "running" and k != wid]
+    for k in done[:-10]:
+        _warmup_store.pop(k, None)
+
+    def _do_warmup():
+        try:
+            _q("SELECT 1 AS ping")   # 웨어하우스 기동 대기 (최대 10분)
+            # 웜업 성공 시 주요 캐시도 채워두기 (병렬)
+            import concurrent.futures as _cf_w
+            with _cf_w.ThreadPoolExecutor(max_workers=5) as _pex:
+                for plant in PLANTS:
+                    _pex.submit(_get_our_products, plant)
+                    _pex.submit(_get_base_prices, plant)
+                    _pex.submit(_get_prev_month_sales_totals, plant)
+            _warmup_store[wid]["status"] = "done"
+            logger.info(f"[pm-warmup] 완료 wid={wid}")
+        except Exception as _e:
+            import traceback as _tb
+            _warmup_store[wid].update({"status": "error", "error": str(_e),
+                                        "traceback": _tb.format_exc()[-1000:]})
+            logger.warning(f"[pm-warmup] 실패: {_e}")
+
+    threading.Thread(target=_do_warmup, daemon=True).start()
+    return JSONResponse({"warmup_id": wid, "status": "running"})
+
+
+@router.get("/api/pm-ai/warmup/poll/{warmup_id}")
+async def api_warmup_poll(request: Request, warmup_id: str):
+    _require_pm_access(request)
+    job = _warmup_store.get(warmup_id)
+    if job is None:
+        return JSONResponse({"status": "not_found"}, status_code=404)
+    return JSONResponse(job)
+
+
 @router.get("/api/pm-ai/suggest")
 async def api_mapping_ai_suggest(
     request: Request,

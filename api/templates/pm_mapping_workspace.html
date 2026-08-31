@@ -551,7 +551,38 @@ async function runAISuggest() {
   document.getElementById('kpiBar').style.display = 'none';
 
   try {
-    // ① 분석 작업 시작 → job_id 즉시 반환 (타임아웃 없음)
+    // ① Databricks 웨어하우스 웜업 (꺼진 경우 여기서 기동)
+    showLoading('Databricks 웨어하우스 연결 확인 중...<br><small style="color:#9ca3af">처음 실행 시 최대 5분 소요될 수 있습니다.</small>');
+    const warmupR = await fetch('/portal/price-monitor/api/pm-ai/warmup');
+    const warmupD = await warmupR.json().catch(() => null);
+    if (!warmupD || !warmupD.warmup_id) {
+      document.getElementById('wsContent').innerHTML = `<div class="ws-empty" style="color:#ef4444">웜업 시작 실패</div>`;
+      btn.disabled = false; btn.textContent = '🤖 AI 매핑 분석'; return;
+    }
+    // 웜업 폴링 (2초마다, 최대 10분)
+    const warmupPollUrl = `/portal/price-monitor/api/pm-ai/warmup/poll/${warmupD.warmup_id}`;
+    let warmupOk = false;
+    for (let wi = 0; wi < 300; wi++) {
+      await new Promise(r => setTimeout(r, 2000));
+      const wr = await fetch(warmupPollUrl);
+      const wd = await wr.json().catch(() => null);
+      if (!wd || wd.status === 'not_found') break;
+      if (wd.status === 'done') { warmupOk = true; break; }
+      if (wd.status === 'error') {
+        document.getElementById('wsContent').innerHTML =
+          `<div class="ws-empty" style="color:#ef4444">Databricks 연결 실패: ${escHtml(wd.error || '알 수 없는 오류')}<br><small style="color:#9ca3af">Databricks 웨어하우스 상태를 확인해 주세요.</small></div>`;
+        btn.disabled = false; btn.textContent = '🤖 AI 매핑 분석'; return;
+      }
+      const elapsed = Math.round((wi + 1) * 2);
+      showLoading(`Databricks 웨어하우스 시작 중... (${elapsed}초 경과)<br><small style="color:#9ca3af">웨어하우스 기동에 최대 5분이 소요됩니다. 잠시만 기다려주세요.</small>`);
+    }
+    if (!warmupOk) {
+      document.getElementById('wsContent').innerHTML = `<div class="ws-empty" style="color:#ef4444">Databricks 웨어하우스 연결 시간 초과. 잠시 후 다시 시도해 주세요.</div>`;
+      btn.disabled = false; btn.textContent = '🤖 AI 매핑 분석'; return;
+    }
+    showLoading('연결 완료. AI 유사도 분석 시작 중...');
+
+    // ② 분석 작업 시작 → job_id 즉시 반환 (타임아웃 없음)
     const startUrl = `/portal/price-monitor/api/pm-ai/suggest?platform=${encodeURIComponent(currentPlatform)}&seller_name=${encodeURIComponent(currentSeller)}&seller_id=${encodeURIComponent(currentSellerId)}&plant=${currentPlant}&limit=1000`;
     const startR = await fetch(startUrl);
     const startD = await startR.json().catch(() => null);
@@ -561,7 +592,7 @@ async function runAISuggest() {
     }
     const jobId = startD.job_id;
 
-    // ② 2초마다 폴링
+    // ③ 2초마다 폴링
     const pollUrl = `/portal/price-monitor/api/pm-ai/suggest/poll/${jobId}`;
     let d = null;
     for (let attempt = 0; attempt < 240; attempt++) {   // 최대 480초 (서버 8분 타임아웃에 맞춤)
