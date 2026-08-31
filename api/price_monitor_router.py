@@ -2035,7 +2035,7 @@ def _score_mapping(platform_name: str, platform_price: float | None,
 
     # 1. 토큰 겹침 (60점) - Overlap Coefficient
     #    숫자+단위 토큰(1kg, 836g 등)과 범용 수식어(슬라이스, 냉동 등)는 텍스트 점수에서 제외
-    _unit_pat2 = __import__('re').compile(r'^\d[\d.]*[a-zA-Z]*$')
+    _unit_pat2 = __import__('re').compile(r'^약?\d[\d.]*[a-zA-Z]*$')  # 숫자+단위, 약XXXg 포함
     _STOP = {
         # '냉동', '냉장' → 온도조건 하드필터로 처리, STOP에서 제거 (텍스트 점수에 반영)
         '슬라이스', '신선', '건조', '원물', '국산', '수입',
@@ -2138,6 +2138,9 @@ def _score_mapping(platform_name: str, platform_price: float | None,
     if _plat_excl and _our_excl:
         score -= 15.0   # 플레이버 불일치 패널티
     #      our_prod.total_weight(KG) 제공 시 직접 비교, 없으면 상품명 파싱
+    # [v9-1] 텍스트 점수 0이면 volume_bonus 차단:
+    # 연근(약500g) → 삼계닭(약500g) 처럼 제품명 토큰 겹침이 전혀 없고 용량만 같은 오매핑 방지
+    # text_score=0 → 제품명 공통 토큰 없음 → 용량만 같은 우연의 일치 → 보너스 차단
     _vol_applied = False
     if our_prod:
         try:
@@ -2149,7 +2152,7 @@ def _score_mapping(platform_name: str, platform_price: float | None,
             pv, pu = _parse_volume(platform_name)
             if pv and pu == 'g':  # g↔g 비교만 (단위 불확실성 방지)
                 rv = min(pv, our_wg) / max(pv, our_wg)
-                if rv >= 0.9:
+                if rv >= 0.9 and text_score > 0:  # [v9-1] 텍스트 점수 없으면 volume_bonus 차단
                     score += 15.0
                     _vol_applied = True
                 # 불일치 시 패널티 없음 (폴백: 상품명 파싱으로 판단)
@@ -2158,7 +2161,7 @@ def _score_mapping(platform_name: str, platform_price: float | None,
         ov, ou = _parse_volume(our_name)
         if pv and ov and pu == ou:          # 같은 단위계(ml vs ml, g vs g)
             ratio_v = min(pv, ov) / max(pv, ov)
-            if ratio_v >= 0.9:
+            if ratio_v >= 0.9 and text_score > 0:  # [v9-1] 텍스트 점수 없으면 volume_bonus 차단
                 score += 15.0
             elif ratio_v >= 0.7:
                 pass                        # 10~30% 차이: 중립
@@ -2168,6 +2171,19 @@ def _score_mapping(platform_name: str, platform_price: float | None,
                 score -= 25.0               # 5배↑ 차이: 강한 패널티
             else:
                 score -= 40.0               # 10배↑: 사실상 탈락
+
+    # [v9-2] 브랜드 매칭 보너스 (+5pt):
+    # 플랫폼 상품명에 명시된 브랜드가 자사 상품명에도 있으면 +5pt
+    # 오뚜기 마요네즈 → 하인즈 마요네즈 처럼 브랜드 교체 오매핑 억제
+    _KNOWN_BRANDS = {
+        'cj','오뚜기','청정원','동원','삼양','사조','롯데','대상','해표','샘표',
+        '한성','면사랑','농심','풍전','샘표','하인즈','삼진','모노링크','폰타나',
+        '랜시','담두','이츠웰','셀플러스','매일','매일유업','빙그레','남양','서울우유',
+    }
+    for _br in _KNOWN_BRANDS:
+        if _br in plat_lower and _br in our_lower:
+            score += 5.0
+            break  # 첫 번째 일치만 적용
 
     # 3-b. 카테고리 계층 보너스 (our_prod 제공 시, 최대 12점)
     #      대분류/중분류/소분류가 플랫폼 상품명 토큰과 겹칠 때 부여
@@ -2930,14 +2946,20 @@ async def poc_benchmark(n: int = 100, seed: int = 42, threshold: float = 20.0,
                 best_v2 = {"score": s2, "code": op.get("product_code",""), "name": oname,
                            "temp": op.get("temp_cond","")}
 
-        # [v8 Phase3] v2 동점 다른제품 폴백:
-        # 온도필터가 v1 후보를 제거하고 동점(±0.5) 다른 제품을 v2로 선택한 경우
-        # → 의미론적으로 v1 후보가 더 나을 가능성이 높으므로 v1 결과를 v2에도 적용
+        # [v8 Phase3] v2 동점 다른제품 폴백
         if (best_v1["score"] > 0
                 and best_v2.get("name") != best_v1.get("name")
                 and abs(best_v2["score"] - best_v1["score"]) <= 0.5):
             best_v2 = {"score": best_v1["score"], "code": best_v1["code"],
                        "name": best_v1["name"], "temp": best_v2.get("temp", "")}
+        # [v9-3] 저점수 하한 게이트:
+        # 핵심어 겹침이 없는 상태(오매핑 의심)에서 30pt 미만이면 미매칭 처리
+        # 사또밥→삼양라면(45pt→패널티 후 저점), 절단게→마늘쫑(27pt) 등 차단
+        _LOW_SCORE_GATE = 30.0
+        if best_v1["score"] < _LOW_SCORE_GATE:
+            best_v1 = {"score": 0.0, "code": "", "name": ""}
+        if best_v2["score"] < _LOW_SCORE_GATE:
+            best_v2 = {"score": 0.0, "code": "", "name": "", "temp": ""}
         v1_ok = best_v1["score"] >= threshold
         v2_ok = best_v2["score"] >= threshold
         diff  = round(best_v2["score"] - best_v1["score"], 1)
