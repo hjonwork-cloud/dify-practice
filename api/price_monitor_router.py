@@ -212,17 +212,18 @@ T_SILVER = "h_hmfo_fsi_dm.gd_rst_ing.dim_platform_products"
 
 
 def _preload_products_background():
-    """앱 시작 시 백그라운드에서 모든 DB 캐시를 미리 워밍업.
-    Databricks 웨어하우스 콜드스타트(2~5분) 대비 — 실사용 전 캐시 완성.
+    """앱 시작 시 백그라운드에서 모든 DB 캐시를 미리 워밍업 + 25분 주기 keep-alive.
+    Databricks 웨어하우스 auto-stop 방지 — 웨어하우스가 잠들지 않도록 주기적 ping.
     """
     def _load():
         import time as _t, concurrent.futures as _cf_pre
         _t.sleep(5)  # 앱 startup 완료 후 실행
+
+        # ── 최초 워밍업 ──────────────────────────────────────────────────
         logger.info("[pm-preload] Databricks 웨어하우스 워밍업 시작")
         for plant in PLANTS:
             try:
-                # 4개 DB 콜 병렬로 워밍업 (포탈 DB + Databricks 3개)
-                with _cf_pre.ThreadPoolExecutor(max_workers=4) as _pex:
+                with _cf_pre.ThreadPoolExecutor(max_workers=5) as _pex:
                     _pex.submit(portal_db.pm_list_all_mappings, plant)
                     _pex.submit(_get_our_products, plant)
                     _pex.submit(_get_our_products_with_batch, plant)
@@ -231,6 +232,33 @@ def _preload_products_background():
                 logger.info(f"[pm-preload] 완료: plant={plant}")
             except Exception as e:
                 logger.warning(f"[pm-preload] 실패 ({plant}): {e}")
+
+        # ── 25분 주기 keep-alive (Databricks auto-stop 방지) ─────────────
+        # Databricks 웨어하우스 기본 auto-stop: 30분 미사용 시 종료
+        # → 25분마다 SELECT 1 ping으로 웨어하우스를 깨어있게 유지
+        _KEEPALIVE_INTERVAL = 25 * 60  # 25분
+        logger.info("[pm-keepalive] 25분 주기 keep-alive 루프 시작")
+        while True:
+            _t.sleep(_KEEPALIVE_INTERVAL)
+            try:
+                _q("SELECT 1 AS ping")
+                logger.info("[pm-keepalive] Databricks ping OK")
+                # 캐시 TTL 만료 임박 시 백그라운드 갱신 (1시간 TTL → 55분마다 갱신)
+                _first_plant = PLANTS[0] if PLANTS else None
+                if _first_plant:
+                    entry = _product_cache.get(f"products_{_first_plant}")
+                    if not entry or (time.time() - entry[0]) > 3300:  # 55분
+                        for plant in PLANTS:
+                            try:
+                                _get_our_products(plant)
+                                _get_base_prices(plant)
+                                _get_prev_month_sales_totals(plant)
+                            except Exception:
+                                pass
+                        logger.info("[pm-keepalive] 캐시 갱신 완료")
+            except Exception as e:
+                logger.warning(f"[pm-keepalive] ping 실패: {e}")
+
     t = threading.Thread(target=_load, daemon=True, name="pm-preload")
     t.start()
 
