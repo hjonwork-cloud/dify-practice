@@ -822,7 +822,9 @@ async def api_our_products(request: Request, plant: str = "ALL", keyword: str = 
             base_prices = {r["product_code"]: r for r in (_get_base_prices(plant) or [])}
         except Exception:
             base_prices = {}
-        # 매출 데이터 + 기준가 합치 (Decimal 안전 변환)
+        # _get_our_products는 _serialize_rows를 거치지 않으므로 Decimal 제거
+        products = _serialize_rows(products)
+        # 매출 데이터 + 기준가 합치 (이미 float 보장)
         enriched = []
         for p in products:
             code = p.get("product_code", "")
