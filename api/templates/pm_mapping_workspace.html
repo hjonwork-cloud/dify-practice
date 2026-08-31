@@ -57,6 +57,37 @@
 .spinner { display:inline-block; width:36px; height:36px; border:4px solid #e5e7eb; border-top-color:#4f46e5; border-radius:50%; animation:spin .7s linear infinite; }
 @keyframes spin { to { transform:rotate(360deg); } }
 
+/* ── 분석 결과 패널 ── */
+.result-panel { padding:16px 24px; background:#fff; border-bottom:1px solid #e5e7eb; display:none; }
+.result-panel.visible { display:block; }
+.result-title { font-size:13px; font-weight:700; color:#374151; margin-bottom:12px; display:flex; align-items:center; gap:8px; }
+.dist-bars { display:flex; gap:8px; align-items:flex-end; height:80px; margin-bottom:8px; }
+.dist-col { display:flex; flex-direction:column; align-items:center; gap:4px; flex:1; min-width:60px; }
+.dist-bar-wrap { width:100%; background:#f3f4f6; border-radius:6px 6px 0 0; position:relative; height:60px; display:flex; align-items:flex-end; }
+.dist-bar-fill { width:100%; border-radius:6px 6px 0 0; transition:height .4s; }
+.dist-label { font-size:11px; color:#6b7280; text-align:center; white-space:nowrap; }
+.dist-count { font-size:14px; font-weight:800; text-align:center; }
+.dist-count.high { color:#059669; }
+.dist-count.mid  { color:#d97706; }
+.dist-count.low  { color:#ef4444; }
+.dist-count.none { color:#9ca3af; }
+
+/* 필터 탭 */
+.filter-tabs { display:flex; gap:0; border-bottom:2px solid #e5e7eb; padding:0 24px; background:#fff; }
+.filter-tab { padding:10px 18px; font-size:13px; font-weight:600; color:#6b7280; border:none; background:none; cursor:pointer; border-bottom:2px solid transparent; margin-bottom:-2px; transition:color .15s; white-space:nowrap; }
+.filter-tab:hover { color:#4f46e5; }
+.filter-tab.active { color:#4f46e5; border-bottom-color:#4f46e5; }
+.filter-tab .tab-count { display:inline-block; font-size:11px; background:#f3f4f6; color:#6b7280; border-radius:10px; padding:1px 7px; margin-left:4px; font-weight:700; }
+.filter-tab.active .tab-count { background:#eef2ff; color:#4f46e5; }
+
+/* 일괄 승인 바 */
+.bulk-bar { display:none; align-items:center; gap:12px; padding:10px 24px; background:#ecfdf5; border-bottom:1px solid #a7f3d0; flex-wrap:wrap; }
+.bulk-bar.visible { display:flex; }
+.btn-bulk { padding:8px 20px; border-radius:8px; font-size:13px; font-weight:700; border:none; cursor:pointer; }
+.btn-bulk-approve { background:#059669; color:#fff; }
+.btn-bulk-approve:hover { background:#047857; }
+.btn-bulk-approve:disabled { background:#9ca3af; cursor:not-allowed; }
+
 /* ── 매핑 팝업 ── */
 #mappingModal { display:none; position:fixed; inset:0; z-index:9000; }
 #mappingModal.open { display:flex; align-items:center; justify-content:center; }
@@ -155,6 +186,62 @@
   <div class="kpi-chip">중신뢰(50-80): <span id="kpiMid" style="color:#d97706">-</span></div>
 </div>
 
+<!-- ══ 분석 결과 패널 ══ -->
+<div class="result-panel" id="resultPanel">
+  <div class="result-title">📊 분석 결과 <span id="resultSummaryText" style="font-weight:400;color:#6b7280;font-size:12px"></span></div>
+  <div style="display:flex;gap:32px;align-items:flex-start;flex-wrap:wrap">
+    <!-- 점수 분포 바 -->
+    <div>
+      <div class="dist-bars" id="distBars">
+        <div class="dist-col">
+          <div class="dist-bar-wrap" id="distBarHighWrap"><div class="dist-bar-fill" id="distBarHigh" style="background:#059669"></div></div>
+          <div class="dist-count high" id="distCntHigh">0</div>
+          <div class="dist-label">고신뢰<br>80pt↑</div>
+        </div>
+        <div class="dist-col">
+          <div class="dist-bar-wrap" id="distBarMidWrap"><div class="dist-bar-fill" id="distBarMid" style="background:#d97706"></div></div>
+          <div class="dist-count mid" id="distCntMid">0</div>
+          <div class="dist-label">중신뢰<br>50~79</div>
+        </div>
+        <div class="dist-col">
+          <div class="dist-bar-wrap" id="distBarLowWrap"><div class="dist-bar-fill" id="distBarLow" style="background:#ef4444"></div></div>
+          <div class="dist-count low" id="distCntLow">0</div>
+          <div class="dist-label">저신뢰<br>30~49</div>
+        </div>
+        <div class="dist-col">
+          <div class="dist-bar-wrap" id="distBarNoneWrap"><div class="dist-bar-fill" id="distBarNone" style="background:#d1d5db"></div></div>
+          <div class="dist-count none" id="distCntNone">0</div>
+          <div class="dist-label">제안<br>없음</div>
+        </div>
+      </div>
+    </div>
+    <!-- 통계 수치 -->
+    <div style="display:flex;flex-direction:column;gap:8px;font-size:13px;padding-top:4px">
+      <div><span style="color:#6b7280">전체 미매핑:</span> <span id="statTotal" style="font-weight:700">-</span></div>
+      <div><span style="color:#6b7280">분석 완료:</span> <span id="statShown" style="font-weight:700">-</span></div>
+      <div><span style="color:#6b7280">평균 점수:</span> <span id="statAvgScore" style="font-weight:700;color:#4f46e5">-</span></div>
+      <div><span style="color:#6b7280">자동 승인 가능(80↑):</span> <span id="statAutoApprove" style="font-weight:700;color:#059669">-</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ 필터 탭 ══ -->
+<div class="filter-tabs" id="filterTabs" style="display:none">
+  <button class="filter-tab active" onclick="setFilter('all')" id="tabAll">전체 <span class="tab-count" id="tabCntAll">0</span></button>
+  <button class="filter-tab" onclick="setFilter('high')" id="tabHigh">🟢 고신뢰(80↑) <span class="tab-count" id="tabCntHigh">0</span></button>
+  <button class="filter-tab" onclick="setFilter('mid')" id="tabMid">🟡 중신뢰(50~79) <span class="tab-count" id="tabCntMid">0</span></button>
+  <button class="filter-tab" onclick="setFilter('low')" id="tabLow">🔴 저신뢰(30~49) <span class="tab-count" id="tabCntLow">0</span></button>
+  <button class="filter-tab" onclick="setFilter('none')" id="tabNone">⬜ 제안없음 <span class="tab-count" id="tabCntNone">0</span></button>
+</div>
+
+<!-- ══ 일괄 승인 바 ══ -->
+<div class="bulk-bar" id="bulkBar">
+  <span id="bulkMsg" style="font-size:13px;font-weight:600;color:#065f46"></span>
+  <span style="flex:1"></span>
+  <button class="btn-bulk btn-bulk-approve" id="btnBulkApprove" onclick="bulkApproveHigh()">⚡ 고신뢰 일괄 매핑 확정</button>
+  <button style="padding:7px 14px;border-radius:8px;font-size:13px;border:1px solid #d1d5db;background:#fff;cursor:pointer" onclick="hideBulkBar()">닫기</button>
+</div>
+
 <div id="wsContent">
   <div class="ws-empty">플랫폼과 셀러를 선택 후 AI 매핑 분석 버튼을 눌러주세요.</div>
 </div>
@@ -214,6 +301,8 @@ let currentSeller   = '{{ seller_name }}';
 let currentSellerId = '{{ seller_id }}';
 let currentPlant    = '{{ plant }}';
 let suggestItems    = [];
+let filteredItems   = [];
+let currentFilter   = 'all';
 
 // 팝업 상태
 let modalPlatItems     = [];   // 현재 팝업에 표시되는 유사 플랫폼 상품
@@ -426,7 +515,8 @@ async function runAISuggest() {
       btn.disabled = false; btn.textContent = '🤖 AI 매핑 분석'; return;
     }
     suggestItems = d.items || [];
-    renderSuggestList(suggestItems, d.total_unmapped || 0);
+    renderResultPanel(suggestItems, d.total_unmapped || 0);
+    setFilter('all');
   } catch(e) {
     document.getElementById('wsContent').innerHTML = `<div class="ws-empty" style="color:#ef4444">오류 발생: ${e.message}</div>`;
   }
@@ -434,23 +524,149 @@ async function runAISuggest() {
   btn.textContent = '🤖 AI 매핑 분석';
 }
 
-// ══ 리스트 렌더 ══
-function renderSuggestList(items, totalUnmapped) {
+// ══ 분석 결과 패널 렌더 ══
+function renderResultPanel(items, totalUnmapped) {
   if (!items.length) {
     document.getElementById('wsContent').innerHTML = '<div class="ws-empty">AI 제안 가능한 미매핑 상품이 없습니다.<br><small style="color:#9ca3af">🔍 진단 버튼으로 데이터를 확인하거나, 전체 셀러를 선택해 보세요.</small></div>';
+    document.getElementById('resultPanel').classList.remove('visible');
+    document.getElementById('filterTabs').style.display = 'none';
+    document.getElementById('bulkBar').classList.remove('visible');
     return;
   }
 
-  // KPI
   const hasSug = items.filter(i => i.has_suggestions);
-  const high = hasSug.filter(i => i.suggestions[0]?.score >= 80).length;
-  const mid  = hasSug.filter(i => { const s=i.suggestions[0]?.score||0; return s>=50 && s<80; }).length;
-  const noSug = items.filter(i => !i.has_suggestions).length;
+  const high   = hasSug.filter(i => i.suggestions[0]?.score >= 80).length;
+  const mid    = hasSug.filter(i => { const s=i.suggestions[0]?.score||0; return s>=50 && s<80; }).length;
+  const low    = hasSug.filter(i => { const s=i.suggestions[0]?.score||0; return s>=30 && s<50; }).length;
+  const noSug  = items.filter(i => !i.has_suggestions).length;
+  const scores = hasSug.map(i => i.suggestions[0]?.score||0);
+  const avgScore = scores.length ? (scores.reduce((a,b)=>a+b,0)/scores.length).toFixed(1) : '-';
+
+  // 분포 바 높이 계산
+  const maxCnt = Math.max(high, mid, low, noSug, 1);
+  const barH = (n) => Math.round((n / maxCnt) * 56);
+  document.getElementById('distBarHigh').style.height = barH(high) + 'px';
+  document.getElementById('distBarMid').style.height  = barH(mid) + 'px';
+  document.getElementById('distBarLow').style.height  = barH(low) + 'px';
+  document.getElementById('distBarNone').style.height = barH(noSug) + 'px';
+  document.getElementById('distCntHigh').textContent  = high;
+  document.getElementById('distCntMid').textContent   = mid;
+  document.getElementById('distCntLow').textContent   = low;
+  document.getElementById('distCntNone').textContent  = noSug;
+
+  // 통계
+  document.getElementById('statTotal').textContent       = totalUnmapped.toLocaleString() + '건';
+  document.getElementById('statShown').textContent       = items.length.toLocaleString() + '건';
+  document.getElementById('statAvgScore').textContent    = avgScore + 'pt';
+  document.getElementById('statAutoApprove').textContent = high + '건';
+  document.getElementById('resultSummaryText').textContent = `| 분석 ${items.length}건 · 고신뢰 ${high}건 · 중신뢰 ${mid}건 · 저신뢰 ${low}건 · 제안없음 ${noSug}건`;
+  document.getElementById('resultPanel').classList.add('visible');
+
+  // 필터 탭 카운트
+  document.getElementById('tabCntAll').textContent  = items.length;
+  document.getElementById('tabCntHigh').textContent = high;
+  document.getElementById('tabCntMid').textContent  = mid;
+  document.getElementById('tabCntLow').textContent  = low;
+  document.getElementById('tabCntNone').textContent = noSug;
+  document.getElementById('filterTabs').style.display = 'flex';
+
+  // 고신뢰 일괄 승인 바
+  if (high > 0) {
+    document.getElementById('bulkMsg').textContent = `✅ 고신뢰(80pt↑) ${high}건을 일괄 매핑 확정할 수 있습니다.`;
+    document.getElementById('bulkBar').classList.add('visible');
+  } else {
+    document.getElementById('bulkBar').classList.remove('visible');
+  }
+
+  // KPI bar (기존)
   document.getElementById('kpiTotal').textContent = totalUnmapped.toLocaleString();
   document.getElementById('kpiShown').textContent = items.length.toLocaleString();
   document.getElementById('kpiHigh').textContent  = high.toLocaleString();
   document.getElementById('kpiMid').textContent   = mid.toLocaleString();
   document.getElementById('kpiBar').style.display = 'flex';
+}
+
+// ══ 필터 탭 ══
+function setFilter(f) {
+  currentFilter = f;
+  ['all','high','mid','low','none'].forEach(t => {
+    document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1))?.classList.toggle('active', t === f);
+  });
+  if (f === 'all')  filteredItems = suggestItems;
+  else if (f === 'high') filteredItems = suggestItems.filter(i => (i.suggestions[0]?.score||0) >= 80);
+  else if (f === 'mid')  filteredItems = suggestItems.filter(i => { const s=i.suggestions[0]?.score||0; return s>=50 && s<80; });
+  else if (f === 'low')  filteredItems = suggestItems.filter(i => { const s=i.suggestions[0]?.score||0; return s>=30 && s<50; });
+  else if (f === 'none') filteredItems = suggestItems.filter(i => !i.has_suggestions);
+  renderSuggestList(filteredItems, 0);
+}
+
+function hideBulkBar() {
+  document.getElementById('bulkBar').classList.remove('visible');
+}
+
+// ══ 일괄 승인 (고신뢰) ══
+async function bulkApproveHigh() {
+  const highItems = suggestItems.filter(i => (i.suggestions[0]?.score||0) >= 80);
+  if (!highItems.length) { alert('고신뢰 항목이 없습니다.'); return; }
+  const confirmed = confirm(`고신뢰(80pt↑) ${highItems.length}건을 일괄 매핑 확정하시겠습니까?\n\n각 항목의 1순위 AI 제안 상품으로 자동 매핑됩니다.`);
+  if (!confirmed) return;
+
+  const btn = document.getElementById('btnBulkApprove');
+  btn.disabled = true;
+  btn.textContent = '⏳ 처리 중...';
+
+  let successCount = 0;
+  let failCount = 0;
+  for (const item of highItems) {
+    const top = item.suggestions[0];
+    if (!top) continue;
+    try {
+      const r = await fetch('/portal/price-monitor/api/mapping/bulk-add', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+          our_product_code: top.our_product_code,
+          plant:            currentPlant,
+          tag:              'normal',
+          multiplier:       1.0,
+          items: [{
+            product_key:         item.product_key,
+            platform:            currentPlatform,
+            platform_seller_id:  '',
+            platform_product_id: '',
+            product_name:        item.product_name || '',
+            seller_name:         item.seller_name || currentSeller,
+          }],
+        }),
+      });
+      const d = await r.json();
+      if (d.ok) successCount++; else failCount++;
+    } catch(e) { failCount++; }
+  }
+
+  btn.disabled = false;
+  btn.textContent = '⚡ 고신뢰 일괄 매핑 확정';
+  showToast(`✅ ${successCount}건 매핑 완료${failCount>0?' / ⚠️ '+failCount+'건 실패':''}`);
+  hideBulkBar();
+
+  // 목록에서 매핑 완료 항목 제거 후 재렌더
+  const approvedKeys = new Set(highItems.map(i => i.product_key));
+  suggestItems = suggestItems.filter(i => !approvedKeys.has(i.product_key));
+  renderResultPanel(suggestItems, parseInt(document.getElementById('statTotal').textContent)||0);
+  setFilter(currentFilter);
+}
+
+// ══ 리스트 렌더 ══
+function renderSuggestList(items, totalUnmapped) {
+  if (!items.length) {
+    const emptyMsg = currentFilter !== 'all'
+      ? '<div class="ws-empty">해당 조건의 항목이 없습니다.</div>'
+      : '<div class="ws-empty">AI 제안 가능한 미매핑 상품이 없습니다.<br><small style="color:#9ca3af">🔍 진단 버튼으로 데이터를 확인하거나, 전체 셀러를 선택해 보세요.</small></div>';
+    document.getElementById('wsContent').innerHTML = emptyMsg;
+    return;
+  }
+
+  // (KPI bar는 renderResultPanel에서 처리)
 
   const platLabel = p => p === 'baemin' ? '배민상회' : '식봄';
   const platClass = p => p === 'baemin' ? 'badge-baemin' : 'badge-food';
@@ -469,7 +685,7 @@ function renderSuggestList(items, totalUnmapped) {
       ? `${escHtml(item.display_name)} <small style="color:#9ca3af;text-decoration:line-through">${escHtml(item.product_name)}</small>`
       : escHtml(item.product_name);
 
-    html += `<div class="suggest-card" data-idx="${idx}">
+    html += `<div class="suggest-card" data-key="${escHtml(item.product_key)}">
       <div class="suggest-card-header">
         <span class="plat-badge ${platClass(currentPlatform)}">${platLabel(currentPlatform)}</span>
         <div class="plat-info">
@@ -484,7 +700,7 @@ function renderSuggestList(items, totalUnmapped) {
           <div class="conf-score ${scoreClass}">${item.has_suggestions ? score.toFixed(0)+'점' : '-'}</div>
           <div style="font-size:11px;color:#9ca3af">신뢰도</div>
         </div>
-        <button class="btn-map-open" onclick="openMappingModal(${idx})">매핑하기 →</button>
+        <button class="btn-map-open" onclick="openMappingModal('${escHtml(item.product_key)}')">매핑하기 →</button>
       </div>
       <div class="suggest-card-body">`;
 
@@ -495,7 +711,7 @@ function renderSuggestList(items, totalUnmapped) {
         const saleV  = s.our_sale_price ? s.our_sale_price.toLocaleString()+'원' : '-';
         const buyV   = s.buy_price      ? s.buy_price.toLocaleString()+'원'      : '-';
         const salesV = s.prev_sales_amt > 0 ? Math.round(s.prev_sales_amt/10000)+'만원' : '-';
-        html += `<div class="sug-item" onclick="selectSuggest(${idx},${si})" id="sug-${idx}-${si}">
+        html += `<div class="sug-item" onclick="selectSuggest('${escHtml(item.product_key)}',${si})" id="sug-${escHtml(item.product_key)}-${si}">
           <span class="sug-rank">#${si+1}</span>
           <div class="sug-code">${escHtml(s.our_product_code)}</div>
           <div class="sug-name">${escHtml(s.product_name)}</div>
@@ -552,16 +768,17 @@ function selectOurProductDirect(code, name) {
 }
 
 // 카드 내 제안 선택 하이라이트
-function selectSuggest(cardIdx, sugIdx) {
-  const card = document.querySelector(`.suggest-card[data-idx="${cardIdx}"]`);
+function selectSuggest(productKey, sugIdx) {
+  const card = document.querySelector(`.suggest-card[data-key="${CSS.escape(productKey)}"]`);
+  if (!card) return;
   card.querySelectorAll('.sug-item').forEach((el, i) => {
     el.classList.toggle('selected', i === sugIdx);
   });
 }
 
 // ══ 팝업 열기 ══
-async function openMappingModal(cardIdx) {
-  const item = suggestItems[cardIdx];
+async function openMappingModal(productKey) {
+  const item = suggestItems.find(i => i.product_key === productKey);
   if (!item) return;
 
   // 기준 정보 초기화
@@ -577,7 +794,7 @@ async function openMappingModal(cardIdx) {
 
   // 카드에서 선택된 제안(클릭한 .selected) 인덱스 확인
   let selectedSugIdx = 0;
-  const card = document.querySelector(`.suggest-card[data-idx="${cardIdx}"]`);
+  const card = document.querySelector(`.suggest-card[data-key="${CSS.escape(productKey)}"]`);
   if (card) {
     card.querySelectorAll('.sug-item').forEach((el, i) => {
       if (el.classList.contains('selected')) selectedSugIdx = i;
