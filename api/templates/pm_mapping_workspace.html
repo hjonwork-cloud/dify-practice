@@ -91,6 +91,25 @@
 .btn-bulk-approve:hover { background:#047857; }
 .btn-bulk-approve:disabled { background:#9ca3af; cursor:not-allowed; }
 
+.btn-our-change { padding:4px 10px; border-radius:6px; font-size:12px; font-weight:600; border:1px solid #d1d5db; background:#f9fafb; color:#374151; cursor:pointer; white-space:nowrap; }
+.btn-our-change:hover { border-color:#4f46e5; color:#4f46e5; background:#eef2ff; }
+
+/* 우리 상품 교체 서브패널 */
+.our-change-panel { display:none; position:absolute; inset:0; background:#fff; z-index:10; border-radius:0; overflow-y:auto; padding:16px; }
+.our-change-panel.open { display:flex; flex-direction:column; gap:10px; }
+.our-change-header { display:flex; align-items:center; gap:8px; margin-bottom:4px; }
+.our-change-header h4 { font-size:14px; font-weight:700; color:#111; flex:1; }
+.our-product-card { border:1.5px solid #e5e7eb; border-radius:8px; padding:10px 12px; cursor:pointer; transition:all .15s; background:#fff; }
+.our-product-card:hover { border-color:#4f46e5; background:#eef2ff; }
+.our-product-card.selected { border-color:#4f46e5; background:#eef2ff; box-shadow:0 0 0 2px #818cf8; }
+.our-product-card .opc-name { font-size:13px; font-weight:700; color:#111; margin-bottom:6px; }
+.our-product-card .opc-code { font-size:11px; color:#9ca3af; margin-bottom:4px; }
+.our-product-card .opc-prices { display:flex; gap:12px; font-size:12px; flex-wrap:wrap; }
+.our-product-card .opc-prices .lbl { color:#6b7280; }
+.our-product-card .opc-prices .val { font-weight:700; }
+.our-product-card .opc-prices .val.sale { color:#1d4ed8; }
+.our-product-card .opc-prices .val.sales { color:#059669; }
+
 /* ── 매핑 팝업 ── */
 #mappingModal { display:none; position:fixed; inset:0; z-index:9000; }
 #mappingModal.open { display:flex; align-items:center; justify-content:center; }
@@ -264,13 +283,27 @@
         <div id="modalPlatList"></div>
       </div>
       <!-- 우: 우리 상품 + 태그/배수 -->
-      <div class="modal-right">
-        <div class="modal-section-title">우리 상품</div>
+      <div class="modal-right" style="position:relative">
+        <div class="modal-section-title" style="display:flex;align-items:center;gap:8px">
+          우리 상품
+          <button class="btn-our-change" onclick="openOurChangePanel()">🔄 교체하기</button>
+        </div>
         <div id="modalOurCandidate"></div>
-        <!-- AI 제안 없는 경우: 직접 검색 폼 -->
+        <!-- 우리 상품 교체 서브패널 (슬라이드인) -->
+        <div class="our-change-panel" id="ourChangePanel">
+          <div class="our-change-header">
+            <h4>🔍 우리 상품 검색</h4>
+            <button class="btn-close-modal" onclick="closeOurChangePanel()">✕ 닫기</button>
+          </div>
+          <input type="text" class="search-box" id="ourChangeInput"
+            placeholder="상품명 or 코드 입력 (*와일드카드 가능)..."
+            oninput="searchOurChange()" style="margin-bottom:4px">
+          <div style="font-size:11px;color:#9ca3af;margin-bottom:8px">매출 높은 순 정렬 · 최대 30건 표시</div>
+          <div id="ourChangeResults" style="flex:1;overflow-y:auto"></div>
+        </div>
+        <!-- AI 제안 없는 경우: 직접 검색 안내 -->
         <div id="ourSearchArea" style="display:none">
-          <input type="text" class="search-box" id="ourSearchInput" placeholder="우리 상품명 or 코드 검색..." oninput="searchOurProducts()" style="margin-top:4px">
-          <div id="ourSearchResults" style="max-height:200px;overflow-y:auto"></div>
+          <p style="font-size:12px;color:#9ca3af;margin:4px 0 8px">AI 제안이 없습니다. 위 교체하기 버튼으로 직접 검색하세요.</p>
         </div>
         <hr style="border:none;border-top:1px solid #e5e7eb;margin:14px 0">
         <div class="modal-section-title">태그</div>
@@ -734,37 +767,73 @@ function renderSuggestList(items, totalUnmapped) {
   document.getElementById('wsContent').innerHTML = html;
 }
 
-// 우리 상품 직접 검색 (제안없는 상품 팝업용)
-let _ourSearchTimer = null;
-async function searchOurProducts() {
-  const q = (document.getElementById('ourSearchInput').value || '').trim();
-  clearTimeout(_ourSearchTimer);
-  if (q.length < 1) { document.getElementById('ourSearchResults').innerHTML = ''; return; }
-  _ourSearchTimer = setTimeout(async () => {
+// 우리 상품 교체 패널 열기/닫기
+function openOurChangePanel() {
+  const panel = document.getElementById('ourChangePanel');
+  panel.classList.add('open');
+  // 검색창 포커스 + 이전 검색 초기화
+  const inp = document.getElementById('ourChangeInput');
+  inp.value = '';
+  document.getElementById('ourChangeResults').innerHTML = '';
+  setTimeout(() => inp.focus(), 50);
+}
+function closeOurChangePanel() {
+  document.getElementById('ourChangePanel').classList.remove('open');
+}
+
+// 우리 상품 교체 검색
+let _ourChangeTimer = null;
+function searchOurChange() {
+  clearTimeout(_ourChangeTimer);
+  const q = (document.getElementById('ourChangeInput').value || '').trim();
+  const resEl = document.getElementById('ourChangeResults');
+  if (!q) { resEl.innerHTML = ''; return; }
+  resEl.innerHTML = '<p style="font-size:12px;color:#9ca3af;padding:8px">검색 중...</p>';
+  _ourChangeTimer = setTimeout(async () => {
     try {
       const r = await fetch(`/portal/price-monitor/api/our-products?plant=${currentPlant}&keyword=${encodeURIComponent(q)}`);
       const d = await r.json();
       const products = d.data || [];
-      const res = document.getElementById('ourSearchResults');
-      if (!products.length) { res.innerHTML = '<p style="font-size:12px;color:#9ca3af;padding:8px">결과 없음</p>'; return; }
+      if (!products.length) { resEl.innerHTML = '<p style="font-size:12px;color:#9ca3af;padding:8px">결과 없음</p>'; return; }
       let html = '';
-      products.slice(0, 20).forEach(p => {
-        const pname = (p.product_name || p.product_code || '').replace(/'/g, '&#39;');
-        const pcode = (p.product_code || '').replace(/'/g, '&#39;');
-        html += `<div onclick="selectOurProductDirect('${pcode}','${pname}')" style="padding:8px 10px;border-radius:6px;border:1px solid #e5e7eb;margin-bottom:6px;cursor:pointer;font-size:13px;background:#fff" onmouseover="this.style.borderColor='#4f46e5'" onmouseout="this.style.borderColor='#e5e7eb'">
-          <span style="font-weight:700">${escHtml(p.product_name||p.product_code)}</span>
-          <span style="color:#9ca3af;margin-left:8px">${escHtml(p.product_code)}</span>
+      products.slice(0, 30).forEach(p => {
+        const saleV  = p.avg_sale_price  ? Math.round(p.avg_sale_price).toLocaleString()+'원' : '-';
+        const buyV   = p.avg_buy_price   ? Math.round(p.avg_buy_price).toLocaleString()+'원'  : '-';
+        const salesV = p.prev_sales_amt  ? Math.round(p.prev_sales_amt/10000).toLocaleString()+'만원' : '-';
+        const safeCode = escHtml(p.product_code||'');
+        const safeName = escHtml(p.product_name||p.product_code||'');
+        html += `<div class="our-product-card" onclick="selectOurChange('${safeCode}','${safeName}',${p.avg_sale_price||0},${p.avg_buy_price||0},${p.prev_sales_amt||0})">
+          <div class="opc-code">${safeCode}</div>
+          <div class="opc-name">${safeName}</div>
+          <div class="opc-prices">
+            <span><span class="lbl">공급가</span> <span class="val sale">${saleV}</span></span>
+            <span><span class="lbl">구매가</span> <span class="val">${buyV}</span></span>
+            <span><span class="lbl">전월매출</span> <span class="val sales">${salesV}</span></span>
+          </div>
         </div>`;
       });
-      res.innerHTML = html;
-    } catch(e) { console.warn(e); }
+      resEl.innerHTML = html;
+    } catch(e) { resEl.innerHTML = `<p style="font-size:12px;color:#ef4444;padding:8px">오류: ${e.message}</p>`; }
   }, 300);
 }
-function selectOurProductDirect(code, name) {
-  modalOurItem = { our_product_code: code, product_name: name, our_sale_price: null, buy_price: null, prev_sales_amt: 0, score: 0 };
+
+function selectOurChange(code, name, saleP, buyP, salesAmt) {
+  modalOurItem = {
+    our_product_code: code,
+    product_name:     name,
+    our_sale_price:   saleP || null,
+    buy_price:        buyP  || null,
+    prev_sales_amt:   salesAmt || 0,
+    score:            0,
+  };
   renderOurCandidate(modalOurItem);
-  document.getElementById('ourSearchArea').style.display = 'none';
+  closeOurChangePanel();
   updateConfirmBtn();
+}
+
+// (이전 코드 호환성 유지)
+function selectOurProductDirect(code, name) {
+  selectOurChange(code, name, 0, 0, 0);
 }
 
 // 카드 내 제안 선택 하이라이트
@@ -801,12 +870,14 @@ async function openMappingModal(productKey) {
     });
   }
 
-  // 우리 상품 후보 렌더 (선택된 제안, 없으면 top1, 없으면 직접검색 모드)
+  // 우리 상품 후보 렌더 (선택된 제안, 없으면 top1, 없으면 교체하기 안내)
   const top = item.suggestions[selectedSugIdx] || item.suggestions[0] || null;
   modalOurItem = top;
   renderOurCandidate(top);
-  // 우리 상품 직접 검색 입력창 표시 여부
-  document.getElementById('ourSearchArea').style.display = top ? 'none' : 'block';
+  // AI 제안이 없으면 교체 패널 자동 오픈
+  document.getElementById('ourSearchArea').style.display = 'none';
+  document.getElementById('ourChangePanel').classList.remove('open');
+  if (!top) openOurChangePanel();
 
   // 유사 플랫폼 상품 로드 (전체 셀러)
   document.getElementById('modalPlatList').innerHTML = '<div style="text-align:center;padding:20px"><div class="spinner"></div></div>';
@@ -1051,6 +1122,7 @@ async function confirmMapping() {
 
 function closeModal() {
   document.getElementById('mappingModal').classList.remove('open');
+  document.getElementById('ourChangePanel').classList.remove('open');
   modalPlatItems     = [];
   modalPlatItemsBase = [];
   modalOurItem       = null;

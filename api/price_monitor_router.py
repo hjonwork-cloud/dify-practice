@@ -816,14 +816,22 @@ async def api_our_products(request: Request, plant: str = "ALL", keyword: str = 
         sales_map = _get_prev_month_sales_totals('ALL')
     except Exception:
         sales_map = {}
-    # 매출 데이터 합치
+    # 기준가(공급가/구매가) 포함
+    try:
+        base_prices = {r["product_code"]: r for r in (_get_base_prices(plant) or [])}
+    except Exception:
+        base_prices = {}
+    # 매출 데이터 + 기준가 합치
     enriched = []
     for p in products:
         code = p.get("product_code", "")
-        s = sales_map.get(code, {})
+        s  = sales_map.get(code, {})
+        bp = base_prices.get(code, {})
         enriched.append({**p,
             "prev_sales_amt": s.get("prev_sales_amt"),
             "prev_sales_qty": s.get("prev_sales_qty"),
+            "avg_sale_price": bp.get("avg_sale_price"),
+            "avg_buy_price":  bp.get("avg_buy_price"),
         })
     products = enriched
     if keyword and products:
