@@ -60,7 +60,8 @@
 /* ── 분석 결과 패널 ── */
 .result-panel { padding:16px 24px; background:#fff; border-bottom:1px solid #e5e7eb; display:none; }
 .result-panel.visible { display:block; }
-.result-title { font-size:13px; font-weight:700; color:#374151; margin-bottom:12px; display:flex; align-items:center; gap:8px; }
+.result-title { font-size:13px; font-weight:700; color:#374151; margin-bottom:8px; }
+.result-summary { font-size:12px; color:#6b7280; margin-bottom:12px; }
 .dist-bars { display:flex; gap:8px; align-items:flex-end; height:80px; margin-bottom:8px; }
 .dist-col { display:flex; flex-direction:column; align-items:center; gap:4px; flex:1; min-width:60px; }
 .dist-bar-wrap { width:100%; background:#f3f4f6; border-radius:6px 6px 0 0; position:relative; height:60px; display:flex; align-items:flex-end; }
@@ -188,7 +189,8 @@
 
 <!-- ══ 분석 결과 패널 ══ -->
 <div class="result-panel" id="resultPanel">
-  <div class="result-title">📊 분석 결과 <span id="resultSummaryText" style="font-weight:400;color:#6b7280;font-size:12px"></span></div>
+  <div class="result-title">📊 분석 결과</div>
+  <div class="result-summary" id="resultSummaryText"></div>
   <div style="display:flex;gap:32px;align-items:flex-start;flex-wrap:wrap">
     <!-- 점수 분포 바 -->
     <div>
@@ -531,6 +533,7 @@ function renderResultPanel(items, totalUnmapped) {
     document.getElementById('resultPanel').classList.remove('visible');
     document.getElementById('filterTabs').style.display = 'none';
     document.getElementById('bulkBar').classList.remove('visible');
+    document.getElementById('kpiBar').style.display = 'none';
     return;
   }
 
@@ -559,7 +562,7 @@ function renderResultPanel(items, totalUnmapped) {
   document.getElementById('statShown').textContent       = items.length.toLocaleString() + '건';
   document.getElementById('statAvgScore').textContent    = avgScore + 'pt';
   document.getElementById('statAutoApprove').textContent = high + '건';
-  document.getElementById('resultSummaryText').textContent = `| 분석 ${items.length}건 · 고신뢰 ${high}건 · 중신뢰 ${mid}건 · 저신뢰 ${low}건 · 제안없음 ${noSug}건`;
+  document.getElementById('resultSummaryText').textContent = `분석 ${items.length}건 · 고신뢰 ${high}건 · 중신뢰 ${mid}건 · 저신뢰 ${low}건 · 제안없음 ${noSug}건`;
   document.getElementById('resultPanel').classList.add('visible');
 
   // 필터 탭 카운트
@@ -578,12 +581,8 @@ function renderResultPanel(items, totalUnmapped) {
     document.getElementById('bulkBar').classList.remove('visible');
   }
 
-  // KPI bar (기존)
-  document.getElementById('kpiTotal').textContent = totalUnmapped.toLocaleString();
-  document.getElementById('kpiShown').textContent = items.length.toLocaleString();
-  document.getElementById('kpiHigh').textContent  = high.toLocaleString();
-  document.getElementById('kpiMid').textContent   = mid.toLocaleString();
-  document.getElementById('kpiBar').style.display = 'flex';
+  // 기존 KPI bar는 숨김(분석결과 패널로 대체)
+  document.getElementById('kpiBar').style.display = 'none';
 }
 
 // ══ 필터 탭 ══
@@ -667,6 +666,7 @@ function renderSuggestList(items, totalUnmapped) {
   }
 
   // (KPI bar는 renderResultPanel에서 처리)
+  const noSug = items.filter(i => !i.has_suggestions).length;
 
   const platLabel = p => p === 'baemin' ? '배민상회' : '식봄';
   const platClass = p => p === 'baemin' ? 'badge-baemin' : 'badge-food';
