@@ -2120,7 +2120,13 @@ def _score_mapping(platform_name: str, platform_price: float | None,
     if _plat_core and _our_core and not _has_core_overlap(_plat_core, _our_core):
         score -= 20.0   # 핵심어 0% 겹침 → 브랜드만 같은 다른 상품
 
-    # 3-a. 용량/중량 정규화 매칭 (+15 / -5 / -8점)
+    # 플레이버/라인 구분 패널티 (4자+ 고유어 불일치)
+    # "키위애플드레싱" vs "유자파인드레싱" 처럼 브랜드·카테고리는 같지만 플레이버가 다른 경우 추가 패널티
+    # core_pen(3자+)에서 "드레싱"(3자) 겹침으로 패널티를 피한 케이스를 잡아냄
+    _plat_long = {t for t in plat_meaningful if t not in _BRAND_STOP and len(t) >= 4}
+    _our_long  = {t for t in our_meaningful  if t not in _BRAND_STOP and len(t) >= 4}
+    if _plat_long and _our_long and not _has_core_overlap(_plat_long, _our_long):
+        score -= 15.0   # 4자+ 고유어 전혀 안 겹침 → 플레이버 다른 상품
     #      our_prod.total_weight(KG) 제공 시 직접 비교, 없으면 상품명 파싱
     _vol_applied = False
     if our_prod:
@@ -2835,11 +2841,8 @@ async def poc_benchmark(n: int = 100, seed: int = 42, threshold: float = 20.0,
       # _get_our_products('ALL'): 이미 캐시된 전체 목록 사용 (LIMIT 100000)
       # POC 전용 필드 보정: cat1/cat2/cat3 → category/mid_category/sub_category
       _base_rows = _get_our_products('ALL')
-      # POC 실행 시간 제한: 8000건으로 샘플링 (100 × 8000 = 800K 스코어링 ≒ 4분)
-      import random as _random
-      _rng = _random.Random(seed)
-      if len(_base_rows) > 8000:
-          _base_rows = _rng.sample(_base_rows, 8000)
+      # 샘플링 없이 전체 자사 상품 사용 (정확도 극대화)
+      # 실행 시간 제어: poc 호출 시 n 파라미터를 줄여서 조정 (n=30 권장)
       our_rows = []
       for _r in _base_rows:
           our_rows.append({
