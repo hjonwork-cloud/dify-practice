@@ -861,21 +861,17 @@ async def api_our_products(request: Request, plant: str = "ALL", keyword: str = 
                 ]
         # 매출 높은순 정렬
         products = sorted(products, key=lambda p: p.get("prev_sales_amt") or 0, reverse=True)
-        # [N] 화성3배치 중복 제거: non-[N] 동일 기본명 + 구매가 있으면 [N] 숨김
+        # [N] 화성3배치 중복 제거: non-[N] 동일 기본명 상품이 존재하면 [N] 숨김
         import re as _re_nd
-        _nd_non_n: dict[str, bool] = {}  # 정규화명 → 구매가 있는 non-[N] 존재 여부
+        _nd_non_n_set: set[str] = set()
         for _p in products:
             _nm = (_p.get("product_name") or "").strip()
             if not _nm.startswith("[N]"):
-                _nk = _re_nd.sub(r'\s+', '', _nm.lower())
-                if _p.get("avg_buy_price"):
-                    _nd_non_n[_nk] = True
-                elif _nk not in _nd_non_n:
-                    _nd_non_n[_nk] = False
+                _nd_non_n_set.add(_re_nd.sub(r'\s+', '', _nm.lower()))
         products = [
             p for p in products
             if not (p.get("product_name") or "").strip().startswith("[N]")
-            or not _nd_non_n.get(_re_nd.sub(r'\s+', '', (p.get("product_name") or "").strip()[3:].lower()), False)
+            or _re_nd.sub(r'\s+', '', (p.get("product_name") or "").strip()[3:].lower()) not in _nd_non_n_set
         ]
         return JSONResponse({"data": products[:100], "error": error_msg, "total_before_filter": len(products)})
     except Exception as e:
@@ -2510,26 +2506,22 @@ async def _do_ai_suggest(request, platform, seller_name, plant, limit):
     our_scan = (our_with_sales + our_no_sales)[:_our_limit]
 
     # ── [N] 화성3배치 중복 제거 ──────────────────────────────────────────
-    # [N]xxx 상품이 있고 동일 기본명(xxx)의 non-[N] 상품도 있으면
-    # → 구매가 데이터가 있는 non-[N] 상품을 우선, [N] 상품은 스캔에서 제외
+    # [N]xxx 상품이 있고 동일 기본명(xxx)의 non-[N] 상품이 our_scan에 존재하면
+    # → non-[N] 상품을 우선, [N] 상품은 스캔에서 제외
+    # (base_prices 유무 조건 제거: 최근 2주 판매 없어도 상품 자체가 있으면 대체)
     import re as _re_dedup
-    _non_n_names: dict[str, str] = {}   # 정규화 기본명 → product_code
-    _non_n_with_price: set[str] = set() # 구매가 있는 non-[N] 정규화명 집합
+    _non_n_names: set[str] = set()   # 정규화 기본명 집합 (non-[N] 상품)
     for _p in our_scan:
         _pname = (_p.get("product_name") or "").strip()
         if not _pname.startswith("[N]"):
-            _norm = _re_dedup.sub(r'\s+', '', _pname.lower())  # 공백제거 소문자
-            _code = _p["product_code"]
-            _non_n_names[_norm] = _code
-            if base_prices.get(_code):
-                _non_n_with_price.add(_norm)
-    _n_exclude: set[str] = set()        # 제외할 [N] 상품 코드
+            _norm = _re_dedup.sub(r'\s+', '', _pname.lower())
+            _non_n_names.add(_norm)
+    _n_exclude: set[str] = set()     # 제외할 [N] 상품 코드
     for _p in our_scan:
         _pname = (_p.get("product_name") or "").strip()
         if _pname.startswith("[N]"):
-            # [N] 제거 후 기본명으로 non-[N] 상품 존재 여부 확인
             _base = _re_dedup.sub(r'\s+', '', _pname[3:].strip().lower())
-            if _base in _non_n_with_price:
+            if _base in _non_n_names:
                 _n_exclude.add(_p["product_code"])
     if _n_exclude:
         our_scan = [p for p in our_scan if p["product_code"] not in _n_exclude]
