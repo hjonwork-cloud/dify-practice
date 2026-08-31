@@ -2531,12 +2531,19 @@ async def _do_ai_suggest(request, platform, seller_name, plant, limit):
     # 기존 매핑 패턴
     pattern_strength = _build_pattern_map(all_mappings, our_scan) or {}
 
-    # ── 우리 상품 토큰 사전 캐시 (빠른 사전 필터용) ──────────────────────────
-    # 3,000개 × tokenize 1회 → 매 플랫폼 상품마다 300만 번 스코어링 → ~10만 번으로 감소
-    _our_scan_toks: dict[str, set] = {
-        p["product_code"]: _tokenize(p.get("product_name") or "")
-        for p in our_scan
-    }
+    # ── 역인덱스 구축: 토큰 → {product_code, ...} ────────────────────────────
+    # 기존 O(N_plat × N_our) 순차 루프 → O(N_our + N_plat_toks) 역인덱스 조회로 전환
+    # 41,879개 × tokenize 1회만 실행; 이후 각 플랫폼 상품은 자신의 토큰으로만 후보 추출
+    from collections import defaultdict as _ddict
+    _tok_inv: dict[str, set] = _ddict(set)   # token → {product_code}
+    _our_tok_cache: dict[str, set] = {}       # product_code → tokens (스코어링 재사용)
+    for _p in our_scan:
+        _c = _p["product_code"]
+        _toks = _tokenize(_p.get("product_name") or "")
+        _our_tok_cache[_c] = _toks
+        for _t in _toks:
+            _tok_inv[_t].add(_c)
+    _our_prod_map: dict[str, dict] = {_p["product_code"]: _p for _p in our_scan}  # 빠른 접근
 
     items = []
     scan_count = min(len(unmapped), limit)  # limit개만 스캔
@@ -2552,17 +2559,17 @@ async def _do_ai_suggest(request, platform, seller_name, plant, limit):
             raw_pname    = row.get("product_name", "")
             clean_pname  = _strip_seller(raw_pname, sname)
 
-            # 우리 상품별 점수 계산
-            plat_toks = _tokenize(clean_pname)  # 플랫폼 상품 토큰 (사전 필터용)
+            # 우리 상품별 점수 계산 — 역인덱스로 토큰이 겹치는 후보만 추출
+            plat_toks = _tokenize(clean_pname)
+            # 플랫폼 토큰이 나타나는 우리 상품 코드만 후보로 (합집합)
+            candidate_codes: set = set()
+            for _t in plat_toks:
+                candidate_codes |= _tok_inv.get(_t, set())
             scored = []
-            for p in our_scan:
-                code = p["product_code"]
-                # ── 빠른 사전 필터: 토큰 겹침이 전혀 없으면 스코어링 skip ──────
-                # 온도조건 하드필터는 _score_mapping 내부에서 처리되므로 여기선 생략
-                if not (plat_toks & _our_scan_toks.get(code, set())):
+            for code in candidate_codes:
+                p = _our_prod_map.get(code)
+                if p is None:
                     continue
-                # ─────────────────────────────────────────────────────────────
-                code = p["product_code"]
                 bp   = base_prices.get(code, {})
                 our_sale = bp.get("avg_sale_price")
                 buy_p    = bp.get("avg_buy_price")
