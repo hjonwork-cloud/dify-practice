@@ -2658,16 +2658,17 @@ def poc_ping():
 
 
 @router.get("/api/poc-result")
-def poc_result(limit: int = 0):
+def poc_result(limit: int = 0, force_file: int = 0):
     """poc-benchmark 완료 후 저장된 결과 조회 (인메모리 우선, /tmp 백업)
     limit: 반환할 details 건수 (0=전체, 기본값)
+    force_file: 1이면 인메모리 무시하고 /tmp 파일에서 읽기 (멀티인스턴스 환경에서 사용)
     """
     global _POC_LATEST
     import json as _json, os as _os
     def _slice(items: list) -> list:
         return items[:limit] if limit > 0 else items
-    # 1) 인메모리 결과 우선
-    if _POC_LATEST is not None:
+    # 1) 인메모리 결과 우선 (force_file=0일 때만)
+    if _POC_LATEST is not None and not force_file:
         all_details = _POC_LATEST.get("details", [])
         return JSONResponse({
             "meta":    _POC_LATEST.get("meta"),
