@@ -2535,23 +2535,32 @@ def _do_ai_suggest(request, platform, seller_name, plant, limit, _job_id=None):
     except Exception as e:
         return JSONResponse({"items": [], "error": str(e)})
 
+    # ── DB 콜 4개 병렬 실행 (순차 합산 → 가장 느린 1개 시간만 소요) ────────
+    _log(f"플랫폼 상품 조회 완료 {len(plat_rows)}개 → DB 병렬 조회 시작")
+    import concurrent.futures as _cf2
+    with _cf2.ThreadPoolExecutor(max_workers=4) as _pex:
+        _f_mappings     = _pex.submit(portal_db.pm_list_all_mappings, plant)
+        _f_our_products = _pex.submit(_get_our_products, plant)
+        _f_price_totals = _pex.submit(_get_prev_month_sales_totals, plant)
+        _f_base_prices  = _pex.submit(_get_base_prices, plant)
+        try:
+            all_mappings  = _f_mappings.result(timeout=120)     or []
+            our_products  = _f_our_products.result(timeout=120) or []
+            price_totals  = _f_price_totals.result(timeout=120) or {}
+            _bp_rows      = _f_base_prices.result(timeout=120)  or []
+        except _cf2.TimeoutError:
+            return JSONResponse({"items": [], "error": "DB 조회 제한시간(2분) 초과 — Databricks 응답 지연"})
+    base_prices = {r["product_code"]: r for r in _bp_rows}
+    _log(f"DB 병렬 조회 완료 매핑={len(all_mappings)}건 우리상품={len(our_products)}개")
+
     # 이미 매핑된 product_key 집합
-    _log(f"플랫폼 상품 조회 완료 {len(plat_rows)}개 → 매핑 목록 조회 시작")
-    all_mappings = portal_db.pm_list_all_mappings(plant) or []
     mapped_keys = {m["product_key"] for m in all_mappings if m.get("is_active", 1)}
-    _log(f"매핑 목록 완료 {len(all_mappings)}건 → 우리상품 조회 시작")
 
     # 미매핑만 필터
     unmapped = [r for r in plat_rows if r["product_key"] not in mapped_keys]
     if _job_id and _job_id in _job_store:
         _job_store[_job_id]["total_unmapped"] = len(unmapped)
-
-    # 우리 상품 목록 + 가격
-    our_products = _get_our_products(plant) or []
-    _log(f"우리상품 완료 {len(our_products)}개 → 가격/매출 조회 시작")
-    price_totals = _get_prev_month_sales_totals(plant) or {}
-    base_prices  = {r["product_code"]: r for r in (_get_base_prices(plant) or [])}
-    _log(f"가격/매출 완료 → 스코어링 시작 미매핑={len(unmapped)}건")
+    _log(f"미매핑={len(unmapped)}건 → 스코어링 시작")
     # 매출데이터 있는 상품 우선, 없으면 전체
     # 전체셀러(__ALL__) 분석은 연산량이 크므로 상품 수 제한
     our_with_sales = [p for p in our_products if p["product_code"] in base_prices]
