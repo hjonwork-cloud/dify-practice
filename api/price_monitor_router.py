@@ -86,14 +86,17 @@ def _q(sql: str) -> list[dict]:
 
 
 def _serialize_rows(rows: list[dict]) -> list[dict]:
-    """date/datetime 등 JSON 비직렬화 타입을 str로 변환."""
+    """date/datetime/Decimal 등 JSON 비직렬화 타입을 안전 변환."""
     import datetime
+    from decimal import Decimal
     result = []
     for row in rows:
         new_row = {}
         for k, v in row.items():
             if isinstance(v, (datetime.date, datetime.datetime)):
                 new_row[k] = v.isoformat()
+            elif isinstance(v, Decimal):
+                new_row[k] = float(v)
             else:
                 new_row[k] = v
         result.append(new_row)
