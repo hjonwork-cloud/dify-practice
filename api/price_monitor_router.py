@@ -732,6 +732,33 @@ async def api_debug_pub(request: Request):
         result["zmm60_temp_cond_samples"] = rows
     except Exception as e:
         result["zmm60_temp_cond_samples_error"] = str(e)
+    # [임시] 상품코드 직접 조회 (쿼리파라미터 product_code 지원)
+    try:
+        pc = request.query_params.get("product_code", "")
+        kw = request.query_params.get("keyword", "")
+        if pc:
+            rows = _q(f"""
+                SELECT z.`상품코드` AS code, m.`상품명` AS name,
+                       m.`자재그룹명` AS group, m.`온도조건` AS temp,
+                       m.`총중량` AS weight, m.`단위` AS unit
+                FROM {T_ZSDR} z
+                LEFT JOIN {T_ZMM60} m ON z.`상품코드` = m.`상품코드`
+                WHERE z.`상품코드` = '{pc}'
+                LIMIT 5
+            """)
+            result["product_code_search"] = rows
+        elif kw:
+            rows = _q(f"""
+                SELECT z.`상품코드` AS code, m.`상품명` AS name,
+                       m.`자재그룹명` AS grp, m.`온도조건` AS temp
+                FROM {T_ZSDR} z
+                LEFT JOIN {T_ZMM60} m ON z.`상품코드` = m.`상품코드`
+                WHERE m.`상품명` LIKE '%{kw}%'
+                LIMIT 10
+            """)
+            result["keyword_search"] = rows
+    except Exception as e:
+        result["product_search_error"] = str(e)
     return JSONResponse(result)
 
 
