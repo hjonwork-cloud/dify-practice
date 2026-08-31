@@ -212,17 +212,25 @@ T_SILVER = "h_hmfo_fsi_dm.gd_rst_ing.dim_platform_products"
 
 
 def _preload_products_background():
-    """앱 시작 시 백그라운드에서 양쪽 플랜트 상품 목록을 미리 로드."""
+    """앱 시작 시 백그라운드에서 모든 DB 캐시를 미리 워밍업.
+    Databricks 웨어하우스 콜드스타트(2~5분) 대비 — 실사용 전 캐시 완성.
+    """
     def _load():
-        import time as _t
+        import time as _t, concurrent.futures as _cf_pre
         _t.sleep(5)  # 앱 startup 완료 후 실행
+        logger.info("[pm-preload] Databricks 웨어하우스 워밍업 시작")
         for plant in PLANTS:
             try:
-                _get_our_products(plant)
-                _get_our_products_with_batch(plant)
-                logger.info(f"[price_monitor] preload 완료: plant={plant}")
+                # 4개 DB 콜 병렬로 워밍업 (포탈 DB + Databricks 3개)
+                with _cf_pre.ThreadPoolExecutor(max_workers=4) as _pex:
+                    _pex.submit(portal_db.pm_list_all_mappings, plant)
+                    _pex.submit(_get_our_products, plant)
+                    _pex.submit(_get_our_products_with_batch, plant)
+                    _pex.submit(_get_base_prices, plant)
+                    _pex.submit(_get_prev_month_sales_totals, plant)
+                logger.info(f"[pm-preload] 완료: plant={plant}")
             except Exception as e:
-                logger.warning(f"[price_monitor] preload 실패 ({plant}): {e}")
+                logger.warning(f"[pm-preload] 실패 ({plant}): {e}")
     t = threading.Thread(target=_load, daemon=True, name="pm-preload")
     t.start()
 
@@ -2468,14 +2476,14 @@ async def api_mapping_ai_suggest(
         with _cf.ThreadPoolExecutor(max_workers=1) as _ex:
             _fut = _ex.submit(_do_ai_suggest, None, platform, seller_name, plant, limit, job_id)
             try:
-                result = _fut.result(timeout=180)  # 3분 하드 타임아웃
+                result = _fut.result(timeout=480)  # 8분 — Databricks 콜드스타트 최대 5분 커버
                 data = _json.loads(result.body)
                 data["status"] = "done"
                 _job_store[job_id].update(data)
             except _cf.TimeoutError:
                 _job_store[job_id].update({
                     "status": "error",
-                    "error": "분석 제한시간(3분) 초과 — DB 연결 지연이 의심됩니다. 잠시 후 다시 시도해 주세요.",
+                    "error": "분석 제한시간(8분) 초과 — Databricks 웨어하우스가 응답하지 않습니다. 잠시 후 다시 시도해 주세요.",
                     "traceback": ""
                 })
             except Exception as _e:
@@ -2544,12 +2552,12 @@ def _do_ai_suggest(request, platform, seller_name, plant, limit, _job_id=None):
         _f_price_totals = _pex.submit(_get_prev_month_sales_totals, plant)
         _f_base_prices  = _pex.submit(_get_base_prices, plant)
         try:
-            all_mappings  = _f_mappings.result(timeout=120)     or []
-            our_products  = _f_our_products.result(timeout=120) or []
-            price_totals  = _f_price_totals.result(timeout=120) or {}
-            _bp_rows      = _f_base_prices.result(timeout=120)  or []
+            all_mappings  = _f_mappings.result(timeout=360)     or []
+            our_products  = _f_our_products.result(timeout=360) or []
+            price_totals  = _f_price_totals.result(timeout=360) or {}
+            _bp_rows      = _f_base_prices.result(timeout=360)  or []
         except _cf2.TimeoutError:
-            return JSONResponse({"items": [], "error": "DB 조회 제한시간(2분) 초과 — Databricks 응답 지연"})
+            return JSONResponse({"items": [], "error": "DB 조회 제한시간(6분) 초과 — Databricks 웨어하우스 응답 지연"})
     base_prices = {r["product_code"]: r for r in _bp_rows}
     _log(f"DB 병렬 조회 완료 매핑={len(all_mappings)}건 우리상품={len(our_products)}개")
 
