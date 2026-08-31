@@ -805,52 +805,61 @@ async def api_debug(request: Request):
 @router.get("/api/our-products")
 async def api_our_products(request: Request, plant: str = "ALL", keyword: str = ""):
     _require_pm_access(request)
-    error_msg = None
     try:
-        products = _get_our_products(plant)  # 캐시 사용
+        error_msg = None
+        try:
+            products = _get_our_products(plant)  # 캐시 사용
+        except Exception as e:
+            error_msg = str(e)
+            products = []
+        # 전체센터 매출 합산 (ALL 고정, product_code 단위)
+        try:
+            sales_map = _get_prev_month_sales_totals('ALL')
+        except Exception:
+            sales_map = {}
+        # 기준가(공급가/구매가) 포함
+        try:
+            base_prices = {r["product_code"]: r for r in (_get_base_prices(plant) or [])}
+        except Exception:
+            base_prices = {}
+        # 매출 데이터 + 기준가 합치 (Decimal 안전 변환)
+        enriched = []
+        for p in products:
+            code = p.get("product_code", "")
+            s  = sales_map.get(code, {})
+            bp = base_prices.get(code, {})
+            def _f(v):
+                """Decimal/float/None 모두 float or None로 반환"""
+                try: return float(v) if v is not None else None
+                except Exception: return None
+            enriched.append({**p,
+                "prev_sales_amt": _f(s.get("prev_sales_amt")),
+                "prev_sales_qty": _f(s.get("prev_sales_qty")),
+                "avg_sale_price": _f(bp.get("avg_sale_price")),
+                "avg_buy_price":  _f(bp.get("avg_buy_price")),
+            })
+        products = enriched
+        if keyword and products:
+            if '*' in keyword:
+                # 와일드카드: *흔다리*500* → 모든 토큰이 포함되는 상품
+                tokens = [t.lower() for t in keyword.split('*') if t.strip()]
+                products = [
+                    p for p in products
+                    if all(t in (p.get("product_name") or "").lower() or t in (p.get("product_code") or "").lower()
+                           for t in tokens)
+                ]
+            else:
+                kw = keyword.lower()
+                products = [
+                    p for p in products
+                    if kw in (p.get("product_name") or "").lower() or kw in (p.get("product_code") or "")
+                ]
+        # 매출 높은순 정렬
+        products = sorted(products, key=lambda p: p.get("prev_sales_amt") or 0, reverse=True)
+        return JSONResponse({"data": products[:100], "error": error_msg, "total_before_filter": len(products)})
     except Exception as e:
-        error_msg = str(e)
-        products = []
-    # 전체센터 매출 합산 (ALL 고정, product_code 단위)
-    try:
-        sales_map = _get_prev_month_sales_totals('ALL')
-    except Exception:
-        sales_map = {}
-    # 기준가(공급가/구매가) 포함
-    try:
-        base_prices = {r["product_code"]: r for r in (_get_base_prices(plant) or [])}
-    except Exception:
-        base_prices = {}
-    # 매출 데이터 + 기준가 합치
-    enriched = []
-    for p in products:
-        code = p.get("product_code", "")
-        s  = sales_map.get(code, {})
-        bp = base_prices.get(code, {})
-        enriched.append({**p,
-            "prev_sales_amt": s.get("prev_sales_amt"),
-            "prev_sales_qty": s.get("prev_sales_qty"),
-            "avg_sale_price": bp.get("avg_sale_price"),
-            "avg_buy_price":  bp.get("avg_buy_price"),
-        })
-    products = enriched
-    if keyword and products:
-        if '*' in keyword:
-            tokens = [t.lower() for t in keyword.split('*') if t.strip()]
-            products = [
-                p for p in products
-                if all(t in (p.get("product_name") or "").lower() or t in (p.get("product_code") or "").lower()
-                       for t in tokens)
-            ]
-        else:
-            kw = keyword.lower()
-            products = [
-                p for p in products
-                if kw in (p.get("product_name") or "").lower() or kw in (p.get("product_code") or "")
-            ]
-    # 매출 높은순 정렬
-    products = sorted(products, key=lambda p: p.get("prev_sales_amt") or 0, reverse=True)
-    return JSONResponse({"data": products[:100], "error": error_msg, "total_before_filter": len(products)})
+        import traceback as _tb
+        return JSONResponse({"data": [], "error": str(e), "traceback": _tb.format_exc()[-2000:]})
 
 
 # ── API: 플랫폼 상품 검색 (AJAX) ─────────────────────────────────────────
