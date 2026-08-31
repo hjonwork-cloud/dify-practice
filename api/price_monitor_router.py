@@ -206,6 +206,60 @@ _inv_cache: dict = {}
 # job_id → {status, progress, total_unmapped, items, error}
 _job_store: dict = {}
 
+# ── 플랫폼 SKU 캐시 (10분 TTL) ───────────────────────────────────────────────
+# plat_rows 쿼리는 매번 Databricks를 치므로 웨어하우스 콜드스타트 시 hang 원인
+# seller 단위로 캐시 → warmup에서 미리 채워두면 분석 즉시 응답
+_plat_rows_cache: dict = {}
+_PLAT_ROWS_TTL = 600  # 10분
+
+
+def _get_plat_rows(platform: str, seller_name: str) -> list[dict]:
+    """플랫폼 SKU 목록 조회 (10분 캐시). warmup에서 미리 채워 분석 시 Databricks 콜드스타트 방지."""
+    cache_key = f"plat_{platform}_{seller_name}"
+    entry = _plat_rows_cache.get(cache_key)
+    if entry and time.time() - entry[0] < _PLAT_ROWS_TTL:
+        return entry[1]
+
+    all_sellers = (seller_name == "__ALL__")
+    safe_seller = seller_name.replace("'", "''")
+    try:
+        if all_sellers:
+            rows = _q(f"""
+                SELECT p.product_key, p.product_name, p.spec,
+                       p.price_sale, p.price_original, p.delivery_type,
+                       p.is_free_delivery, p.platform_seller_name
+                FROM {T_SILVER} p
+                INNER JOIN (
+                    SELECT platform_seller_name, MAX(crawl_date) AS max_date
+                    FROM {T_SILVER}
+                    WHERE platform = '{platform}'
+                    GROUP BY platform_seller_name
+                ) md ON p.platform_seller_name = md.platform_seller_name
+                      AND p.crawl_date = md.max_date
+                WHERE p.platform = '{platform}'
+                ORDER BY p.product_name
+                LIMIT 5000
+            """) or []
+        else:
+            rows = _q(f"""
+                SELECT p.product_key, p.product_name, p.spec,
+                       p.price_sale, p.price_original, p.delivery_type,
+                       p.is_free_delivery, p.platform_seller_name
+                FROM {T_SILVER} p
+                INNER JOIN (
+                    SELECT MAX(crawl_date) AS max_date
+                    FROM {T_SILVER}
+                    WHERE platform = '{platform}' AND platform_seller_name = '{safe_seller}'
+                ) md ON p.crawl_date = md.max_date
+                WHERE p.platform = '{platform}' AND p.platform_seller_name = '{safe_seller}'
+                ORDER BY p.product_name
+            """) or []
+        _plat_rows_cache[cache_key] = (time.time(), rows)
+        return rows
+    except Exception as e:
+        logger.warning(f"[pm-ai] plat_rows 조회 실패 ({platform}/{seller_name}): {e}")
+        raise
+
 T_ZSDR  = "h_hmfo_fsi.gd_fsi_ent.sap_zsdr0017_order_linkage_status_d"
 T_ZMM60 = "h_hmfo_fsi.gd_fsi_ent.sap_zmm60_material_master_d"
 T_SILVER = "h_hmfo_fsi_dm.gd_rst_ing.dim_platform_products"
@@ -2502,14 +2556,23 @@ async def api_warmup_start(request: Request):
 
     def _do_warmup():
         try:
-            _q("SELECT 1 AS ping")   # 웨어하우스 기동 대기 (최대 10분)
-            # 웜업 성공 시 주요 캐시도 채워두기 (병렬)
+            _q("SELECT 1 AS ping")   # 웨어하우스 기동 대기
+            logger.info(f"[pm-warmup] Databricks ping OK, 캐시 채우기 시작 wid={wid}")
+            # 웜업 성공 시 모든 캐시 병렬로 채우기
             import concurrent.futures as _cf_w
-            with _cf_w.ThreadPoolExecutor(max_workers=5) as _pex:
-                for plant in PLANTS:
-                    _pex.submit(_get_our_products, plant)
-                    _pex.submit(_get_base_prices, plant)
-                    _pex.submit(_get_prev_month_sales_totals, plant)
+            futs = []
+            with _cf_w.ThreadPoolExecutor(max_workers=10) as _pex:
+                for _plant in PLANTS:
+                    futs.append(_pex.submit(_get_our_products, _plant))
+                    futs.append(_pex.submit(_get_base_prices, _plant))
+                    futs.append(_pex.submit(_get_prev_month_sales_totals, _plant))
+                # 주요 셀러 plat_rows도 미리 캐시
+                for _pf in ('baemin', 'foodspring'):
+                    futs.append(_pex.submit(_get_plat_rows, _pf, '__ALL__'))
+            # 결과 수집 (예외 무시 — 일부 실패해도 warmup 완료로 처리)
+            for _f in futs:
+                try: _f.result(timeout=300)
+                except Exception: pass
             _warmup_store[wid]["status"] = "done"
             logger.info(f"[pm-warmup] 완료 wid={wid}")
         except Exception as _e:
@@ -2586,39 +2649,9 @@ def _do_ai_suggest(request, platform, seller_name, plant, limit, _job_id=None):
     safe_seller = seller_name.replace("'", "''")
     _log(f"시작 platform={platform} seller={seller_name} plant={plant}")
 
-    # 플랫폼 SKU 조회 (전체 셀러 or 특정 셀러)
+    # 플랫폼 SKU 조회 — 캐시 우선 (_get_plat_rows 10분 캐시)
     try:
-        if all_sellers:
-            plat_rows = _q(f"""
-                SELECT p.product_key, p.product_name, p.spec,
-                       p.price_sale, p.price_original, p.delivery_type,
-                       p.is_free_delivery, p.platform_seller_name
-                FROM {T_SILVER} p
-                INNER JOIN (
-                    SELECT platform_seller_name, MAX(crawl_date) AS max_date
-                    FROM {T_SILVER}
-                    WHERE platform = '{platform}'
-                    GROUP BY platform_seller_name
-                ) md ON p.platform_seller_name = md.platform_seller_name
-                      AND p.crawl_date = md.max_date
-                WHERE p.platform = '{platform}'
-                ORDER BY p.product_name
-                LIMIT 5000
-            """) or []
-        else:
-            plat_rows = _q(f"""
-                SELECT p.product_key, p.product_name, p.spec,
-                       p.price_sale, p.price_original, p.delivery_type,
-                       p.is_free_delivery, p.platform_seller_name
-                FROM {T_SILVER} p
-                INNER JOIN (
-                    SELECT MAX(crawl_date) AS max_date
-                    FROM {T_SILVER}
-                    WHERE platform = '{platform}' AND platform_seller_name = '{safe_seller}'
-                ) md ON p.crawl_date = md.max_date
-                WHERE p.platform = '{platform}' AND p.platform_seller_name = '{safe_seller}'
-                ORDER BY p.product_name
-            """) or []
+        plat_rows = _get_plat_rows(platform, seller_name)
     except Exception as e:
         return JSONResponse({"items": [], "error": str(e)})
 
