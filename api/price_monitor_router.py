@@ -2464,27 +2464,40 @@ async def api_mapping_ai_suggest(
         _job_store.pop(k, None)
 
     def _bg():
-        try:
-            import json as _json
-            result = _do_ai_suggest(None, platform, seller_name, plant, limit, _job_id=job_id)
-            data = _json.loads(result.body)
-            data["status"] = "done"
-            _job_store[job_id].update(data)
-        except Exception as _e:
-            import traceback as _tb
-            _job_store[job_id].update({"status": "error", "error": str(_e),
-                                        "traceback": _tb.format_exc()[-2000:]})
+        import json as _json, concurrent.futures as _cf
+        with _cf.ThreadPoolExecutor(max_workers=1) as _ex:
+            _fut = _ex.submit(_do_ai_suggest, None, platform, seller_name, plant, limit, job_id)
+            try:
+                result = _fut.result(timeout=180)  # 3분 하드 타임아웃
+                data = _json.loads(result.body)
+                data["status"] = "done"
+                _job_store[job_id].update(data)
+            except _cf.TimeoutError:
+                _job_store[job_id].update({
+                    "status": "error",
+                    "error": "분석 제한시간(3분) 초과 — DB 연결 지연이 의심됩니다. 잠시 후 다시 시도해 주세요.",
+                    "traceback": ""
+                })
+            except Exception as _e:
+                import traceback as _tb
+                _job_store[job_id].update({"status": "error", "error": str(_e),
+                                            "traceback": _tb.format_exc()[-2000:]})
 
     threading.Thread(target=_bg, daemon=True).start()
     return JSONResponse({"job_id": job_id, "status": "running"})
 
 
 def _do_ai_suggest(request, platform, seller_name, plant, limit, _job_id=None):
+    import time as _t
+    _t0 = _t.time()
+    def _log(msg): logger.info(f"[pm-ai][{_job_id}] {msg} ({_t.time()-_t0:.1f}s)")
+
     if not platform or not seller_name:
         return JSONResponse({"items": [], "error": "platform/seller_name 필요"})
 
     all_sellers = (seller_name == "__ALL__")
     safe_seller = seller_name.replace("'", "''")
+    _log(f"시작 platform={platform} seller={seller_name} plant={plant}")
 
     # 플랫폼 SKU 조회 (전체 셀러 or 특정 셀러)
     try:
@@ -2523,8 +2536,10 @@ def _do_ai_suggest(request, platform, seller_name, plant, limit, _job_id=None):
         return JSONResponse({"items": [], "error": str(e)})
 
     # 이미 매핑된 product_key 집합
+    _log(f"플랫폼 상품 조회 완료 {len(plat_rows)}개 → 매핑 목록 조회 시작")
     all_mappings = portal_db.pm_list_all_mappings(plant) or []
     mapped_keys = {m["product_key"] for m in all_mappings if m.get("is_active", 1)}
+    _log(f"매핑 목록 완료 {len(all_mappings)}건 → 우리상품 조회 시작")
 
     # 미매핑만 필터
     unmapped = [r for r in plat_rows if r["product_key"] not in mapped_keys]
@@ -2533,8 +2548,10 @@ def _do_ai_suggest(request, platform, seller_name, plant, limit, _job_id=None):
 
     # 우리 상품 목록 + 가격
     our_products = _get_our_products(plant) or []
+    _log(f"우리상품 완료 {len(our_products)}개 → 가격/매출 조회 시작")
     price_totals = _get_prev_month_sales_totals(plant) or {}
     base_prices  = {r["product_code"]: r for r in (_get_base_prices(plant) or [])}
+    _log(f"가격/매출 완료 → 스코어링 시작 미매핑={len(unmapped)}건")
     # 매출데이터 있는 상품 우선, 없으면 전체
     # 전체셀러(__ALL__) 분석은 연산량이 크므로 상품 수 제한
     our_with_sales = [p for p in our_products if p["product_code"] in base_prices]
