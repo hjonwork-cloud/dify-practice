@@ -2557,6 +2557,21 @@ async def api_mapping_similar_platform(
 
     import re as _re
 
+    # ── 와일드카드 패턴 감지 (*오뚜기*1.8* 형식) ──────────────────────────
+    _is_wildcard = '*' in product_name
+
+    def _escape_sql(s):
+        return s.replace("'", "''")
+
+    def _build_like_clause(toks, operator="OR"):
+        parts = [f"p.product_name LIKE '%{_escape_sql(t)}%'" for t in toks]
+        return f" {operator} ".join(parts) if parts else "1=1"
+
+    def _wildcard_to_like(pattern: str) -> str:
+        """*오뚜기*1.8* → %오뚜기%1.8% (SQL LIKE 패턴)"""
+        parts = [_escape_sql(p) for p in pattern.split('*')]
+        return '%' + '%'.join(parts) + '%'
+
     def _word_tokens(name: str):
         """공백 분리 단어만 (bi/tri-gram 제외). 한글 2자+, 영문/숫자 2자+ 허용."""
         name = _re.sub(r'[/·•\-_,\(\)\[\]{}]', ' ', name or '')
@@ -2585,17 +2600,6 @@ async def api_mapping_similar_platform(
                 overlap = min(1.0, overlap + 0.15)
         return round(overlap * 100.0, 1)
 
-    word_toks = _word_tokens(product_name)
-    if not word_toks:
-        return JSONResponse({"data": []})
-
-    def _escape_sql(s):
-        return s.replace("'", "''")
-
-    def _build_like_clause(toks, operator="OR"):
-        parts = [f"p.product_name LIKE '%{_escape_sql(t)}%'" for t in toks]
-        return f" {operator} ".join(parts) if parts else "1=1"
-
     # 플랫폼 필터 옵션
     plat_filter = f"AND p.platform = '{platform}'" if platform else ""
 
@@ -2619,13 +2623,21 @@ async def api_mapping_similar_platform(
         """) or []
 
     try:
-        # 1차: 단어 토큰 OR 조건으로 넓게 조회
-        like_or = _build_like_clause(word_toks, "OR")
-        rows = _run_query(like_or)
-        # 2차 fallback: 결과가 없으면 가장 긴 단어 1개로 재시도
-        if not rows and word_toks:
-            longest = sorted(word_toks, key=len, reverse=True)[0]
-            rows = _run_query(f"p.product_name LIKE '%{_escape_sql(longest)}%'")
+        if _is_wildcard:
+            # 와일드카드 모드: *오뚜기*1.8* → p.product_name LIKE '%오뚜기%1.8%'
+            like_pattern = _wildcard_to_like(product_name)
+            rows = _run_query(f"p.product_name LIKE '{like_pattern}'")
+        else:
+            # 일반 모드: 단어 토큰 OR 조건으로 넓게 조회
+            word_toks = _word_tokens(product_name)
+            if not word_toks:
+                return JSONResponse({"data": []})
+            like_or = _build_like_clause(word_toks, "OR")
+            rows = _run_query(like_or)
+            # fallback: 결과 없으면 가장 긴 단어 1개로 재시도
+            if not rows and word_toks:
+                longest = sorted(word_toks, key=len, reverse=True)[0]
+                rows = _run_query(f"p.product_name LIKE '%{_escape_sql(longest)}%'")
     except Exception as e:
         return JSONResponse({"data": [], "error": str(e)})
 

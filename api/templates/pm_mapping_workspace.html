@@ -850,11 +850,8 @@ function renderModalPlatList(query) {
   if (!query) {
     displayItems = modalPlatItems;
   } else {
-    const q = query.toLowerCase();
-    const filtered = modalPlatItems.filter(r =>
-      (r.display_name || r.product_name || '').toLowerCase().includes(q) ||
-      (r.product_name || '').toLowerCase().includes(q)
-    );
+    // 와일드카드(*) 포함 여부에 따라 매처 선택
+    const filtered = modalPlatItems.filter(r => _matchQuery(query, r));
     // 체크된 항목이 필터에서 빠졌으면 앞에 강제 추가
     const filteredKeys = new Set(filtered.map(r => r.product_key));
     const extraLocked = lockedItems.filter(r => !filteredKeys.has(r.product_key));
@@ -896,8 +893,25 @@ function renderModalPlatList(query) {
   updateSelCount();
 }
 
-// filterModalList: 즉각 로컬 필터 → 300ms 후 API 확장
+// filterModalList: 즉각 로컬 필터 → 400ms 후 API 확장
+// 와일드카드: *오뚜기*1.8* 형태 지원 (* → .* 정규식 변환)
 let _modalSearchTimer = null;
+function _buildSearchMatcher(query) {
+  if (!query) return null;
+  if (query.includes('*')) {
+    // 와일드카드 모드: *를 .*로, 나머지는 escape
+    const regStr = query.split('*').map(s => s.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*');
+    try { return new RegExp(regStr, 'i'); } catch(e) { return null; }
+  }
+  // 일반 모드: 소문자 포함 검색
+  return null;
+}
+function _matchQuery(query, item) {
+  const target = ((item.display_name || item.product_name || '') + ' ' + (item.product_name || '')).toLowerCase();
+  const re = _buildSearchMatcher(query);
+  if (re) return re.test(target);
+  return target.includes(query.toLowerCase());
+}
 function filterModalList() {
   clearTimeout(_modalSearchTimer);
   const query = (document.getElementById('modalSearch').value || '').trim();
@@ -908,7 +922,7 @@ function filterModalList() {
   }
   // 즉각 로컬 필터: 기존 항목에서 먼저 반응
   renderModalPlatList(query);
-  // 300ms 후 API 호출로 추가 결과 병합
+  // 400ms 후 API 호출로 추가 결과 병합 (와일드카드 포함 그대로 전달)
   _modalSearchTimer = setTimeout(async () => {
     try {
       const r = await fetch(`/portal/price-monitor/api/pm-ai/similar?product_name=${encodeURIComponent(query)}&platform=${currentPlatform}`);
