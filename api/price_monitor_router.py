@@ -1945,22 +1945,24 @@ async def pm_mapping_workspace(
 # ── AI 유사도 매핑 엔진 헬퍼 ────────────────────────────────────────────────
 
 def _strip_seller(name: str, seller_name: str) -> str:
-    """상품명에서 셀러명(브랜드/회사명)을 제거한 정제 상품명 반환.
-    예) '현대그린푸드 사과식초 1.8L' + '현대그린푸드' → '사과식초 1.8L'
+    """상품명에서 셀러명 및 대괄호([...]) 태그를 제거한 정제 상품명 반환.
+    예) '[다봄푸드] 그린 돈까스소스 1.8L 1.8l' + '다봄푸드' → '그린 돈까스소스 1.8L'
+    - [N], [행사], [냉장], [셀러명] 등 대괄호 구간 전부 제거
+    - () 소괄호는 용량/규격 정보이므로 유지
     """
     import re as _re
-    if not name or not seller_name:
-        return (name or "").strip()
-    # 셀러명을 공백 기준 단어로 분리 (2글자 이상만)
-    seller_words = [w.strip() for w in _re.split(r'[\s\-_/·]+', seller_name) if len(w.strip()) >= 2]
-    cleaned = name
-    for word in seller_words:
-        # 단어 경계: 앞뒤가 공백이거나 문자열 시작/끝
-        cleaned = _re.sub(
-            r'(?<![가-힣a-zA-Z0-9])' + _re.escape(word) + r'(?![가-힣a-zA-Z0-9])',
-            ' ', cleaned, flags=_re.IGNORECASE
-        )
-    # 남은 공백 정리
+    cleaned = (name or "").strip()
+    # 1) 대괄호([...]) 안 내용 전부 제거
+    cleaned = _re.sub(r'\[[^\]]*\]', ' ', cleaned)
+    # 2) 셀러명 단어 제거 (2글자 이상)
+    if seller_name:
+        seller_words = [w.strip() for w in _re.split(r'[\s\-_/·]+', seller_name) if len(w.strip()) >= 2]
+        for word in seller_words:
+            cleaned = _re.sub(
+                r'(?<![가-힣a-zA-Z0-9])' + _re.escape(word) + r'(?![가-힣a-zA-Z0-9])',
+                ' ', cleaned, flags=_re.IGNORECASE
+            )
+    # 3) 남은 공백 정리
     cleaned = _re.sub(r'\s+', ' ', cleaned).strip()
     # 정제 후 너무 짧으면 원본 반환
     return cleaned if len(cleaned) >= 2 else (name or "").strip()
