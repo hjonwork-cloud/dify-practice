@@ -202,6 +202,10 @@ _PRODUCT_CACHE_TTL = 3600  # 1시간
 # _get_our_products와 동일 TTL로 관리 — 상품 목록 갱신 시에만 재구축
 _inv_cache: dict = {}
 
+# ── AI 매핑 백그라운드 잡 스토어 ─────────────────────────────────────────────
+# job_id → {status, progress, total_unmapped, items, error}
+_job_store: dict = {}
+
 T_ZSDR  = "h_hmfo_fsi.gd_fsi_ent.sap_zsdr0017_order_linkage_status_d"
 T_ZMM60 = "h_hmfo_fsi.gd_fsi_ent.sap_zmm60_material_master_d"
 T_SILVER = "h_hmfo_fsi_dm.gd_rst_ing.dim_platform_products"
@@ -2430,6 +2434,16 @@ async def api_mapping_ai_debug(
     })
 
 
+# ── AI 매핑 잡 폴링 엔드포인트 ────────────────────────────────────────────────
+@router.get("/api/pm-ai/suggest/poll/{job_id}")
+async def api_suggest_poll(request: Request, job_id: str):
+    _require_pm_access(request)
+    job = _job_store.get(job_id)
+    if job is None:
+        return JSONResponse({"status": "not_found"}, status_code=404)
+    return JSONResponse(job)
+
+
 @router.get("/api/pm-ai/suggest")
 async def api_mapping_ai_suggest(
     request: Request,
@@ -2440,15 +2454,39 @@ async def api_mapping_ai_suggest(
     limit: int = 1000,
 ):
     _require_pm_access(request)
-    try:
-        return await _do_ai_suggest(request, platform, seller_name, plant, limit)
-    except Exception as e:
-        import traceback
-        return JSONResponse({"items": [], "total_unmapped": 0,
-                             "error": str(e), "traceback": traceback.format_exc()[-2000:]})
+    import uuid as _uuid
+    job_id = _uuid.uuid4().hex
+    _job_store[job_id] = {"status": "running", "progress": 0, "total_unmapped": 0, "items": []}
+
+    # 완료된 오래된 잡 정리 (최대 30개 유지)
+    done = [k for k, v in list(_job_store.items()) if v.get("status") in ("done", "error") and k != job_id]
+    for k in done[:-30]:
+        _job_store.pop(k, None)
+
+    def _bg():
+        try:
+            import asyncio as _aio, json as _json
+            loop = _aio.new_event_loop()
+            _aio.set_event_loop(loop)
+            try:
+                result = loop.run_until_complete(
+                    _do_ai_suggest(None, platform, seller_name, plant, limit, _job_id=job_id)
+                )
+                data = _json.loads(result.body)
+                data["status"] = "done"
+                _job_store[job_id].update(data)
+            finally:
+                loop.close()
+        except Exception as _e:
+            import traceback as _tb
+            _job_store[job_id].update({"status": "error", "error": str(_e),
+                                        "traceback": _tb.format_exc()[-2000:]})
+
+    threading.Thread(target=_bg, daemon=True).start()
+    return JSONResponse({"job_id": job_id, "status": "running"})
 
 
-async def _do_ai_suggest(request, platform, seller_name, plant, limit):
+async def _do_ai_suggest(request, platform, seller_name, plant, limit, _job_id=None):
     if not platform or not seller_name:
         return JSONResponse({"items": [], "error": "platform/seller_name 필요"})
 
@@ -2497,6 +2535,8 @@ async def _do_ai_suggest(request, platform, seller_name, plant, limit):
 
     # 미매핑만 필터
     unmapped = [r for r in plat_rows if r["product_key"] not in mapped_keys]
+    if _job_id and _job_id in _job_store:
+        _job_store[_job_id]["total_unmapped"] = len(unmapped)
 
     # 우리 상품 목록 + 가격
     our_products = _get_our_products(plant) or []
@@ -2560,7 +2600,9 @@ async def _do_ai_suggest(request, platform, seller_name, plant, limit):
     items = []
     scan_count = min(len(unmapped), limit)  # limit개만 스캔
     try:
-        for row in unmapped[:scan_count]:
+        for _row_idx, row in enumerate(unmapped[:scan_count]):
+            if _job_id and _job_id in _job_store:
+                _job_store[_job_id]["progress"] = _row_idx + 1
             sname = row.get("platform_seller_name") or ("" if all_sellers else seller_name)
             p_price = row.get("price_sale")
             d_type  = row.get("delivery_type") or "직배송"

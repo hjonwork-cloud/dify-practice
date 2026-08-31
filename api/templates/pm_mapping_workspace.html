@@ -542,22 +542,47 @@ async function runAISuggest() {
   const btn = document.getElementById('btnAnalyze');
   btn.disabled = true;
   btn.textContent = '⏳ 분석 중...';
-  document.getElementById('wsContent').innerHTML = '<div class="ws-loading"><div class="spinner"></div><p style="margin-top:12px;color:#6b7280;font-size:14px">AI 유사도 분석 중입니다...</p></div>';
+
+  const showLoading = (msg) => {
+    document.getElementById('wsContent').innerHTML =
+      `<div class="ws-loading"><div class="spinner"></div><p style="margin-top:12px;color:#6b7280;font-size:14px">${msg}</p></div>`;
+  };
+  showLoading('AI 유사도 분석 시작 중...');
   document.getElementById('kpiBar').style.display = 'none';
 
   try {
-    const url = `/portal/price-monitor/api/pm-ai/suggest?platform=${encodeURIComponent(currentPlatform)}&seller_name=${encodeURIComponent(currentSeller)}&seller_id=${encodeURIComponent(currentSellerId)}&plant=${currentPlant}&limit=1000`;
-    const r   = await fetch(url);
-    const raw = await r.text();
-    let d;
-    try { d = JSON.parse(raw); } catch(e) {
-      document.getElementById('wsContent').innerHTML = `<div class="ws-empty" style="color:#ef4444">서버 오류 (HTTP ${r.status})<br><small style="color:#9ca3af">${escHtml(raw.slice(0,300))}</small></div>`;
+    // ① 분석 작업 시작 → job_id 즉시 반환 (타임아웃 없음)
+    const startUrl = `/portal/price-monitor/api/pm-ai/suggest?platform=${encodeURIComponent(currentPlatform)}&seller_name=${encodeURIComponent(currentSeller)}&seller_id=${encodeURIComponent(currentSellerId)}&plant=${currentPlant}&limit=1000`;
+    const startR = await fetch(startUrl);
+    const startD = await startR.json().catch(() => null);
+    if (!startD || !startD.job_id) {
+      document.getElementById('wsContent').innerHTML = `<div class="ws-empty" style="color:#ef4444">작업 시작 실패 (HTTP ${startR.status})</div>`;
       btn.disabled = false; btn.textContent = '🤖 AI 매핑 분석'; return;
     }
-    if (d.error) {
-      document.getElementById('wsContent').innerHTML = `<div class="ws-empty" style="color:#ef4444">API 오류: ${escHtml(d.error)}<br><details><summary style="cursor:pointer;color:#6b7280;font-size:12px">traceback 보기</summary><pre style="font-size:11px;text-align:left;color:#374151;white-space:pre-wrap">${escHtml(d.traceback||'(없음)')}</pre></details></div>`;
+    const jobId = startD.job_id;
+
+    // ② 2초마다 폴링
+    const pollUrl = `/portal/price-monitor/api/pm-ai/suggest/poll/${jobId}`;
+    let d = null;
+    for (let attempt = 0; attempt < 300; attempt++) {   // 최대 10분
+      await new Promise(r => setTimeout(r, 2000));
+      const pr = await fetch(pollUrl);
+      d = await pr.json().catch(() => null);
+      if (!d) continue;
+      if (d.status === 'done' || d.status === 'error') break;
+      // running: 진행 메시지 업데이트
+      const prog = d.progress || 0;
+      const total = d.total_unmapped || '?';
+      showLoading(`AI 유사도 분석 중... (${prog} / ${total})`);
+    }
+
+    if (!d || d.status !== 'done') {
+      const errMsg = d?.error || '분석 시간 초과 또는 알 수 없는 오류';
+      document.getElementById('wsContent').innerHTML =
+        `<div class="ws-empty" style="color:#ef4444">오류: ${escHtml(errMsg)}<br><details><summary style="cursor:pointer;color:#6b7280;font-size:12px">traceback 보기</summary><pre style="font-size:11px;text-align:left;color:#374151;white-space:pre-wrap">${escHtml(d?.traceback||'(없음)')}</pre></details></div>`;
       btn.disabled = false; btn.textContent = '🤖 AI 매핑 분석'; return;
     }
+
     suggestItems = d.items || [];
     renderResultPanel(suggestItems, d.total_unmapped || 0);
     setFilter('all');
