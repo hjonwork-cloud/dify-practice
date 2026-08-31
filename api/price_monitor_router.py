@@ -2525,9 +2525,12 @@ async def _do_ai_suggest(request, platform, seller_name, plant, limit):
                     our_prod=p
                 )
                 if sc >= 20.0:
+                    our_name = p.get("product_name", code)
+                    # [N] 접두사: 화성3배치(고단가) → 동일 점수대에서 후순위
+                    is_n_prefix = our_name.lstrip().startswith('[N]')
                     scored.append({
                         "our_product_code": code,
-                        "product_name":     p.get("product_name", code),
+                        "product_name":     our_name,
                         "category":         p.get("category", ""),
                         "unit":             p.get("unit", ""),
                         "score":            sc,
@@ -2535,8 +2538,13 @@ async def _do_ai_suggest(request, platform, seller_name, plant, limit):
                         "buy_price":        int(buy_p)    if buy_p    else None,
                         "net_comp_price":   int(net_price) if net_price else None,
                         "prev_sales_amt":   int(price_totals.get(code, {}).get("prev_sales_amt") or 0),
+                        "_is_n":            is_n_prefix,
                     })
-            scored.sort(key=lambda x: x["score"], reverse=True)
+            # [N] 아닌 상품 우선 → 같은 점수대에서 [N] 상품 후순위
+            scored.sort(key=lambda x: (-x["score"], x["_is_n"]))
+            # _is_n 내부 키 제거 후 top3
+            for s in scored:
+                s.pop("_is_n", None)
             top3 = scored[:3]
 
             items.append({
