@@ -2118,15 +2118,21 @@ def _score_mapping(platform_name: str, platform_price: float | None,
                     return True
         return False
     if _plat_core and _our_core and not _has_core_overlap(_plat_core, _our_core):
-        score -= 20.0   # 핵심어 0% 겹침 → 브랜드만 같은 다른 상품
+        score -= 30.0   # 핵심어 0% 겹침 → 브랜드만 같은 다른 상품 (v7: -20→-30 강화)
 
     # 플레이버/라인 구분 패널티 (4자+ 고유어 불일치)
     # "키위애플드레싱" vs "유자파인드레싱" 처럼 브랜드·카테고리는 같지만 플레이버가 다른 경우 추가 패널티
-    # core_pen(3자+)에서 "드레싱"(3자) 겹침으로 패널티를 피한 케이스를 잡아냄
+    # [v7 버그수정] 기존: _has_core_overlap(_plat_long, _our_long) → 공통 브랜드 토큰(마리브리자드 등)이
+    # 양쪽에 모두 있으면 겹침으로 판단해 패널티 미적용되는 버그 수정
+    # 수정: 공통 토큰을 제거한 배타적 토큰끼리 비교 → 플레이버만 다른 케이스 정확히 감지
     _plat_long = {t for t in plat_meaningful if t not in _BRAND_STOP and len(t) >= 4}
     _our_long  = {t for t in our_meaningful  if t not in _BRAND_STOP and len(t) >= 4}
-    if _plat_long and _our_long and not _has_core_overlap(_plat_long, _our_long):
-        score -= 15.0   # 4자+ 고유어 전혀 안 겹침 → 플레이버 다른 상품
+    # 배타적 토큰: 상대방에 없는(substring 포함) 토큰만 추출
+    _plat_excl = {p for p in _plat_long if not any(p in o or o in p for o in _our_long)}
+    _our_excl  = {o for o in _our_long  if not any(o in p or p in o for p in _plat_long)}
+    # 양쪽 다 배타적 4자+ 토큰이 존재 → 플레이버/라인이 서로 다른 상품
+    if _plat_excl and _our_excl:
+        score -= 15.0   # 플레이버 불일치 패널티
     #      our_prod.total_weight(KG) 제공 시 직접 비교, 없으면 상품명 파싱
     _vol_applied = False
     if our_prod:
@@ -2652,17 +2658,22 @@ def poc_ping():
 
 
 @router.get("/api/poc-result")
-def poc_result():
-    """poc-benchmark 완료 후 저장된 결과 조회 (인메모리 우선, /tmp 백업)"""
+def poc_result(limit: int = 0):
+    """poc-benchmark 완료 후 저장된 결과 조회 (인메모리 우선, /tmp 백업)
+    limit: 반환할 details 건수 (0=전체, 기본값)
+    """
     global _POC_LATEST
     import json as _json, os as _os
+    def _slice(items: list) -> list:
+        return items[:limit] if limit > 0 else items
     # 1) 인메모리 결과 우선
     if _POC_LATEST is not None:
+        all_details = _POC_LATEST.get("details", [])
         return JSONResponse({
             "meta":    _POC_LATEST.get("meta"),
             "summary": _POC_LATEST.get("summary"),
-            "details": _POC_LATEST.get("details", [])[:20],
-            "total_details": len(_POC_LATEST.get("details", [])),
+            "details": _slice(all_details),
+            "total_details": len(all_details),
             "source": "memory",
         })
     # 2) /tmp 파일 폴백
@@ -2677,12 +2688,12 @@ def poc_result():
                              "async_error": err or None})
     with open(path, encoding="utf-8") as f:
         data = _json.load(f)
-    # summary + details[:20]만 반환 (크기 절약)
+    all_details = data.get("details", [])
     return JSONResponse({
         "meta":    data.get("meta"),
         "summary": data.get("summary"),
-        "details": data.get("details", [])[:20],
-        "total_details": len(data.get("details", [])),
+        "details": _slice(all_details),
+        "total_details": len(all_details),
         "source": "file",
     })
 
