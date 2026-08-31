@@ -2045,11 +2045,28 @@ def _score_mapping(platform_name: str, platform_price: float | None,
         'new', 'ea',
     }
     text_score = 0.0
+    # [v10] 브랜드 파생 토큰 필터용 집합 (블록 밖에서 정의하여 _plat_core 에서도 재사용)
+    _bs_check = {
+        'cj', '오뚜기', '청정원', '동원', '삼양', '사조', '오뗄', '에쓰푸드',
+        '대림', '롯데', '하인즈', '풍전', '해표', '샘표', '한성', '미성',
+        '굿프랜즈', '면사랑', '칠갑', '뚜레반', '영풍', '사옹원', '농심',
+        '신송', '청솔', '범아', '조흥', '웅진', '코다노', '다봄', '현대',
+        '삼양식품', '동원에프앤비', '사조대림', '사조해표', '사조오양',
+        '롯데제과', '롯데푸드', '매일유업', '남양유업',
+    }
     common = set()
     if pt and ot:
         common = pt & ot
         # 텍스트 점수용 공통 토큰: 숫자단위·범용수식어 제외
-        common_text = {t for t in common if not _unit_pat2.match(t) and t not in _STOP}
+        # [v10] 브랜드 파생 토큰도 제외: 삼양식품 trigram(삼양식, 양식품 등)이
+        #       공통 토큰으로 잘못 집계되어 text_score 부풀리는 문제 방지
+        _brand_derived_tokens = {
+            _ct for _ct in common
+            if any(_bk in _ct or _ct in _bk for _bk in _bs_check if len(_bk) >= 2)
+        }
+        common_text = {t for t in common
+                       if not _unit_pat2.match(t) and t not in _STOP
+                       and t not in _brand_derived_tokens}
         if common_text:
             overlap = len(common_text) / min(len(pt), len(ot))
             text_score = overlap * 60.0
@@ -2105,9 +2122,12 @@ def _score_mapping(platform_name: str, platform_price: float | None,
         '분다버그', '시미루', '코다노', '다봄', '현대',
         '국내산', '중국산', '이탈리아산', '태국산', '베트남산', '호주산',
         '미국산', '필리핀산', '뉴질랜드산', '칠레산', '오스트리아산',
+        # [v10] 법인명 복합어 추가: 브랜드+식품/제과 등 compound가 핵심어 겹침으로 오판되는 문제 방지
+        # 예: 삼양식품 사또밥 vs 삼양라면 → 삼양식품 공통 → 핵심어 패널티 미발동 버그 수정
+        '삼양식품', '동원에프앤비', '청정원홈푸드', '사조대림', '사조해표', '사조오양',
+        '롯데제과', '롯데푸드', '농심켈로그', '오뚜기라면', '씨제이제일제당',
+        '대상주식회사', '매일유업', '남양유업', '서울우유', '빙그레',
     }
-    _plat_core = {t for t in plat_meaningful if t not in _BRAND_STOP and len(t) >= 3}
-    _our_core  = {t for t in our_meaningful  if t not in _BRAND_STOP and len(t) >= 3}
     # 포함 관계 체크: '자판기' ⊂ '자판기용' 처럼 한쪽이 다른 쪽을 포함하면 겹침으로 처리
     def _has_core_overlap(pc: set, oc: set) -> bool:
         if pc & oc:
@@ -2119,7 +2139,10 @@ def _score_mapping(platform_name: str, platform_price: float | None,
         return False
     # [v8 Phase1] _our_core empty 버그 수정:
     # 기존: _our_core and → 자사 상품명이 짧아서(케찹 2자, 라면 2자 등) _our_core가 비면 패널티 스킵됨
-    # 수정: BRAND_STOP·길이 제한 없는 전체 토큰(_our_all)과 비교
+    # [v10] _plat_core도 브랜드 파생 토큰 제외 (삼양식품 trigram 등)
+    _plat_core = {t for t in plat_meaningful
+                  if t not in _BRAND_STOP and len(t) >= 3
+                  and not any(_bk in t or t in _bk for _bk in _bs_check if len(_bk) >= 2)}
     _our_all = {t for t in ot if len(t) >= 2}  # 2자 이상 전체 토큰 (케찹, 비엔나 등 포함)
     if _plat_core and not _has_core_overlap(_plat_core, _our_all):
         score -= 30.0   # 핵심어 0% 겹침 → 브랜드만 같은 다른 상품 (v8: _our_core empty 케이스도 적용)
@@ -2172,18 +2195,20 @@ def _score_mapping(platform_name: str, platform_price: float | None,
             else:
                 score -= 40.0               # 10배↑: 사실상 탈락
 
-    # [v9-2] 브랜드 매칭 보너스 (+5pt):
+    # [v9-2 / v10 수정] 브랜드 매칭 보너스 (+5pt):
     # 플랫폼 상품명에 명시된 브랜드가 자사 상품명에도 있으면 +5pt
-    # 오뚜기 마요네즈 → 하인즈 마요네즈 처럼 브랜드 교체 오매핑 억제
+    # [v10] 조건 추가: text_score > 0 (제품명 토큰 겹침 있을 때만 적용)
+    # → 사또밥 vs 삼양라면처럼 브랜드만 같고 제품이 전혀 다른 케이스에서 보너스 역효과 방지
     _KNOWN_BRANDS = {
         'cj','오뚜기','청정원','동원','삼양','사조','롯데','대상','해표','샘표',
-        '한성','면사랑','농심','풍전','샘표','하인즈','삼진','모노링크','폰타나',
+        '한성','면사랑','농심','풍전','하인즈','삼진','모노링크','폰타나',
         '랜시','담두','이츠웰','셀플러스','매일','매일유업','빙그레','남양','서울우유',
     }
-    for _br in _KNOWN_BRANDS:
-        if _br in plat_lower and _br in our_lower:
-            score += 5.0
-            break  # 첫 번째 일치만 적용
+    if text_score > 0:  # [v10] 제품명 겹침 없으면 브랜드 보너스 차단
+        for _br in _KNOWN_BRANDS:
+            if _br in plat_lower and _br in our_lower:
+                score += 5.0
+                break  # 첫 번째 일치만 적용
 
     # 3-b. 카테고리 계층 보너스 (our_prod 제공 시, 최대 12점)
     #      대분류/중분류/소분류가 플랫폼 상품명 토큰과 겹칠 때 부여
