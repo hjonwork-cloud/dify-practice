@@ -570,6 +570,10 @@ async function runAISuggest() {
       d = await pr.json().catch(() => null);
       if (!d) continue;
       if (d.status === 'done' || d.status === 'error') break;
+      if (d.status === 'not_found') {
+        d = {status: 'error', error: '앱이 재시작되었습니다. 다시 시도해주세요.'};
+        break;
+      }
       // running: 진행 메시지 업데이트
       const prog = d.progress || 0;
       const total = d.total_unmapped || '?';

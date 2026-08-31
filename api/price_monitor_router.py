@@ -2465,18 +2465,11 @@ async def api_mapping_ai_suggest(
 
     def _bg():
         try:
-            import asyncio as _aio, json as _json
-            loop = _aio.new_event_loop()
-            _aio.set_event_loop(loop)
-            try:
-                result = loop.run_until_complete(
-                    _do_ai_suggest(None, platform, seller_name, plant, limit, _job_id=job_id)
-                )
-                data = _json.loads(result.body)
-                data["status"] = "done"
-                _job_store[job_id].update(data)
-            finally:
-                loop.close()
+            import json as _json
+            result = _do_ai_suggest(None, platform, seller_name, plant, limit, _job_id=job_id)
+            data = _json.loads(result.body)
+            data["status"] = "done"
+            _job_store[job_id].update(data)
         except Exception as _e:
             import traceback as _tb
             _job_store[job_id].update({"status": "error", "error": str(_e),
@@ -2486,7 +2479,7 @@ async def api_mapping_ai_suggest(
     return JSONResponse({"job_id": job_id, "status": "running"})
 
 
-async def _do_ai_suggest(request, platform, seller_name, plant, limit, _job_id=None):
+def _do_ai_suggest(request, platform, seller_name, plant, limit, _job_id=None):
     if not platform or not seller_name:
         return JSONResponse({"items": [], "error": "platform/seller_name 필요"})
 
