@@ -198,6 +198,10 @@ def _get_prev_month_sales_totals(plant: str) -> dict[str, dict]:
 _product_cache = {}
 _PRODUCT_CACHE_TTL = 3600  # 1시간
 
+# ── 역인덱스 캐시: plant → (ts, tok_inv, prod_map) ──────────────────────────
+# _get_our_products와 동일 TTL로 관리 — 상품 목록 갱신 시에만 재구축
+_inv_cache: dict = {}
+
 T_ZSDR  = "h_hmfo_fsi.gd_fsi_ent.sap_zsdr0017_order_linkage_status_d"
 T_ZMM60 = "h_hmfo_fsi.gd_fsi_ent.sap_zmm60_material_master_d"
 T_SILVER = "h_hmfo_fsi_dm.gd_rst_ing.dim_platform_products"
@@ -2531,19 +2535,27 @@ async def _do_ai_suggest(request, platform, seller_name, plant, limit):
     # 기존 매핑 패턴
     pattern_strength = _build_pattern_map(all_mappings, our_scan) or {}
 
-    # ── 역인덱스 구축: 토큰 → {product_code, ...} ────────────────────────────
-    # 기존 O(N_plat × N_our) 순차 루프 → O(N_our + N_plat_toks) 역인덱스 조회로 전환
-    # 41,879개 × tokenize 1회만 실행; 이후 각 플랫폼 상품은 자신의 토큰으로만 후보 추출
-    from collections import defaultdict as _ddict
-    _tok_inv: dict[str, set] = _ddict(set)   # token → {product_code}
-    _our_tok_cache: dict[str, set] = {}       # product_code → tokens (스코어링 재사용)
-    for _p in our_scan:
-        _c = _p["product_code"]
-        _toks = _tokenize(_p.get("product_name") or "")
-        _our_tok_cache[_c] = _toks
-        for _t in _toks:
-            _tok_inv[_t].add(_c)
-    _our_prod_map: dict[str, dict] = {_p["product_code"]: _p for _p in our_scan}  # 빠른 접근
+    # ── 역인덱스: 모듈 레벨 캐시(_inv_cache)에서 가져오기 ───────────────────
+    # our_scan이 같으면(=product_cache TTL 내) 재구축 없이 재사용
+    # → 매 요청마다 41,879번 tokenize하던 병목 완전 제거
+    _inv_key = f"inv_{plant}"
+    _inv_entry = _inv_cache.get(_inv_key)
+    _prod_cache_entry = _product_cache.get(f"products_{plant}")
+    _prod_cache_ts = _prod_cache_entry[0] if _prod_cache_entry else 0
+    if _inv_entry is None or _inv_entry[0] < _prod_cache_ts:
+        # 상품 캐시가 갱신됐거나 inv 캐시 없을 때만 재구축
+        from collections import defaultdict as _ddict
+        _tok_inv_new: dict = _ddict(set)
+        _prod_map_new: dict = {}
+        for _p in our_scan:
+            _c = _p["product_code"]
+            _prod_map_new[_c] = _p
+            for _t in _tokenize(_p.get("product_name") or ""):
+                _tok_inv_new[_t].add(_c)
+        _inv_cache[_inv_key] = (time.time(), dict(_tok_inv_new), _prod_map_new)
+        logger.info(f"[pm-ai] inv_cache 재구축 plant={plant} 상품={len(_prod_map_new):,}개")
+    _tok_inv     = _inv_cache[_inv_key][1]
+    _our_prod_map = _inv_cache[_inv_key][2]
 
     items = []
     scan_count = min(len(unmapped), limit)  # limit개만 스캔
