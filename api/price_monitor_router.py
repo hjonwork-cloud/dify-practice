@@ -2502,8 +2502,9 @@ async def _do_ai_suggest(request, platform, seller_name, plant, limit):
     # 전체셀러(__ALL__) 분석은 연산량이 크므로 상품 수 제한
     our_with_sales = [p for p in our_products if p["product_code"] in base_prices]
     our_no_sales   = [p for p in our_products if p["product_code"] not in base_prices]
-    _our_limit = 500 if all_sellers else 3000
-    our_scan = (our_with_sales + our_no_sales)[:_our_limit]
+    # 사전 토큰 필터(하단)가 실제 스코어링을 ~95% 감소시키므로 전체 상품 스캔
+    # (구: 3000개 임의 절삭 → 매출데이터 없는 상품이 통째로 누락되는 문제 해결)
+    our_scan = our_with_sales + our_no_sales
 
     # ── [N] 화성3배치 중복 제거 ──────────────────────────────────────────
     # [N]xxx 상품이 있고 동일 기본명(xxx)의 non-[N] 상품이 our_scan에 존재하면
