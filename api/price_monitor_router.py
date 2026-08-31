@@ -2530,6 +2530,13 @@ async def _do_ai_suggest(request, platform, seller_name, plant, limit):
     # 기존 매핑 패턴
     pattern_strength = _build_pattern_map(all_mappings, our_scan) or {}
 
+    # ── 우리 상품 토큰 사전 캐시 (빠른 사전 필터용) ──────────────────────────
+    # 3,000개 × tokenize 1회 → 매 플랫폼 상품마다 300만 번 스코어링 → ~10만 번으로 감소
+    _our_scan_toks: dict[str, set] = {
+        p["product_code"]: _tokenize(p.get("product_name") or "")
+        for p in our_scan
+    }
+
     items = []
     scan_count = min(len(unmapped), limit)  # limit개만 스캔
     try:
@@ -2545,8 +2552,15 @@ async def _do_ai_suggest(request, platform, seller_name, plant, limit):
             clean_pname  = _strip_seller(raw_pname, sname)
 
             # 우리 상품별 점수 계산
+            plat_toks = _tokenize(clean_pname)  # 플랫폼 상품 토큰 (사전 필터용)
             scored = []
             for p in our_scan:
+                code = p["product_code"]
+                # ── 빠른 사전 필터: 토큰 겹침이 전혀 없으면 스코어링 skip ──────
+                # 온도조건 하드필터는 _score_mapping 내부에서 처리되므로 여기선 생략
+                if not (plat_toks & _our_scan_toks.get(code, set())):
+                    continue
+                # ─────────────────────────────────────────────────────────────
                 code = p["product_code"]
                 bp   = base_prices.get(code, {})
                 our_sale = bp.get("avg_sale_price")
