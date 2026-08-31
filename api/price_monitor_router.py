@@ -2117,8 +2117,12 @@ def _score_mapping(platform_name: str, platform_price: float | None,
                 if _p in _o or _o in _p:
                     return True
         return False
-    if _plat_core and _our_core and not _has_core_overlap(_plat_core, _our_core):
-        score -= 30.0   # 핵심어 0% 겹침 → 브랜드만 같은 다른 상품 (v7: -20→-30 강화)
+    # [v8 Phase1] _our_core empty 버그 수정:
+    # 기존: _our_core and → 자사 상품명이 짧아서(케찹 2자, 라면 2자 등) _our_core가 비면 패널티 스킵됨
+    # 수정: BRAND_STOP·길이 제한 없는 전체 토큰(_our_all)과 비교
+    _our_all = {t for t in ot if len(t) >= 2}  # 2자 이상 전체 토큰 (케찹, 비엔나 등 포함)
+    if _plat_core and not _has_core_overlap(_plat_core, _our_all):
+        score -= 30.0   # 핵심어 0% 겹침 → 브랜드만 같은 다른 상품 (v8: _our_core empty 케이스도 적용)
 
     # 플레이버/라인 구분 패널티 (4자+ 고유어 불일치)
     # "키위애플드레싱" vs "유자파인드레싱" 처럼 브랜드·카테고리는 같지만 플레이버가 다른 경우 추가 패널티
@@ -2926,6 +2930,14 @@ async def poc_benchmark(n: int = 100, seed: int = 42, threshold: float = 20.0,
                 best_v2 = {"score": s2, "code": op.get("product_code",""), "name": oname,
                            "temp": op.get("temp_cond","")}
 
+        # [v8 Phase3] v2 동점 다른제품 폴백:
+        # 온도필터가 v1 후보를 제거하고 동점(±0.5) 다른 제품을 v2로 선택한 경우
+        # → 의미론적으로 v1 후보가 더 나을 가능성이 높으므로 v1 결과를 v2에도 적용
+        if (best_v1["score"] > 0
+                and best_v2.get("name") != best_v1.get("name")
+                and abs(best_v2["score"] - best_v1["score"]) <= 0.5):
+            best_v2 = {"score": best_v1["score"], "code": best_v1["code"],
+                       "name": best_v1["name"], "temp": best_v2.get("temp", "")}
         v1_ok = best_v1["score"] >= threshold
         v2_ok = best_v2["score"] >= threshold
         diff  = round(best_v2["score"] - best_v1["score"], 1)
