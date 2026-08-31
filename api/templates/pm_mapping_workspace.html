@@ -82,6 +82,9 @@
 .filter-tab.active { color:#4f46e5; border-bottom-color:#4f46e5; }
 .filter-tab .tab-count { display:inline-block; font-size:11px; background:#f3f4f6; color:#6b7280; border-radius:10px; padding:1px 7px; margin-left:4px; font-weight:700; }
 .filter-tab.active .tab-count { background:#eef2ff; color:#4f46e5; }
+.sort-btn { padding:5px 12px; border-radius:6px; font-size:12px; font-weight:600; border:1px solid #d1d5db; background:#fff; color:#374151; cursor:pointer; transition:all .15s; }
+.sort-btn.active { background:#4f46e5; color:#fff; border-color:#4f46e5; }
+.sort-btn:hover:not(.active) { border-color:#4f46e5; color:#4f46e5; }
 
 /* 일괄 승인 바 */
 .bulk-bar { display:none; align-items:center; gap:12px; padding:10px 24px; background:#ecfdf5; border-bottom:1px solid #a7f3d0; flex-wrap:wrap; }
@@ -253,6 +256,11 @@
   <button class="filter-tab" onclick="setFilter('mid')" id="tabMid">🟡 중신뢰(50~79) <span class="tab-count" id="tabCntMid">0</span></button>
   <button class="filter-tab" onclick="setFilter('low')" id="tabLow">🔴 저신뢰(30~49) <span class="tab-count" id="tabCntLow">0</span></button>
   <button class="filter-tab" onclick="setFilter('none')" id="tabNone">⬜ 제안없음 <span class="tab-count" id="tabCntNone">0</span></button>
+  <div style="margin-left:auto;display:flex;align-items:center;gap:6px;padding:0 16px">
+    <span style="font-size:12px;color:#6b7280">정렬:</span>
+    <button id="sortScore" class="sort-btn active" onclick="setSort('score')">📊 점수순</button>
+    <button id="sortSales" class="sort-btn" onclick="setSort('sales')">💰 매출액순</button>
+  </div>
 </div>
 
 <!-- ══ 일괄 승인 바 ══ -->
@@ -338,6 +346,7 @@ let currentPlant    = '{{ plant }}';
 let suggestItems    = [];
 let filteredItems   = [];
 let currentFilter   = 'all';
+let currentSort     = 'score'; // 'score' | 'sales'
 
 // 팝업 상태
 let modalPlatItems     = [];   // 현재 팝업에 표시되는 유사 플랫폼 상품
@@ -537,7 +546,7 @@ async function runAISuggest() {
   document.getElementById('kpiBar').style.display = 'none';
 
   try {
-    const url = `/portal/price-monitor/api/pm-ai/suggest?platform=${encodeURIComponent(currentPlatform)}&seller_name=${encodeURIComponent(currentSeller)}&seller_id=${encodeURIComponent(currentSellerId)}&plant=${currentPlant}&limit=200`;
+    const url = `/portal/price-monitor/api/pm-ai/suggest?platform=${encodeURIComponent(currentPlatform)}&seller_name=${encodeURIComponent(currentSeller)}&seller_id=${encodeURIComponent(currentSellerId)}&plant=${currentPlant}&limit=1000`;
     const r   = await fetch(url);
     const raw = await r.text();
     let d;
@@ -629,6 +638,31 @@ function setFilter(f) {
   else if (f === 'mid')  filteredItems = suggestItems.filter(i => { const s=i.suggestions[0]?.score||0; return s>=50 && s<80; });
   else if (f === 'low')  filteredItems = suggestItems.filter(i => { const s=i.suggestions[0]?.score||0; return s>=30 && s<50; });
   else if (f === 'none') filteredItems = suggestItems.filter(i => !i.has_suggestions);
+  applySort();
+  renderSuggestList(filteredItems, 0);
+}
+
+function applySort() {
+  if (currentSort === 'sales') {
+    filteredItems.sort((a, b) => {
+      const sa = a.suggestions[0]?.prev_sales_amt || 0;
+      const sb = b.suggestions[0]?.prev_sales_amt || 0;
+      return sb - sa;
+    });
+  } else {
+    filteredItems.sort((a, b) => {
+      const sa = a.suggestions[0]?.score || 0;
+      const sb = b.suggestions[0]?.score || 0;
+      return sb - sa;
+    });
+  }
+}
+
+function setSort(s) {
+  currentSort = s;
+  document.getElementById('sortScore').classList.toggle('active', s === 'score');
+  document.getElementById('sortSales').classList.toggle('active', s === 'sales');
+  applySort();
   renderSuggestList(filteredItems, 0);
 }
 

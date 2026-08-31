@@ -2433,7 +2433,7 @@ async def api_mapping_ai_suggest(
     seller_name: str = "",
     seller_id: str = "",
     plant: str = "ALL",
-    limit: int = 100,
+    limit: int = 1000,
 ):
     _require_pm_access(request)
     try:
