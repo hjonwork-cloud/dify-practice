@@ -1815,16 +1815,26 @@ async def api_simulation(
             _deduped.append(_m)
     all_mappings = _deduped
 
-    # 셀러 필터: platform 필수, seller_id 있으면 id 우선, 없으면 seller_name
+    # 셀러 필터 보완: 매핑 DB의 seller_name 외에 platform 크롤링 데이터의
+    # platform_seller_name도 함께 확인 (경쟁분석과 동일 로직)
+    # → 매핑 저장 당시 seller_name이 비어있거나 달랐던 레코드까지 포함
+    _plat_pkeys = [m["product_key"] for m in all_mappings if m.get("platform") == platform]
+    _plat_rows_for_filter = _get_platform_latest(product_keys=_plat_pkeys)
+    _plat_name_map = {r["product_key"]: (r.get("platform_seller_name") or "") for r in _plat_rows_for_filter}
+
     seller_mappings = []
     for m in all_mappings:
         if m.get("platform") != platform:
             continue
         if seller_id:
+            # seller_id 기준 필터 (우선순위 높음)
             if str(m.get("platform_seller_id", "")) == str(seller_id):
                 seller_mappings.append(m)
         else:
-            if (m.get("seller_name") or "") == seller_name:
+            # seller_name 기준: 매핑 레코드 OR 크롤링 데이터 중 하나라도 일치하면 포함
+            _map_seller  = (m.get("seller_name") or "")
+            _plat_seller = _plat_name_map.get(m["product_key"], "")
+            if _map_seller == seller_name or _plat_seller == seller_name:
                 seller_mappings.append(m)
 
     if not seller_mappings:
@@ -1860,10 +1870,10 @@ async def api_simulation(
             pass
         return p_code
 
-    # ── 플랫폼 최신가 ──
+    # ── 플랫폼 최신가 (필터용으로 이미 로드된 데이터 재사용) ──
     product_keys = [m["product_key"] for m in seller_mappings]
-    platform_rows = _get_platform_latest(product_keys=product_keys)
-    platform_map = {r["product_key"]: r for r in platform_rows}
+    # _plat_rows_for_filter는 이미 platform 전체 product_key 기준으로 로드됨
+    platform_map = {r["product_key"]: r for r in _plat_rows_for_filter}
 
     crawl_date = ""
 
@@ -2021,14 +2031,14 @@ async def api_simulation_seller_skus(
         actual_total = 0
 
     # 매핑된 product_key 집합
+    # platform DB에서 이미 이 셀러의 product_key 목록을 조회했으므로
+    # 그 키 셋과 매핑 레코드를 교차 확인 (seller_name 불일치 문제 우회)
+    all_keys_for_seller = {r["product_key"] for r in rows}
     all_mappings = portal_db.pm_list_all_mappings(plant)
     mapped_keys = set()
     for m in all_mappings:
-        if m.get("platform") == platform:
-            if seller_id and str(m.get("platform_seller_id", "")) == str(seller_id):
-                mapped_keys.add(m["product_key"])
-            elif not seller_id and (m.get("seller_name") or "") == seller_name:
-                mapped_keys.add(m["product_key"])
+        if m.get("platform") == platform and m["product_key"] in all_keys_for_seller:
+            mapped_keys.add(m["product_key"])
 
     # actual_total: COUNT 쿼리 기준 실제 전체 수 (rows가 잘리지 않았다면 같음)
     total   = actual_total if actual_total > len(rows) else len(rows)
