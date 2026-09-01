@@ -840,8 +840,8 @@ function renderSuggestList(items, totalUnmapped) {
           <div class="conf-score ${scoreClass}">${item.has_suggestions ? score.toFixed(0)+'점' : '-'}</div>
           <div style="font-size:11px;color:#9ca3af">신뢰도</div>
         </div>
-        <button class="btn-map-open" onclick="openMappingModal('${escHtml(item.product_key)}')">매핑하기 →</button>
-        <button class="btn-improve-flag" data-flag-key="${escHtml(item.product_key)}" onclick="toggleImproveFlag('${escHtml(item.product_key)}', this)" title="AI 제안이 틀린 경우 클릭 — 매핑 확정 시 피드백 저장">⚠️ 개선필요</button>
+        <button class="btn-map-open" onclick="openMappingModal(this.closest('.suggest-card').dataset.key)">매핑하기 →</button>
+        <button class="btn-improve-flag" data-flag-key="${escHtml(item.product_key)}" onclick="toggleImproveFlag(this.closest('.suggest-card').dataset.key, this)" title="AI 제안이 틀린 경우 클릭 — 매핑 확정 시 피드백 저장">⚠️ 개선필요</button>
       </div>
       <div class="suggest-card-body">`;
 
@@ -852,7 +852,7 @@ function renderSuggestList(items, totalUnmapped) {
         const saleV  = s.our_sale_price ? s.our_sale_price.toLocaleString()+'원' : '-';
         const buyV   = s.buy_price      ? s.buy_price.toLocaleString()+'원'      : '-';
         const salesV = s.prev_sales_amt > 0 ? Math.round(s.prev_sales_amt/10000)+'만원' : '-';
-        html += `<div class="sug-item" onclick="selectSuggest('${escHtml(item.product_key)}',${si})" id="sug-${escHtml(item.product_key)}-${si}">
+        html += `<div class="sug-item" data-pkey="${escHtml(item.product_key)}" data-si="${si}" onclick="selectSuggest(this.dataset.pkey, +this.dataset.si)" id="sug-${escHtml(item.product_key)}-${si}">
           <span class="sug-rank">#${si+1}</span>
           <div class="sug-code">${escHtml(s.our_product_code)}</div>
           <div class="sug-name">${escHtml(s.product_name)}</div>
@@ -1068,7 +1068,7 @@ function renderModalPlatList(query) {
       ? `${escHtml(r.display_name)} <small style="color:#9ca3af;font-size:10px">(${escHtml(r.product_name)})</small>`
       : escHtml(r.product_name || '');
     html += `<label class="plat-check-item ${checked?'checked':''}" data-key="${escHtml(r.product_key)}">
-      <input type="checkbox" ${checked?'checked':''} ${r.is_mapped?'disabled':''} onchange="togglePlatCheck('${escHtml(r.product_key)}', this.checked)">
+      <input type="checkbox" ${checked?'checked':''} ${r.is_mapped?'disabled':''} onchange="togglePlatCheck(this.closest('[data-key]').dataset.key, this.checked)">
       <div style="flex:1;min-width:0">
         <div class="plat-check-name">${rDispName}${r.spec?' <small style=color:#9ca3af>'+escHtml(r.spec)+'</small>':''} ${simBadge}</div>
         <div class="plat-check-meta">
@@ -1293,7 +1293,7 @@ function showToast(msg) {
 }
 
 function escHtml(s) {
-  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 </script>
 {% endblock %}
