@@ -920,7 +920,13 @@ function searchOurChange() {
         const salesV = p.prev_sales_amt  ? Math.round(p.prev_sales_amt/10000).toLocaleString()+'만원' : '-';
         const safeCode = escHtml(p.product_code||'');
         const safeName = escHtml(p.product_name||p.product_code||'');
-        html += `<div class="our-product-card" onclick="selectOurChange('${safeCode}','${safeName}',${p.avg_sale_price||0},${p.avg_buy_price||0},${p.prev_sales_amt||0})">
+        html += `<div class="our-product-card"
+          data-code="${safeCode}"
+          data-name="${safeName}"
+          data-sale="${p.avg_sale_price||0}"
+          data-buy="${p.avg_buy_price||0}"
+          data-sales="${p.prev_sales_amt||0}"
+          onclick="(function(el){selectOurChange(el.dataset.code,el.dataset.name,+el.dataset.sale,+el.dataset.buy,+el.dataset.sales)})(this)">
           <div class="opc-code">${safeCode}</div>
           <div class="opc-name">${safeName}</div>
           <div class="opc-prices">
@@ -961,6 +967,48 @@ function selectSuggest(productKey, sugIdx) {
   card.querySelectorAll('.sug-item').forEach((el, i) => {
     el.classList.toggle('selected', i === sugIdx);
   });
+}
+
+// ══ 개선필요 플래그 ══
+const improveFlagSet = new Set();
+
+function toggleImproveFlag(productKey, btnEl) {
+  if (improveFlagSet.has(productKey)) {
+    improveFlagSet.delete(productKey);
+    btnEl.classList.remove('active');
+    btnEl.textContent = '⚠️ 개선필요';
+  } else {
+    improveFlagSet.add(productKey);
+    btnEl.classList.add('active');
+    btnEl.textContent = '⚠️ 개선필요 ON';
+  }
+  if (modalPlatKey === productKey) _syncModalFlagBtn();
+}
+
+function toggleImproveFlagModal() {
+  if (improveFlagSet.has(modalPlatKey)) {
+    improveFlagSet.delete(modalPlatKey);
+  } else {
+    improveFlagSet.add(modalPlatKey);
+  }
+  const cardBtn = document.querySelector(`[data-flag-key="${CSS.escape(modalPlatKey)}"]`);
+  if (cardBtn) {
+    if (improveFlagSet.has(modalPlatKey)) { cardBtn.classList.add('active'); cardBtn.textContent = '⚠️ 개선필요 ON'; }
+    else { cardBtn.classList.remove('active'); cardBtn.textContent = '⚠️ 개선필요'; }
+  }
+  _syncModalFlagBtn();
+}
+
+function _syncModalFlagBtn() {
+  const btn = document.getElementById('btnModalImproveFlag');
+  if (!btn) return;
+  if (improveFlagSet.has(modalPlatKey)) {
+    btn.classList.add('active');
+    btn.textContent = '⚠️ 개선필요 ON';
+  } else {
+    btn.classList.remove('active');
+    btn.textContent = '⚠️ 개선필요';
+  }
 }
 
 // ══ 팝업 열기 ══
