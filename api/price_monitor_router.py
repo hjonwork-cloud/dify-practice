@@ -103,18 +103,67 @@ def _serialize_rows(rows: list[dict]) -> list[dict]:
     return result
 
 
-# ── 기준가/구매가 캐시 (5분) ─────────────────────────────────────────────────
+# ── 디스크 영구 캐시 ────────────────────────────────────────────────────────
+# Azure App Service /home 경로는 재시작 후에도 유지됨 (Persistent Storage)
+# 메모리 캐시 miss → 디스크 캐시 확인 → Databricks 조회 순서
+# 앱 재시작 시 Databricks 콜드스타트 없이 즉시 응답 가능
+import pickle as _pickle
+
+_DISK_CACHE_DIR: Path = Path(
+    os.getenv("PM_CACHE_DIR",  # 환경변수로 오버라이드 가능
+              "/home/pm_cache" if Path("/home").exists() else "/tmp/pm_cache")
+)
+try:
+    _DISK_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+except Exception:
+    _DISK_CACHE_DIR = Path("/tmp/pm_cache")
+    _DISK_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+_disk_lock = threading.Lock()
+
+
+def _disk_get(key: str) -> tuple[float, object] | None:
+    """디스크에서 캐시 읽기. (ts, data) 반환 또는 None."""
+    p = _DISK_CACHE_DIR / f"{key}.pkl"
+    try:
+        if p.exists():
+            with open(p, "rb") as f:
+                return _pickle.load(f)
+    except Exception as e:
+        logger.warning(f"[disk-cache] read 실패 {key}: {e}")
+    return None
+
+
+def _disk_set(key: str, ts: float, data: object) -> None:
+    """디스크에 캐시 저장 (스레드 세이프)."""
+    p = _DISK_CACHE_DIR / f"{key}.pkl"
+    try:
+        with _disk_lock:
+            with open(p, "wb") as f:
+                _pickle.dump((ts, data), f, protocol=_pickle.HIGHEST_PROTOCOL)
+    except Exception as e:
+        logger.warning(f"[disk-cache] write 실패 {key}: {e}")
+
+
+# ── 기준가/구매가 캐시 (메모리 5분 / 디스크 2시간) ──────────────────────────
 _price_cache = {}
-_CACHE_TTL = 300
+_CACHE_TTL        = 300     # 메모리 TTL: 5분
+_CACHE_TTL_DISK   = 7200    # 디스크 TTL: 2시간
 
 
 def _get_base_prices(plant: str) -> list[dict]:
     """최근 2주 기준가(매출액/매출수량) + 구매단가(매출원가/매출수량) (플랜트별)"""
     cache_key = f"base_prices_{plant}"
+    # 1) 메모리 캐시
     if cache_key in _price_cache:
         ts, data = _price_cache[cache_key]
         if time.time() - ts < _CACHE_TTL:
             return data
+    # 2) 디스크 캐시
+    disk = _disk_get(cache_key)
+    if disk and time.time() - disk[0] < _CACHE_TTL_DISK:
+        _price_cache[cache_key] = disk  # 메모리에도 올림
+        return disk[1]
     try:
         import main as _main
         plant_cond_bp = (f"`플랜트` IN ({', '.join(repr(p) for p in PLANTS_REAL)})"
@@ -139,23 +188,26 @@ def _get_base_prices(plant: str) -> list[dict]:
             GROUP BY `자재`
         """)
         _price_cache[cache_key] = (time.time(), rows)
+        _disk_set(cache_key, time.time(), rows)
         return rows
     except Exception as e:
         logger.warning(f"[price_monitor] base_prices 조회 실패 ({plant}): {e}")
         return []
 
 
-# ── 전월 매출 캐시 (1시간) ───────────────────────────────────────────────────
-_prev_sales_cache = {}
-
-
 def _get_prev_month_sales(plant: str) -> dict[tuple, dict]:
     """전월(1개월 전) 상품·플랜트별 매출액·수량 합계 반환 ((product_code, plant) → dict)"""
     cache_key = f"prev_sales_{plant}"
+    # 1) 메모리
     if cache_key in _prev_sales_cache:
         ts, data = _prev_sales_cache[cache_key]
         if time.time() - ts < 3600:
             return data
+    # 2) 디스크 (24시간)
+    disk = _disk_get(cache_key)
+    if disk and time.time() - disk[0] < 86400:
+        _prev_sales_cache[cache_key] = disk
+        return disk[1]
     try:
         import main as _main
         plant_cond_ps = (f"`플랜트` IN ({', '.join(repr(p) for p in PLANTS_REAL)})"
@@ -175,6 +227,7 @@ def _get_prev_month_sales(plant: str) -> dict[tuple, dict]:
         """)
         result = {(r["product_code"], r["plant"]): r for r in (rows or [])}
         _prev_sales_cache[cache_key] = (time.time(), result)
+        _disk_set(cache_key, time.time(), result)
         return result
     except Exception as e:
         logger.warning(f"[price_monitor] prev_month_sales 조회 실패 ({plant}): {e}")
@@ -194,9 +247,10 @@ def _get_prev_month_sales_totals(plant: str) -> dict[str, dict]:
     return totals
 
 
-# ── 운영상품 목록 캐시 (1시간) ─────────────────────────────────────────────
+# ── 운영상품 목록 캐시 (메모리 1시간 / 디스크 2시간) ───────────────────────
 _product_cache = {}
-_PRODUCT_CACHE_TTL = 3600  # 1시간
+_PRODUCT_CACHE_TTL      = 3600   # 메모리 TTL: 1시간
+_PRODUCT_CACHE_TTL_DISK = 7200   # 디스크 TTL: 2시간
 
 # ── 역인덱스 캐시: plant → (ts, tok_inv, prod_map) ──────────────────────────
 # _get_our_products와 동일 TTL로 관리 — 상품 목록 갱신 시에만 재구축
@@ -216,9 +270,15 @@ _PLAT_ROWS_TTL = 600  # 10분
 def _get_plat_rows(platform: str, seller_name: str) -> list[dict]:
     """플랫폼 SKU 목록 조회 (10분 캐시). warmup에서 미리 채워 분석 시 Databricks 콜드스타트 방지."""
     cache_key = f"plat_{platform}_{seller_name}"
+    # 1) 메모리
     entry = _plat_rows_cache.get(cache_key)
     if entry and time.time() - entry[0] < _PLAT_ROWS_TTL:
         return entry[1]
+    # 2) 디스크 (1시간)
+    disk = _disk_get(cache_key)
+    if disk and time.time() - disk[0] < 3600:
+        _plat_rows_cache[cache_key] = disk
+        return disk[1]
 
     all_sellers = (seller_name == "__ALL__")
     safe_seller = seller_name.replace("'", "''")
@@ -255,6 +315,7 @@ def _get_plat_rows(platform: str, seller_name: str) -> list[dict]:
                 ORDER BY p.product_name
             """) or []
         _plat_rows_cache[cache_key] = (time.time(), rows)
+        _disk_set(cache_key, time.time(), rows)
         return rows
     except Exception as e:
         logger.warning(f"[pm-ai] plat_rows 조회 실패 ({platform}/{seller_name}): {e}")
@@ -336,10 +397,16 @@ def _build_like_clause(keyword: str, col: str) -> str:
 def _get_our_products(plant: str) -> list[dict]:
     """매핑 등록용: 상품코드당 1건 (배치 무시, GROUP BY 상품코드)"""
     cache_key = f"products_{plant}"
+    # 1) 메모리
     if cache_key in _product_cache:
         ts, data = _product_cache[cache_key]
         if time.time() - ts < _PRODUCT_CACHE_TTL:
             return data
+    # 2) 디스크 (2시간)
+    disk = _disk_get(cache_key)
+    if disk and time.time() - disk[0] < _PRODUCT_CACHE_TTL_DISK:
+        _product_cache[cache_key] = disk
+        return disk[1]
     try:
         if plant == 'ALL':
             plant_cond_op = f"z.`플랜트` IN ({', '.join(repr(p) for p in PLANTS_REAL)})"
@@ -376,6 +443,7 @@ def _get_our_products(plant: str) -> list[dict]:
             LIMIT 100000
         """)
         _product_cache[cache_key] = (time.time(), rows)
+        _disk_set(cache_key, time.time(), rows)
         return rows
     except Exception as e:
         logger.warning(f"[price_monitor] our_products 조회 실패 ({plant}): {e}")
