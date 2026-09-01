@@ -595,7 +595,7 @@ async function runAISuggest() {
     // ③ 2초마다 폴링
     const pollUrl = `/portal/price-monitor/api/pm-ai/suggest/poll/${jobId}`;
     let d = null;
-    for (let attempt = 0; attempt < 240; attempt++) {   // 최대 480초 (서버 8분 타임아웃에 맞춤)
+    for (let attempt = 0; attempt < 900; attempt++) {   // 최대 1800초 (서버 30분 타임아웃에 맞춤)
       await new Promise(r => setTimeout(r, 2000));
       const pr = await fetch(pollUrl);
       d = await pr.json().catch(() => null);

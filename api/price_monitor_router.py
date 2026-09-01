@@ -2252,6 +2252,10 @@ def _tokenize(name: str) -> set[str]:
     return tokens
 
 
+# 모듈 레벨 regex 캐시 — _score_mapping 매 호출마다 re.compile 방지
+_UNIT_PAT2 = __import__('re').compile(r'^약?\d[\d.]*[a-zA-Z]*$')
+
+
 def _score_mapping(platform_name: str, platform_price: float | None,
                    our_name: str, our_sale_price: float | None,
                    buy_price: float | None,
@@ -2298,7 +2302,7 @@ def _score_mapping(platform_name: str, platform_price: float | None,
 
     # 1. 토큰 겹침 (60점) - Overlap Coefficient
     #    숫자+단위 토큰(1kg, 836g 등)과 범용 수식어(슬라이스, 냉동 등)는 텍스트 점수에서 제외
-    _unit_pat2 = __import__('re').compile(r'^약?\d[\d.]*[a-zA-Z]*$')  # 숫자+단위, 약XXXg 포함
+    _unit_pat2 = _UNIT_PAT2  # 모듈 레벨 캐시 사용
     _STOP = {
         # '냉동', '냉장' → 온도조건 하드필터로 처리, STOP에서 제거 (텍스트 점수에 반영)
         '슬라이스', '신선', '건조', '원물', '국산', '수입',
@@ -2720,7 +2724,7 @@ async def api_mapping_ai_suggest(
         with _cf.ThreadPoolExecutor(max_workers=1) as _ex:
             _fut = _ex.submit(_do_ai_suggest, None, platform, seller_name, plant, limit, job_id)
             try:
-                result = _fut.result(timeout=480)  # 8분 — Databricks 콜드스타트 최대 5분 커버
+                result = _fut.result(timeout=1800)  # 30분 — 1844건 스코어링 완주 허용
                 data = _json.loads(result.body)
                 data["status"] = "done"
                 _job_store[job_id].update(data)
@@ -2874,6 +2878,9 @@ def _do_ai_suggest(request, platform, seller_name, plant, limit, _job_id=None):
         candidate_codes: set = set()
         for _t in plat_toks:
             candidate_codes |= _tok_inv.get(_t, set())
+        # 후보 폭발 방지: 역인덱스 히트 너무 많으면 상위 200개로 제한
+        if len(candidate_codes) > 200:
+            candidate_codes = set(list(candidate_codes)[:200])
         scored = []
         for code in candidate_codes:
             p = _our_prod_map.get(code)
@@ -2926,41 +2933,29 @@ def _do_ai_suggest(request, platform, seller_name, plant, limit, _job_id=None):
         }
 
     try:
-        import concurrent.futures as _cf3
-        # CPU 바운드가 아닌 순수 Python 계산 → ThreadPoolExecutor (GIL 해제 없어도
-        # 스코어링 자체가 메모리 조회 위주라 병렬화 효과 있음)
-        _SCORE_WORKERS = 8
-        batch_results: list = [None] * scan_count
-        with _cf3.ThreadPoolExecutor(max_workers=_SCORE_WORKERS) as _sex:
-            futs = {
-                _sex.submit(_score_one, unmapped[i]): i
-                for i in range(scan_count)
-            }
-            for fut in _cf3.as_completed(futs):
-                idx = futs[fut]
-                batch_results[idx] = fut.result()
-                with _score_lock:
-                    _progress_counter[0] += 1
-                    done_cnt = _progress_counter[0]
-                    if _job_id and _job_id in _job_store:
-                        _job_store[_job_id]["progress"] = done_cnt
-                    # 50개마다 중간 결과 저장 + 속도 측정
-                    if done_cnt % 50 == 0 and _job_id and _job_id in _job_store:
-                        _partial = [r for r in batch_results if r is not None]
-                        _elapsed = _t.time() - _score_start
-                        _ips = done_cnt / _elapsed if _elapsed > 0 else 0
-                        _eta = (scan_count - done_cnt) / _ips if _ips > 0 else 0
-                        _job_store[_job_id]["_partial_items"] = _partial
-                        _job_store[_job_id]["_partial_total"] = len(unmapped)
-                        _job_store[_job_id]["elapsed_sec"] = round(_elapsed, 1)
-                        _job_store[_job_id]["items_per_sec"] = round(_ips, 2)
-                        _job_store[_job_id]["eta_sec"] = round(_eta)
-                        logger.info(f"[pm-ai][{_job_id}] scoring {done_cnt}/{scan_count} — {_ips:.1f}건/초, ETA {_eta:.0f}초")
-        items = [r for r in batch_results if r is not None]
+        # GIL로 인해 ThreadPoolExecutor는 순수 Python 연산에 효과 없음 → 순차 루프
+        # candidate_codes 상한 200개로 제한 (역인덱스 히트 폭발 방지)
+        for _row_idx in range(scan_count):
+            row = unmapped[_row_idx]
+            result_row = _score_one(row)
+            items.append(result_row)
+            _progress_counter[0] = _row_idx + 1
+            done_cnt = _row_idx + 1
+            if _job_id and _job_id in _job_store:
+                _job_store[_job_id]["progress"] = done_cnt
+            # 50개마다 중간 결과 저장 + 속도 측정
+            if done_cnt % 50 == 0 and _job_id and _job_id in _job_store:
+                _elapsed = _t.time() - _score_start
+                _ips = done_cnt / _elapsed if _elapsed > 0 else 0
+                _eta = (scan_count - done_cnt) / _ips if _ips > 0 else 0
+                _job_store[_job_id]["_partial_items"] = list(items)
+                _job_store[_job_id]["_partial_total"] = len(unmapped)
+                _job_store[_job_id]["elapsed_sec"] = round(_elapsed, 1)
+                _job_store[_job_id]["items_per_sec"] = round(_ips, 2)
+                _job_store[_job_id]["eta_sec"] = round(_eta)
+                logger.info(f"[pm-ai][{_job_id}] scoring {done_cnt}/{scan_count} — {_ips:.1f}건/초, ETA {_eta:.0f}초")
     except Exception as e:
         import traceback as _tb
-        # 병렬 실패 시 완료된 부분이라도 반환
-        items = [r for r in batch_results if r is not None] if 'batch_results' in dir() else items
         return JSONResponse({"items": items, "total_unmapped": len(unmapped),
                              "error": str(e), "traceback": _tb.format_exc()[-3000:]})
 
