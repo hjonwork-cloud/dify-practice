@@ -52,7 +52,7 @@
 .btn-map-open:hover { background:#4338ca; }
 .btn-improve-flag { white-space:nowrap; padding:7px 12px; border-radius:8px; background:#f3f4f6; color:#6b7280; font-size:12px; font-weight:600; border:1.5px solid #e5e7eb; cursor:pointer; transition:all .15s; }
 .btn-improve-flag:hover { background:#fef3c7; color:#d97706; border-color:#fcd34d; }
-.btn-improve-flag.active { background:#fef3c7; color:#d97706; border-color:#f59e0b; box-shadow:0 0 0 2px #fde68a; }
+.btn-improve-flag.active { background:#fef9c3; color:#b45309; border-color:#f59e0b; box-shadow:0 0 0 2px #fde68a; font-weight:700; }
 
 /* Empty/Loading */
 .ws-empty { text-align:center; padding:80px 20px; color:#9ca3af; font-size:15px; }
@@ -333,6 +333,7 @@
     </div>
     <div class="modal-footer">
       <span id="modalSelCount" style="font-size:13px;color:#374151">선택된 항목: 0개</span>
+      <button class="btn-improve-flag" id="btnModalImproveFlag" onclick="toggleImproveFlagModal()" title="AI 제안이 틀린 경우 클릭">⚠️ 개선필요</button>
       <span style="flex:1"></span>
       <button class="btn-close-modal" onclick="closeModal()">취소</button>
       <button class="btn-confirm" id="btnConfirm" onclick="confirmMapping()" disabled>✅ 매핑 확정</button>
@@ -840,7 +841,7 @@ function renderSuggestList(items, totalUnmapped) {
           <div style="font-size:11px;color:#9ca3af">신뢰도</div>
         </div>
         <button class="btn-map-open" onclick="openMappingModal('${escHtml(item.product_key)}')">매핑하기 →</button>
-        <button class="btn-improve-flag" id="flag-${escHtml(item.product_key)}" onclick="toggleImproveFlag('${escHtml(item.product_key)}')" title="AI 제안이 틀린 경우 클릭 — 매핑 확정 시 피드백 저장">⚠️ 개선필요</button>
+        <button class="btn-improve-flag" data-flag-key="${escHtml(item.product_key)}" onclick="toggleImproveFlag('${escHtml(item.product_key)}', this)" title="AI 제안이 틀린 경우 클릭 — 매핑 확정 시 피드백 저장">⚠️ 개선필요</button>
       </div>
       <div class="suggest-card-body">`;
 
@@ -977,6 +978,8 @@ async function openMappingModal(productKey) {
   document.getElementById('modalSearch').value = '';
   document.getElementById('mappingModal').classList.add('open');
   document.getElementById('modalTitle').textContent = `매핑 확정 — ${item.display_name || item.product_name}`;
+  // 팬업 개선필요 버튼을 카드의 현재 플래그 상태와 동기화
+  _syncModalFlagBtn();
 
   // 카드에서 선택된 제안(클릭한 .selected) 인덱스 확인
   let selectedSugIdx = 0;
