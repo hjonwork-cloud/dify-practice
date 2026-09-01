@@ -2855,85 +2855,104 @@ def _do_ai_suggest(request, platform, seller_name, plant, limit, _job_id=None):
 
     items = []
     scan_count = min(len(unmapped), limit)  # limit개만 스캔
+    _score_lock = threading.Lock()
+    _progress_counter = [0]  # 스레드 안전 카운터 (list로 mutable 참조)
+
+    def _score_one(row):
+        """row 1개 스코어링 — 스레드 안전, 순수 계산만 수행."""
+        sname = row.get("platform_seller_name") or ("" if all_sellers else seller_name)
+        p_price = row.get("price_sale")
+        d_type  = row.get("delivery_type") or "직배송"
+        fee     = _get_fee(d_type, platform, sname)
+        net_price = round(float(p_price) * (1.0 - fee) / 1.1, 0) if p_price else None
+
+        raw_pname   = row.get("product_name", "")
+        clean_pname = _strip_seller(raw_pname, sname)
+
+        plat_toks = _tokenize(clean_pname)
+        candidate_codes: set = set()
+        for _t in plat_toks:
+            candidate_codes |= _tok_inv.get(_t, set())
+        scored = []
+        for code in candidate_codes:
+            p = _our_prod_map.get(code)
+            if p is None:
+                continue
+            bp       = base_prices.get(code, {})
+            our_sale = bp.get("avg_sale_price")
+            buy_p    = bp.get("avg_buy_price")
+            pat_bonus = min(1.0, pattern_strength.get(code, 0) / 3.0)
+            sc = _score_mapping(
+                clean_pname, p_price,
+                p.get("product_name", ""), our_sale, buy_p,
+                d_type, platform, sname, pat_bonus,
+                our_prod=p
+            )
+            if sc >= 20.0:
+                our_name = p.get("product_name", code)
+                is_n_prefix = our_name.lstrip().startswith('[N]')
+                if is_n_prefix:
+                    sc = max(0.0, sc - 5.0)
+                scored.append({
+                    "our_product_code": code,
+                    "product_name":     our_name,
+                    "category":         p.get("category", ""),
+                    "unit":             p.get("unit", ""),
+                    "score":            sc,
+                    "our_sale_price":   int(our_sale) if our_sale else None,
+                    "buy_price":        int(buy_p)    if buy_p    else None,
+                    "net_comp_price":   int(net_price) if net_price else None,
+                    "prev_sales_amt":   int(price_totals.get(code, {}).get("prev_sales_amt") or 0),
+                    "_is_n":            is_n_prefix,
+                })
+        scored.sort(key=lambda x: (-x["score"], x["_is_n"]))
+        for s in scored:
+            s.pop("_is_n", None)
+        top3 = scored[:3]
+
+        return {
+            "product_key":    row["product_key"],
+            "product_name":   raw_pname,
+            "display_name":   clean_pname,
+            "spec":           row.get("spec", ""),
+            "price_sale":     int(p_price) if p_price else None,
+            "net_price":      int(net_price) if net_price else None,
+            "delivery_type":  d_type,
+            "fee_pct":        round(fee * 100, 1),
+            "seller_name":    sname,
+            "suggestions":    top3,
+            "has_suggestions": len(top3) > 0,
+        }
+
     try:
-        for _row_idx, row in enumerate(unmapped[:scan_count]):
-            if _job_id and _job_id in _job_store:
-                _job_store[_job_id]["progress"] = _row_idx + 1
-            sname = row.get("platform_seller_name") or ("" if all_sellers else seller_name)
-            p_price = row.get("price_sale")
-            d_type  = row.get("delivery_type") or "직배송"
-            fee     = _get_fee(d_type, platform, sname)
-            net_price = round(float(p_price) * (1.0 - fee) / 1.1, 0) if p_price else None
-
-            # 상품명에서 셀러명 제거 (유사도 계산 정밀도 향상)
-            raw_pname    = row.get("product_name", "")
-            clean_pname  = _strip_seller(raw_pname, sname)
-
-            # 우리 상품별 점수 계산 — 역인덱스로 토큰이 겹치는 후보만 추출
-            plat_toks = _tokenize(clean_pname)
-            # 플랫폼 토큰이 나타나는 우리 상품 코드만 후보로 (합집합)
-            candidate_codes: set = set()
-            for _t in plat_toks:
-                candidate_codes |= _tok_inv.get(_t, set())
-            scored = []
-            for code in candidate_codes:
-                p = _our_prod_map.get(code)
-                if p is None:
-                    continue
-                bp   = base_prices.get(code, {})
-                our_sale = bp.get("avg_sale_price")
-                buy_p    = bp.get("avg_buy_price")
-                pat_bonus = min(1.0, pattern_strength.get(code, 0) / 3.0)
-                sc = _score_mapping(
-                    clean_pname, p_price,
-                    p.get("product_name", ""), our_sale, buy_p,
-                    d_type, platform, sname, pat_bonus,
-                    our_prod=p
-                )
-                if sc >= 20.0:
-                    our_name = p.get("product_name", code)
-                    # [N] 접두사: 화성3배치(고단가) → 스코어 -5pt 패널티 + 동점시 후순위
-                    is_n_prefix = our_name.lstrip().startswith('[N]')
-                    if is_n_prefix:
-                        sc = max(0.0, sc - 5.0)
-                    scored.append({
-                        "our_product_code": code,
-                        "product_name":     our_name,
-                        "category":         p.get("category", ""),
-                        "unit":             p.get("unit", ""),
-                        "score":            sc,
-                        "our_sale_price":   int(our_sale) if our_sale else None,
-                        "buy_price":        int(buy_p)    if buy_p    else None,
-                        "net_comp_price":   int(net_price) if net_price else None,
-                        "prev_sales_amt":   int(price_totals.get(code, {}).get("prev_sales_amt") or 0),
-                        "_is_n":            is_n_prefix,
-                    })
-            # [N] 아닌 상품 우선 → 같은 점수대에서 [N] 상품 후순위
-            scored.sort(key=lambda x: (-x["score"], x["_is_n"]))
-            # _is_n 내부 키 제거 후 top3
-            for s in scored:
-                s.pop("_is_n", None)
-            top3 = scored[:3]
-
-            items.append({
-                "product_key":    row["product_key"],
-                "product_name":   raw_pname,
-                "display_name":   clean_pname,
-                "spec":           row.get("spec", ""),
-                "price_sale":     int(p_price) if p_price else None,
-                "net_price":      int(net_price) if net_price else None,
-                "delivery_type":  d_type,
-                "fee_pct":        round(fee * 100, 1),
-                "seller_name":    sname,
-                "suggestions":    top3,
-                "has_suggestions": len(top3) > 0,
-            })
-            # 50개마다 중간 결과 저장 — 타임아웃 시 부분 결과 반환용
-            if _job_id and _job_id in _job_store and len(items) % 50 == 0:
-                _job_store[_job_id]["_partial_items"] = list(items)
-                _job_store[_job_id]["_partial_total"] = len(unmapped)
+        import concurrent.futures as _cf3
+        # CPU 바운드가 아닌 순수 Python 계산 → ThreadPoolExecutor (GIL 해제 없어도
+        # 스코어링 자체가 메모리 조회 위주라 병렬화 효과 있음)
+        _SCORE_WORKERS = 8
+        batch_results: list = [None] * scan_count
+        with _cf3.ThreadPoolExecutor(max_workers=_SCORE_WORKERS) as _sex:
+            futs = {
+                _sex.submit(_score_one, unmapped[i]): i
+                for i in range(scan_count)
+            }
+            for fut in _cf3.as_completed(futs):
+                idx = futs[fut]
+                batch_results[idx] = fut.result()
+                with _score_lock:
+                    _progress_counter[0] += 1
+                    done_cnt = _progress_counter[0]
+                    if _job_id and _job_id in _job_store:
+                        _job_store[_job_id]["progress"] = done_cnt
+                    # 50개마다 중간 결과 저장 (완료된 것만, None 제외)
+                    if done_cnt % 50 == 0 and _job_id and _job_id in _job_store:
+                        _partial = [r for r in batch_results if r is not None]
+                        _job_store[_job_id]["_partial_items"] = _partial
+                        _job_store[_job_id]["_partial_total"] = len(unmapped)
+        items = [r for r in batch_results if r is not None]
     except Exception as e:
         import traceback as _tb
+        # 병렬 실패 시 완료된 부분이라도 반환
+        items = [r for r in batch_results if r is not None] if 'batch_results' in dir() else items
         return JSONResponse({"items": items, "total_unmapped": len(unmapped),
                              "error": str(e), "traceback": _tb.format_exc()[-3000:]})
 
