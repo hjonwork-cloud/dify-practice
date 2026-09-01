@@ -50,6 +50,9 @@
 .sug-score-fill { height:4px; border-radius:2px; }
 .btn-map-open { margin-left:auto; white-space:nowrap; padding:7px 14px; border-radius:8px; background:#4f46e5; color:#fff; font-size:13px; font-weight:600; border:none; cursor:pointer; }
 .btn-map-open:hover { background:#4338ca; }
+.btn-improve-flag { white-space:nowrap; padding:7px 12px; border-radius:8px; background:#f3f4f6; color:#6b7280; font-size:12px; font-weight:600; border:1.5px solid #e5e7eb; cursor:pointer; transition:all .15s; }
+.btn-improve-flag:hover { background:#fef3c7; color:#d97706; border-color:#fcd34d; }
+.btn-improve-flag.active { background:#fef3c7; color:#d97706; border-color:#f59e0b; box-shadow:0 0 0 2px #fde68a; }
 
 /* Empty/Loading */
 .ws-empty { text-align:center; padding:80px 20px; color:#9ca3af; font-size:15px; }
@@ -837,6 +840,7 @@ function renderSuggestList(items, totalUnmapped) {
           <div style="font-size:11px;color:#9ca3af">신뢰도</div>
         </div>
         <button class="btn-map-open" onclick="openMappingModal('${escHtml(item.product_key)}')">매핑하기 →</button>
+        <button class="btn-improve-flag" id="flag-${escHtml(item.product_key)}" onclick="toggleImproveFlag('${escHtml(item.product_key)}')" title="AI 제안이 틀린 경우 클릭 — 매핑 확정 시 피드백 저장">⚠️ 개선필요</button>
       </div>
       <div class="suggest-card-body">`;
 
@@ -1217,6 +1221,35 @@ async function confirmMapping() {
     const d = await r.json();
     if (d.ok) {
       showToast(`✅ ${d.added}개 매핑 저장 완료!`);
+
+      // 개선필요 플래그 ON 상태면 피드백 저장
+      if (improveFlagSet.has(modalPlatKey)) {
+        const origItem = suggestItems.find(i => i.product_key === modalPlatKey);
+        const aiSug = origItem?.suggestions?.[0];
+        try {
+          await fetch('/portal/price-monitor/api/pm-ai/feedback', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({
+              product_key:       modalPlatKey,
+              our_product_code:  modalOurItem.our_product_code,
+              product_name:      modalOurItem.product_name,
+              category:          modalOurItem.category || '',
+              unit:              modalOurItem.unit || '',
+              our_sale_price:    modalOurItem.our_sale_price,
+              buy_price:         modalOurItem.buy_price,
+              ai_suggested_code: aiSug?.our_product_code || '',
+              ai_score:          aiSug?.score || null,
+              platform_name:     origItem?.product_name || '',
+            }),
+          });
+          showToast('피드백 저장 완료 — 다음 분석부터 반영됩니다');
+          improveFlagSet.delete(modalPlatKey);
+        } catch(fe) {
+          console.warn('피드백 저장 실패', fe);
+        }
+      }
+
       closeModal();
       // 해당 카드를 목록에서 제거 (completed)
       const cardEl = document.querySelector(`.suggest-card[data-key="${CSS.escape(modalPlatKey)}"]`);

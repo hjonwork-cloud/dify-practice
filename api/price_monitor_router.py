@@ -2640,6 +2640,87 @@ async def api_suggest_poll(request: Request, job_id: str):
     return JSONResponse(job)
 
 
+# ── AI 매핑 피드백 (수기 매핑 정답 저장 → 다음 분석에 반영) ────────────────────
+# 저장 경로: /home/pm_cache/pm_feedback.json (디스크 영속)
+_feedback_cache: dict = {}  # product_key → {our_product_code, product_name, ...}
+_FEEDBACK_PATH = (_DISK_CACHE_DIR / "pm_feedback.json") if _DISK_CACHE_DIR else None
+
+
+def _load_feedback() -> None:
+    """앱 시작 시 또는 필요할 때 피드백 파일 로드."""
+    global _feedback_cache
+    if not _FEEDBACK_PATH:
+        return
+    try:
+        if _FEEDBACK_PATH.exists():
+            import json as _j
+            with open(_FEEDBACK_PATH, "r", encoding="utf-8") as f:
+                _feedback_cache = _j.load(f)
+            logger.info(f"[feedback] 로드 완료 {len(_feedback_cache)}건")
+    except Exception as e:
+        logger.warning(f"[feedback] 로드 실패: {e}")
+
+
+def _save_feedback() -> None:
+    """피드백 메모리 → 디스크 저장."""
+    if not _FEEDBACK_PATH:
+        return
+    try:
+        import json as _j
+        with _disk_lock:
+            with open(_FEEDBACK_PATH, "w", encoding="utf-8") as f:
+                _j.dump(_feedback_cache, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.warning(f"[feedback] 저장 실패: {e}")
+
+
+# 앱 시작 시 피드백 로드
+_load_feedback()
+
+
+@router.post("/api/pm-ai/feedback")
+async def api_feedback_save(request: Request):
+    """수기 매핑 피드백 저장. AI 제안과 다른 상품으로 매핑했을 때 기록."""
+    _require_pm_access(request)
+    data = await request.json()
+    product_key = data.get("product_key", "").strip()
+    if not product_key:
+        return JSONResponse({"ok": False, "error": "product_key 필요"})
+
+    _feedback_cache[product_key] = {
+        "our_product_code": data.get("our_product_code", ""),
+        "product_name":     data.get("product_name", ""),
+        "category":         data.get("category", ""),
+        "unit":             data.get("unit", ""),
+        "our_sale_price":   data.get("our_sale_price"),
+        "buy_price":        data.get("buy_price"),
+        "ai_suggested_code": data.get("ai_suggested_code", ""),
+        "ai_score":         data.get("ai_score"),
+        "platform_name":    data.get("platform_name", ""),
+        "created_at":       __import__('datetime').datetime.now().isoformat(),
+    }
+    _save_feedback()
+    logger.info(f"[feedback] 저장 product_key={product_key} → {_feedback_cache[product_key]['our_product_code']}")
+    return JSONResponse({"ok": True, "total": len(_feedback_cache)})
+
+
+@router.get("/api/pm-ai/feedback")
+async def api_feedback_list(request: Request):
+    """저장된 피드백 목록 조회."""
+    _require_pm_access(request)
+    return JSONResponse({"data": list(_feedback_cache.values()), "total": len(_feedback_cache)})
+
+
+@router.delete("/api/pm-ai/feedback/{product_key}")
+async def api_feedback_delete(request: Request, product_key: str):
+    """특정 피드백 삭제."""
+    _require_pm_access(request)
+    removed = _feedback_cache.pop(product_key, None)
+    if removed:
+        _save_feedback()
+    return JSONResponse({"ok": bool(removed)})
+
+
 # ── Databricks 웨어하우스 웜업 (분석 전 연결 확인) ──────────────────────────────
 # 웨어하우스가 꺼진 상태에서 분석을 바로 시작하면 8분 타임아웃도 부족할 수 있음.
 # 분석 전 SELECT 1로 웨어하우스를 먼저 깨우고, 완료 후 분석 시작.
@@ -2864,15 +2945,45 @@ def _do_ai_suggest(request, platform, seller_name, plant, limit, _job_id=None):
     _score_start = _t.time()  # 스코어링 시작 시각
 
     def _score_one(row):
-        """row 1개 스코어링 — 스레드 안전, 순수 계산만 수행."""
+        """row 1개 스코어링 — 피드백 캐시 우선, 없으면 유사도 계산."""
+        pkey  = row.get("product_key", "")
         sname = row.get("platform_seller_name") or ("" if all_sellers else seller_name)
         p_price = row.get("price_sale")
         d_type  = row.get("delivery_type") or "직배송"
         fee     = _get_fee(d_type, platform, sname)
         net_price = round(float(p_price) * (1.0 - fee) / 1.1, 0) if p_price else None
-
         raw_pname   = row.get("product_name", "")
         clean_pname = _strip_seller(raw_pname, sname)
+
+        # ── 피드백 캐시 우선: 수기 매핑 정답이 있으면 #1으로 반환 ──
+        if pkey and pkey in _feedback_cache:
+            fb = _feedback_cache[pkey]
+            top3 = [{
+                "our_product_code": fb["our_product_code"],
+                "product_name":     fb["product_name"],
+                "category":         fb.get("category", ""),
+                "unit":             fb.get("unit", ""),
+                "score":            100.0,  # 수기 매핑 = 신뢰도 100
+                "our_sale_price":   fb.get("our_sale_price"),
+                "buy_price":        fb.get("buy_price"),
+                "net_comp_price":   int(net_price) if net_price else None,
+                "prev_sales_amt":   0,
+                "_feedback": True,  # 피드백 출처 표시
+            }]
+            return {
+                "product_key":    pkey,
+                "product_name":   raw_pname,
+                "display_name":   clean_pname,
+                "spec":           row.get("spec", ""),
+                "price_sale":     int(p_price) if p_price else None,
+                "net_price":      int(net_price) if net_price else None,
+                "delivery_type":  d_type,
+                "fee_pct":        round(fee * 100, 1),
+                "seller_name":    sname,
+                "suggestions":    top3,
+                "has_suggestions": True,
+                "from_feedback":  True,
+            }
 
         plat_toks = _tokenize(clean_pname)
         candidate_codes: set = set()
