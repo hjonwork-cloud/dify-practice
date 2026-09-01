@@ -1689,7 +1689,9 @@ async def api_competition(request: Request, plant: str = "ALL"):
         else:
             diff = diff_pct = None
 
-        seller_groups[(platform, seller_name, seller_id)].append({
+        # seller_id는 그룹 키에서 제외 — 동일 셀러명인데 ID 유무로 중복 방지
+        seller_groups[(platform, seller_name)].append({
+            "_seller_id": seller_id,
             "our_product_code":  p_code,
             "product_name":      _resolve(p_code),
             "our_price":         int(our_price)   if our_price   else None,  # 우리 공급가
@@ -1710,12 +1712,18 @@ async def api_competition(request: Request, plant: str = "ALL"):
 
     # ── 셀러 요약 빌드 ──
     sellers = []
-    for (platform, seller_name, seller_id), items in seller_groups.items():
+    for (platform, seller_name), items in seller_groups.items():
+        # seller_id: 그룹 내에서 값이 있는 것 우선 사용
+        seller_id = next((i["_seller_id"] for i in items if i.get("_seller_id")), "")
         win  = sum(1 for i in items if i["status"] == "win")
         tie  = sum(1 for i in items if i["status"] == "tie")
         lose = sum(1 for i in items if i["status"] == "lose")
         total_items = len(items)
         win_rate = round(win / total_items * 100) if total_items else 0
+
+        # _seller_id 임시 키 제거
+        for _it in items:
+            _it.pop("_seller_id", None)
 
         # 열세 상품 상단 정렬
         items_sorted = sorted(items, key=lambda x: (
