@@ -110,20 +110,25 @@ def _serialize_rows(rows: list[dict]) -> list[dict]:
 import pickle as _pickle
 
 _DISK_CACHE_DIR: Path = Path(
-    os.getenv("PM_CACHE_DIR",  # 환경변수로 오버라이드 가능
+    os.getenv("PM_CACHE_DIR",
               "/home/pm_cache" if Path("/home").exists() else "/tmp/pm_cache")
 )
 try:
     _DISK_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 except Exception:
-    _DISK_CACHE_DIR = Path("/tmp/pm_cache")
-    _DISK_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        _DISK_CACHE_DIR = Path("/tmp/pm_cache")
+        _DISK_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        _DISK_CACHE_DIR = None  # type: ignore  # 디스크 캐시 비활성화 (read-only 환경)
 
 _disk_lock = threading.Lock()
 
 
-def _disk_get(key: str) -> tuple[float, object] | None:
+def _disk_get(key: str):
     """디스크에서 캐시 읽기. (ts, data) 반환 또는 None."""
+    if _DISK_CACHE_DIR is None:
+        return None
     p = _DISK_CACHE_DIR / f"{key}.pkl"
     try:
         if p.exists():
@@ -136,6 +141,8 @@ def _disk_get(key: str) -> tuple[float, object] | None:
 
 def _disk_set(key: str, ts: float, data: object) -> None:
     """디스크에 캐시 저장 (스레드 세이프)."""
+    if _DISK_CACHE_DIR is None:
+        return
     p = _DISK_CACHE_DIR / f"{key}.pkl"
     try:
         with _disk_lock:
