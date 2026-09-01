@@ -583,7 +583,7 @@ async function runAISuggest() {
     showLoading('연결 완료. AI 유사도 분석 시작 중...');
 
     // ② 분석 작업 시작 → job_id 즉시 반환 (타임아웃 없음)
-    const startUrl = `/portal/price-monitor/api/pm-ai/suggest?platform=${encodeURIComponent(currentPlatform)}&seller_name=${encodeURIComponent(currentSeller)}&seller_id=${encodeURIComponent(currentSellerId)}&plant=${currentPlant}&limit=1000`;
+    const startUrl = `/portal/price-monitor/api/pm-ai/suggest?platform=${encodeURIComponent(currentPlatform)}&seller_name=${encodeURIComponent(currentSeller)}&seller_id=${encodeURIComponent(currentSellerId)}&plant=${currentPlant}&limit=10000`;
     const startR = await fetch(startUrl);
     const startD = await startR.json().catch(() => null);
     if (!startD || !startD.job_id) {
