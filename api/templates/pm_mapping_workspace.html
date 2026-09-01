@@ -795,84 +795,127 @@ async function bulkApproveHigh() {
   setFilter(currentFilter);
 }
 
-// ══ 리스트 렌더 ══
+// ══ 리스트 렌더 (페이지네이션) ══
+const PAGE_SIZE = 100;
+let _paginatedItems = [];
+let _pageLoaded = 0;
+
+function _buildCardHtml(item) {
+  const top    = item.suggestions[0] || {};
+  const score  = top.score || 0;
+  const scoreClass = score >= 80 ? 'high' : score >= 50 ? 'mid' : 'low';
+  const netDisp = item.net_price ? item.net_price.toLocaleString()+'원' : '-';
+  const saleDisp = item.price_sale ? item.price_sale.toLocaleString()+'원' : '-';
+  const sellerLabel = (currentSeller === '__ALL__' && item.seller_name) ? `<span style="color:#7c3aed;font-weight:600">${escHtml(item.seller_name)}</span>` : escHtml(currentSeller);
+  const noSugBadge = !item.has_suggestions ? '<span style="font-size:11px;background:#fef3c7;color:#b45309;padding:2px 8px;border-radius:10px;font-weight:600">제안없음</span>' : '';
+  const dispName = item.display_name && item.display_name !== item.product_name
+    ? `${escHtml(item.display_name)} <small style="color:#9ca3af;text-decoration:line-through">${escHtml(item.product_name)}</small>`
+    : escHtml(item.product_name);
+  const platLabel = p => p === 'baemin' ? '배민상회' : '식봄';
+  const platClass = p => p === 'baemin' ? 'badge-baemin' : 'badge-food';
+
+  let h = `<div class="suggest-card" data-key="${escHtml(item.product_key)}">
+    <div class="suggest-card-header">
+      <span class="plat-badge ${platClass(currentPlatform)}">${platLabel(currentPlatform)}</span>
+      <div class="plat-info">
+        <div class="plat-name">${dispName}${item.spec ? ' <small style="color:#9ca3af">'+escHtml(item.spec)+'</small>' : ''} ${noSugBadge}</div>
+        <div class="plat-meta">
+          <span>${sellerLabel}</span>
+          <span class="price-main">${saleDisp}</span>
+          <span class="price-net">실판매가 ${netDisp} <small>(${item.delivery_type}, 수수료 ${item.fee_pct}%+VAT)</small></span>
+        </div>
+      </div>
+      <div class="confidence">
+        <div class="conf-score ${scoreClass}">${item.has_suggestions ? score.toFixed(0)+'점' : '-'}</div>
+        <div style="font-size:11px;color:#9ca3af">신뢰도</div>
+      </div>
+      <button class="btn-map-open" onclick="openMappingModal(this.closest('.suggest-card').dataset.key)">매핑하기 →</button>
+      <button class="btn-improve-flag" data-flag-key="${escHtml(item.product_key)}" onclick="toggleImproveFlag(this.closest('.suggest-card').dataset.key, this)" title="AI 제안이 틀린 경우 클릭 — 매핑 확정 시 피드백 저장">⚠️ 개선필요</button>
+    </div>
+    <div class="suggest-card-body">`;
+
+  if (item.has_suggestions) {
+    item.suggestions.forEach((s, si) => {
+      const barPct = Math.round(s.score);
+      const barColor = s.score>=80?'#059669':s.score>=50?'#d97706':'#9ca3af';
+      const saleV  = s.our_sale_price ? s.our_sale_price.toLocaleString()+'원' : '-';
+      const buyV   = s.buy_price      ? s.buy_price.toLocaleString()+'원'      : '-';
+      const salesV = s.prev_sales_amt > 0 ? Math.round(s.prev_sales_amt/10000)+'만원' : '-';
+      h += `<div class="sug-item" data-pkey="${escHtml(item.product_key)}" data-si="${si}" onclick="selectSuggest(this.dataset.pkey, +this.dataset.si)" id="sug-${escHtml(item.product_key)}-${si}">
+        <span class="sug-rank">#${si+1}</span>
+        <div class="sug-code">${escHtml(s.our_product_code)}</div>
+        <div class="sug-name">${escHtml(s.product_name)}</div>
+        <div class="sug-prices">
+          <span><span class="lbl">공급가</span> <span class="val sale">${saleV}</span></span>
+          <span><span class="lbl">구매가</span> <span class="val">${buyV}</span></span>
+          <span><span class="lbl">전월매출</span> <span class="val">${salesV}</span></span>
+        </div>
+        <div class="sug-score-bar"><div class="sug-score-fill" style="width:${barPct}%;background:${barColor}"></div></div>
+      </div>`;
+    });
+  } else {
+    h += `<div style="padding:12px;color:#9ca3af;font-size:13px">유사한 우리 상품을 찾지 못했습니다. 매핑하기 버튼에서 직접 선택할 수 있습니다.</div>`;
+  }
+  h += `</div></div>`;
+  return h;
+}
+
+function _renderLoadMoreBtn() {
+  const remaining = _paginatedItems.length - _pageLoaded * PAGE_SIZE;
+  const el = document.getElementById('loadMoreBtn');
+  if (el) {
+    if (remaining > 0) {
+      el.textContent = `더 보기 (${remaining}개 남음)`;
+      el.style.display = 'block';
+    } else {
+      el.style.display = 'none';
+    }
+  }
+}
+
+function loadMoreSuggest() {
+  const list = document.getElementById('suggestListInner');
+  if (!list) return;
+  const start = _pageLoaded * PAGE_SIZE;
+  const slice = _paginatedItems.slice(start, start + PAGE_SIZE);
+  let html = '';
+  slice.forEach(item => { html += _buildCardHtml(item); });
+  list.insertAdjacentHTML('beforeend', html);
+  _pageLoaded++;
+  _renderLoadMoreBtn();
+}
+
 function renderSuggestList(items, totalUnmapped) {
+  const wsContent = document.getElementById('wsContent');
   if (!items.length) {
     const emptyMsg = currentFilter !== 'all'
       ? '<div class="ws-empty">해당 조건의 항목이 없습니다.</div>'
       : '<div class="ws-empty">AI 제안 가능한 미매핑 상품이 없습니다.<br><small style="color:#9ca3af">🔍 진단 버튼으로 데이터를 확인하거나, 전체 셀러를 선택해 보세요.</small></div>';
-    document.getElementById('wsContent').innerHTML = emptyMsg;
+    wsContent.innerHTML = emptyMsg;
     return;
   }
 
-  // (KPI bar는 renderResultPanel에서 처리)
+  _paginatedItems = items;
+  _pageLoaded = 0;
+
   const noSug = items.filter(i => !i.has_suggestions).length;
+  const noSugNote = noSug > 0
+    ? `<div style="padding:8px 24px 20px;font-size:12px;color:#9ca3af">※ 제안없음 ${noSug}개는 유사도가 낮은 항목으로, 팝업에서 직접 우리 상품을 선택해 매핑할 수 있습니다.</div>`
+    : '';
 
-  const platLabel = p => p === 'baemin' ? '배민상회' : '식봄';
-  const platClass = p => p === 'baemin' ? 'badge-baemin' : 'badge-food';
+  // 빈 컨테이너 먼저 삽입 (첫 렌더는 빠름)
+  wsContent.innerHTML = `
+    <div class="suggest-list" id="suggestListInner"></div>
+    ${noSugNote}
+    <div style="text-align:center;padding:16px 0 24px">
+      <button id="loadMoreBtn" onclick="loadMoreSuggest()"
+        style="display:none;padding:8px 28px;background:#4f46e5;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer">
+        더 보기
+      </button>
+    </div>`;
 
-  let html = '<div class="suggest-list">';
-    items.forEach((item, idx) => {
-    const top    = item.suggestions[0] || {};
-    const score  = top.score || 0;
-    const scoreClass = score >= 80 ? 'high' : score >= 50 ? 'mid' : 'low';
-    const netDisp = item.net_price ? item.net_price.toLocaleString()+'원' : '-';
-    const saleDisp = item.price_sale ? item.price_sale.toLocaleString()+'원' : '-';
-    const sellerLabel = (currentSeller === '__ALL__' && item.seller_name) ? `<span style="color:#7c3aed;font-weight:600">${escHtml(item.seller_name)}</span>` : escHtml(currentSeller);
-    const noSugBadge = !item.has_suggestions ? '<span style="font-size:11px;background:#fef3c7;color:#b45309;padding:2px 8px;border-radius:10px;font-weight:600">제안없음</span>' : '';
-    // 셀러명 제거된 이름(있으면) vs 원본명
-    const dispName = item.display_name && item.display_name !== item.product_name
-      ? `${escHtml(item.display_name)} <small style="color:#9ca3af;text-decoration:line-through">${escHtml(item.product_name)}</small>`
-      : escHtml(item.product_name);
-
-    html += `<div class="suggest-card" data-key="${escHtml(item.product_key)}">
-      <div class="suggest-card-header">
-        <span class="plat-badge ${platClass(currentPlatform)}">${platLabel(currentPlatform)}</span>
-        <div class="plat-info">
-          <div class="plat-name">${dispName}${item.spec ? ' <small style="color:#9ca3af">'+escHtml(item.spec)+'</small>' : ''} ${noSugBadge}</div>
-          <div class="plat-meta">
-            <span>${sellerLabel}</span>
-            <span class="price-main">${saleDisp}</span>
-            <span class="price-net">실판매가 ${netDisp} <small>(${item.delivery_type}, 수수료 ${item.fee_pct}%+VAT)</small></span>
-          </div>
-        </div>
-        <div class="confidence">
-          <div class="conf-score ${scoreClass}">${item.has_suggestions ? score.toFixed(0)+'점' : '-'}</div>
-          <div style="font-size:11px;color:#9ca3af">신뢰도</div>
-        </div>
-        <button class="btn-map-open" onclick="openMappingModal(this.closest('.suggest-card').dataset.key)">매핑하기 →</button>
-        <button class="btn-improve-flag" data-flag-key="${escHtml(item.product_key)}" onclick="toggleImproveFlag(this.closest('.suggest-card').dataset.key, this)" title="AI 제안이 틀린 경우 클릭 — 매핑 확정 시 피드백 저장">⚠️ 개선필요</button>
-      </div>
-      <div class="suggest-card-body">`;
-
-    if (item.has_suggestions) {
-      item.suggestions.forEach((s, si) => {
-        const barPct = Math.round(s.score);
-        const barColor = s.score>=80?'#059669':s.score>=50?'#d97706':'#9ca3af';
-        const saleV  = s.our_sale_price ? s.our_sale_price.toLocaleString()+'원' : '-';
-        const buyV   = s.buy_price      ? s.buy_price.toLocaleString()+'원'      : '-';
-        const salesV = s.prev_sales_amt > 0 ? Math.round(s.prev_sales_amt/10000)+'만원' : '-';
-        html += `<div class="sug-item" data-pkey="${escHtml(item.product_key)}" data-si="${si}" onclick="selectSuggest(this.dataset.pkey, +this.dataset.si)" id="sug-${escHtml(item.product_key)}-${si}">
-          <span class="sug-rank">#${si+1}</span>
-          <div class="sug-code">${escHtml(s.our_product_code)}</div>
-          <div class="sug-name">${escHtml(s.product_name)}</div>
-          <div class="sug-prices">
-            <span><span class="lbl">공급가</span> <span class="val sale">${saleV}</span></span>
-            <span><span class="lbl">구매가</span> <span class="val">${buyV}</span></span>
-            <span><span class="lbl">전월매출</span> <span class="val">${salesV}</span></span>
-          </div>
-          <div class="sug-score-bar"><div class="sug-score-fill" style="width:${barPct}%;background:${barColor}"></div></div>
-        </div>`;
-      });
-    } else {
-      html += `<div style="padding:12px;color:#9ca3af;font-size:13px">유사한 우리 상품을 찾지 못했습니다. 매핑하기 버튼에서 직접 선택할 수 있습니다.</div>`;
-    }
-
-    html += `</div></div>`;
-  });
-  html += '</div>';
-  if (noSug > 0) html += `<div style="padding:8px 24px 20px;font-size:12px;color:#9ca3af">※ 제안없음 ${noSug}개는 유사도가 낮은 항목으로, 팝업에서 직접 우리 상품을 선택해 매핑할 수 있습니다.</div>`;
-  document.getElementById('wsContent').innerHTML = html;
+  // 첫 PAGE_SIZE개 렌더
+  loadMoreSuggest();
 }
 
 // 우리 상품 교체 패널 열기/닫기
