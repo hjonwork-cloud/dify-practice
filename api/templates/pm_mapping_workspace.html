@@ -621,6 +621,12 @@ async function runAISuggest() {
 
     suggestItems = d.items || [];
     renderResultPanel(suggestItems, d.total_unmapped || 0);
+    if (d.warning) {
+      const warnDiv = document.createElement('div');
+      warnDiv.style.cssText = 'background:#fffbeb;border:1px solid #f59e0b;border-radius:8px;padding:10px 14px;margin:8px 0;font-size:13px;color:#92400e';
+      warnDiv.textContent = '⚠️ ' + d.warning;
+      document.getElementById('wsContent').prepend(warnDiv);
+    }
     setFilter('all');
   } catch(e) {
     document.getElementById('wsContent').innerHTML = `<div class="ws-empty" style="color:#ef4444">오류 발생: ${e.message}</div>`;

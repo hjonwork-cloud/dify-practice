@@ -2725,11 +2725,26 @@ async def api_mapping_ai_suggest(
                 data["status"] = "done"
                 _job_store[job_id].update(data)
             except _cf.TimeoutError:
-                _job_store[job_id].update({
-                    "status": "error",
-                    "error": "분석 제한시간(8분) 초과 — Databricks 웨어하우스가 응답하지 않습니다. 잠시 후 다시 시도해 주세요.",
-                    "traceback": ""
-                })
+                # 중간 결과가 있으면 done으로 반환, 없으면 에러
+                _partial = _job_store[job_id].get("_partial_items", [])
+                _ptotal  = _job_store[job_id].get("_partial_total", 0)
+                if _partial:
+                    _partial.sort(
+                        key=lambda x: x["suggestions"][0]["score"] if x["suggestions"] else -1,
+                        reverse=True
+                    )
+                    _job_store[job_id].update({
+                        "status":        "done",
+                        "items":         _partial[:1000],
+                        "total_unmapped": _ptotal,
+                        "warning":       f"⏱ 시간 제한으로 {len(_partial)}건만 분석됨 (전체 {_ptotal}건 중) — 다시 분석 시 전체 결과 확인 가능"
+                    })
+                else:
+                    _job_store[job_id].update({
+                        "status": "error",
+                        "error":  "분석 제한시간(8분) 초과 — Databricks 웨어하우스가 응답하지 않습니다. 잠시 후 다시 시도해 주세요.",
+                        "traceback": ""
+                    })
             except Exception as _e:
                 import traceback as _tb
                 _job_store[job_id].update({"status": "error", "error": str(_e),
@@ -2913,7 +2928,10 @@ def _do_ai_suggest(request, platform, seller_name, plant, limit, _job_id=None):
                 "suggestions":    top3,
                 "has_suggestions": len(top3) > 0,
             })
-    except Exception as e:
+            # 50개마다 중간 결과 저장 — 타임아웃 시 부분 결과 반환용
+            if _job_id and _job_id in _job_store and len(items) % 50 == 0:
+                _job_store[_job_id]["_partial_items"] = list(items)
+                _job_store[_job_id]["_partial_total"] = len(unmapped)
         import traceback as _tb
         return JSONResponse({"items": items, "total_unmapped": len(unmapped),
                              "error": str(e), "traceback": _tb.format_exc()[-3000:]})
