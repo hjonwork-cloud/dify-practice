@@ -609,7 +609,9 @@ async function runAISuggest() {
       const prog = d.progress || 0;
       const total = d.total_unmapped || '?';
       const waitMsg = attempt < 30 ? ' (Databricks 연결 중...)' : '';
-      showLoading(`AI 유사도 분석 중... (${prog} / ${total})${waitMsg}`);
+      const ips = d.items_per_sec ? ` | ${d.items_per_sec}건/초` : '';
+      const eta = d.eta_sec ? ` | 남은시간 약 ${d.eta_sec}초` : '';
+      showLoading(`AI 유사도 분석 중... (${prog} / ${total})${ips}${eta}${waitMsg}`);
     }
 
     if (!d || d.status !== 'done') {

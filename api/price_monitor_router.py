@@ -2857,6 +2857,7 @@ def _do_ai_suggest(request, platform, seller_name, plant, limit, _job_id=None):
     scan_count = min(len(unmapped), limit)  # limit개만 스캔
     _score_lock = threading.Lock()
     _progress_counter = [0]  # 스레드 안전 카운터 (list로 mutable 참조)
+    _score_start = _t.time()  # 스코어링 시작 시각
 
     def _score_one(row):
         """row 1개 스코어링 — 스레드 안전, 순수 계산만 수행."""
@@ -2943,11 +2944,18 @@ def _do_ai_suggest(request, platform, seller_name, plant, limit, _job_id=None):
                     done_cnt = _progress_counter[0]
                     if _job_id and _job_id in _job_store:
                         _job_store[_job_id]["progress"] = done_cnt
-                    # 50개마다 중간 결과 저장 (완료된 것만, None 제외)
+                    # 50개마다 중간 결과 저장 + 속도 측정
                     if done_cnt % 50 == 0 and _job_id and _job_id in _job_store:
                         _partial = [r for r in batch_results if r is not None]
+                        _elapsed = _t.time() - _score_start
+                        _ips = done_cnt / _elapsed if _elapsed > 0 else 0
+                        _eta = (scan_count - done_cnt) / _ips if _ips > 0 else 0
                         _job_store[_job_id]["_partial_items"] = _partial
                         _job_store[_job_id]["_partial_total"] = len(unmapped)
+                        _job_store[_job_id]["elapsed_sec"] = round(_elapsed, 1)
+                        _job_store[_job_id]["items_per_sec"] = round(_ips, 2)
+                        _job_store[_job_id]["eta_sec"] = round(_eta)
+                        logger.info(f"[pm-ai][{_job_id}] scoring {done_cnt}/{scan_count} — {_ips:.1f}건/초, ETA {_eta:.0f}초")
         items = [r for r in batch_results if r is not None]
     except Exception as e:
         import traceback as _tb
