@@ -202,6 +202,10 @@ def _get_base_prices(plant: str) -> list[dict]:
         return []
 
 
+# ── 전월 매출 캐시 (메모리 1시간 / 디스크 24시간) ────────────────────────────
+_prev_sales_cache = {}
+
+
 def _get_prev_month_sales(plant: str) -> dict[tuple, dict]:
     """전월(1개월 전) 상품·플랜트별 매출액·수량 합계 반환 ((product_code, plant) → dict)"""
     cache_key = f"prev_sales_{plant}"
