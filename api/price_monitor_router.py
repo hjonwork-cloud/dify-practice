@@ -2932,6 +2932,7 @@ def _do_ai_suggest(request, platform, seller_name, plant, limit, _job_id=None):
             if _job_id and _job_id in _job_store and len(items) % 50 == 0:
                 _job_store[_job_id]["_partial_items"] = list(items)
                 _job_store[_job_id]["_partial_total"] = len(unmapped)
+    except Exception as e:
         import traceback as _tb
         return JSONResponse({"items": items, "total_unmapped": len(unmapped),
                              "error": str(e), "traceback": _tb.format_exc()[-3000:]})
