@@ -279,19 +279,42 @@ _PLAT_ROWS_TTL = 600  # 10분
 
 
 def _get_plat_rows(platform: str, seller_name: str) -> list[dict]:
-    """플랫폼 SKU 목록 조회 (10분 캐시). warmup에서 미리 채워 분석 시 Databricks 콜드스타트 방지."""
+    """플랫폼 SKU 목록 조회 (10분 캐시).
+    특정 셀러 요청 시 __ALL__ 캐시에서 필터링 우선 → Databricks 추가 조회 없음.
+    warmup은 __ALL__만 채우면 모든 셀러 요청을 커버.
+    """
     cache_key = f"plat_{platform}_{seller_name}"
-    # 1) 메모리
+    all_sellers = (seller_name == "__ALL__")
+
+    # 1) 메모리 캐시
     entry = _plat_rows_cache.get(cache_key)
     if entry and time.time() - entry[0] < _PLAT_ROWS_TTL:
         return entry[1]
-    # 2) 디스크 (1시간)
+
+    # 2) 디스크 캐시
     disk = _disk_get(cache_key)
     if disk and time.time() - disk[0] < 3600:
         _plat_rows_cache[cache_key] = disk
         return disk[1]
 
-    all_sellers = (seller_name == "__ALL__")
+    # 3) 특정 셀러 요청 시 __ALL__ 캐시에서 필터링 (Databricks 조회 없이)
+    if not all_sellers:
+        all_key = f"plat_{platform}___ALL__"
+        all_entry = _plat_rows_cache.get(all_key)
+        if not all_entry:
+            all_disk = _disk_get(all_key)
+            if all_disk and time.time() - all_disk[0] < 3600:
+                all_entry = all_disk
+        if all_entry:
+            rows = [r for r in all_entry[1]
+                    if r.get("platform_seller_name") == seller_name]
+            ts = time.time()
+            _plat_rows_cache[cache_key] = (ts, rows)
+            _disk_set(cache_key, ts, rows)
+            logger.info(f"[pm-ai] plat_rows {platform}/{seller_name} → __ALL__ 필터링 {len(rows)}개")
+            return rows
+
+    # 4) Databricks 직접 조회 (캐시 없을 때만)
     safe_seller = seller_name.replace("'", "''")
     try:
         if all_sellers:
