@@ -2707,7 +2707,7 @@ async def api_mapping_ai_suggest(
     seller_name: str = "",
     seller_id: str = "",
     plant: str = "ALL",
-    limit: int = 1000,
+    limit: int = 10000,
 ):
     _require_pm_access(request)
     import uuid as _uuid
@@ -2739,7 +2739,7 @@ async def api_mapping_ai_suggest(
                     )
                     _job_store[job_id].update({
                         "status":        "done",
-                        "items":         _partial[:1000],
+                        "items":         _partial[:10000],
                         "total_unmapped": _ptotal,
                         "warning":       f"⏱ 시간 제한으로 {len(_partial)}건만 분석됨 (전체 {_ptotal}건 중) — 다시 분석 시 전체 결과 확인 가능"
                     })
