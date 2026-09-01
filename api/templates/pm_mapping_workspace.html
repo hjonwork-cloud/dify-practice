@@ -343,10 +343,10 @@
 
 <script>
 // ══ 상태 ══
-let currentPlatform = '{{ platform }}';
-let currentSeller   = '{{ seller_name }}';
-let currentSellerId = '{{ seller_id }}';
-let currentPlant    = '{{ plant }}';
+let currentPlatform = {{ platform | tojson }};
+let currentSeller   = {{ seller_name | tojson }};
+let currentSellerId = {{ seller_id | tojson }};
+let currentPlant    = {{ plant | tojson }};
 let suggestItems    = [];
 let filteredItems   = [];
 let currentFilter   = 'all';
