@@ -1094,12 +1094,18 @@ async def api_platform_products(
     rows = []
     try:
         like_clause = _build_like_clause(keyword, 'p.product_name')
+        plat_filter = f"AND p.platform = '{platform}'" if platform else ""
         rows = _q(f"""
             SELECT p.*
             FROM {T_SILVER} p
-            CROSS JOIN (SELECT MAX(crawl_date) AS max_date FROM {T_SILVER}) latest
-            WHERE ({like_clause}) AND p.crawl_date = latest.max_date
-            ORDER BY platform, platform_seller_name, price_sale
+            INNER JOIN (
+                SELECT platform, MAX(crawl_date) AS max_date
+                FROM {T_SILVER}
+                {("WHERE platform = '" + platform + "'") if platform else ""}
+                GROUP BY platform
+            ) latest ON p.platform = latest.platform AND p.crawl_date = latest.max_date
+            WHERE ({like_clause}) {plat_filter}
+            ORDER BY p.platform, p.platform_seller_name, p.price_sale
             LIMIT 500
         """) or []
     except Exception as e:
