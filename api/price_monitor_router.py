@@ -301,8 +301,15 @@ def _get_plat_rows(platform: str, seller_name: str) -> list[dict]:
     """플랫폼 SKU 목록 조회 (10분 캐시).
     특정 셀러 요청 시 __ALL__ 캐시에서 필터링 우선 → Databricks 추가 조회 없음.
     warmup은 __ALL__만 채우면 모든 셀러 요청을 커버.
+
+    ※ 캐시 키에 버전 접두사(v2)를 둔다. 과거 __ALL__ 쿼리의 LIMIT 5000 절삭으로
+      인해 일부 셀러(예: 배민상회 현대그린푸드)에 대해 빈 리스트가 디스크 캐시
+      (Azure /home, 배포/재시작 후에도 유지됨)에 영구 저장된 적이 있었다.
+      LIMIT을 제거한 뒤에도 이 오염된 디스크 캐시 파일이 TTL 이내라면 그대로
+      재사용되어 버그가 재현되므로, 키 네임스페이스를 바꿔 과거 캐시를 전부
+      무효화한다.
     """
-    cache_key = f"plat_{platform}_{seller_name}"
+    cache_key = f"platv2_{platform}_{seller_name}"
     all_sellers = (seller_name == "__ALL__")
 
     # 1) 메모리 캐시
@@ -320,7 +327,7 @@ def _get_plat_rows(platform: str, seller_name: str) -> list[dict]:
     #    ※ __ALL__ 캐시도 TTL을 반드시 확인한다. 이전에는 메모리 캐시를 무기한
     #      재사용해 과거의 LIMIT 절삭 결과가 영구히 재사용되는 문제가 있었다.
     if not all_sellers:
-        all_key = f"plat_{platform}___ALL__"
+        all_key = f"platv2_{platform}___ALL__"
         all_entry = _plat_rows_cache.get(all_key)
         if all_entry and time.time() - all_entry[0] >= _PLAT_ROWS_TTL:
             all_entry = None
@@ -331,11 +338,18 @@ def _get_plat_rows(platform: str, seller_name: str) -> list[dict]:
         if all_entry:
             rows = [r for r in all_entry[1]
                     if r.get("platform_seller_name") == seller_name]
-            ts = time.time()
-            _plat_rows_cache[cache_key] = (ts, rows)
-            _disk_set(cache_key, ts, rows)
-            logger.info(f"[pm-ai] plat_rows {platform}/{seller_name} → __ALL__ 필터링 {len(rows)}개")
-            return rows
+            # ※ 빈 결과는 캐시에 절대 저장하지 않는다. __ALL__ 캐시가 아직
+            #   완전히 채워지지 않았거나 일시적 문제로 특정 셀러가 0건으로
+            #   필터링되는 경우, 이를 그대로 캐싱하면 TTL 동안 계속 빈 결과가
+            #   재사용되는 "미매핑 상품 없음" 오탐이 재발할 수 있다.
+            if rows:
+                ts = time.time()
+                _plat_rows_cache[cache_key] = (ts, rows)
+                _disk_set(cache_key, ts, rows)
+                logger.info(f"[pm-ai] plat_rows {platform}/{seller_name} → __ALL__ 필터링 {len(rows)}개")
+                return rows
+            logger.warning(f"[pm-ai] plat_rows {platform}/{seller_name} → __ALL__ 필터링 결과 0건, "
+                            f"직접 조회로 폴백 (캐시 저장 안 함)")
 
     # 4) Databricks 직접 조회 (캐시 없을 때만)
     safe_seller = seller_name.replace("'", "''")
@@ -375,8 +389,11 @@ def _get_plat_rows(platform: str, seller_name: str) -> list[dict]:
                 WHERE p.platform = '{platform}' AND p.platform_seller_name = '{safe_seller}'
                 ORDER BY p.product_name
             """) or []
-        _plat_rows_cache[cache_key] = (time.time(), rows)
-        _disk_set(cache_key, time.time(), rows)
+        # ※ 빈 결과는 캐시하지 않는다 (일시적 조회 실패/데이터 지연으로 인한
+        #   0건이 TTL 동안 고착되어 "미매핑 상품 없음" 오탐을 유발하지 않도록).
+        if rows:
+            _plat_rows_cache[cache_key] = (time.time(), rows)
+            _disk_set(cache_key, time.time(), rows)
         return rows
     except Exception as e:
         logger.warning(f"[pm-ai] plat_rows 조회 실패 ({platform}/{seller_name}): {e}")
