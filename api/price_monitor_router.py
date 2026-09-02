@@ -317,9 +317,13 @@ def _get_plat_rows(platform: str, seller_name: str) -> list[dict]:
         return disk[1]
 
     # 3) 특정 셀러 요청 시 __ALL__ 캐시에서 필터링 (Databricks 조회 없이)
+    #    ※ __ALL__ 캐시도 TTL을 반드시 확인한다. 이전에는 메모리 캐시를 무기한
+    #      재사용해 과거의 LIMIT 절삭 결과가 영구히 재사용되는 문제가 있었다.
     if not all_sellers:
         all_key = f"plat_{platform}___ALL__"
         all_entry = _plat_rows_cache.get(all_key)
+        if all_entry and time.time() - all_entry[0] >= _PLAT_ROWS_TTL:
+            all_entry = None
         if not all_entry:
             all_disk = _disk_get(all_key)
             if all_disk and time.time() - all_disk[0] < 3600:
@@ -337,6 +341,11 @@ def _get_plat_rows(platform: str, seller_name: str) -> list[dict]:
     safe_seller = seller_name.replace("'", "''")
     try:
         if all_sellers:
+            # ※ LIMIT을 두지 않는다. 과거 LIMIT 5000이 있었는데, 셀러별 필터링에도
+            #   이 결과가 재사용되다 보니 상품명 정렬 순서상 뒤쪽에 위치한 셀러
+            #   (예: 배민상회 '현대그린푸드' 2,095건은 5,638~7,732번째라 통째로 잘림)
+            #   전체가 누락되어 "미매핑 상품 없음"으로 오표시되는 버그가 있었다.
+            #   (baemin 전체=12,024건, foodspring 전체=86,493건으로 5000 훨씬 초과)
             rows = _q(f"""
                 SELECT p.product_key, p.product_name, p.spec,
                        p.price_sale, p.price_original, p.delivery_type,
@@ -351,7 +360,6 @@ def _get_plat_rows(platform: str, seller_name: str) -> list[dict]:
                       AND p.crawl_date = md.max_date
                 WHERE p.platform = '{platform}'
                 ORDER BY p.product_name
-                LIMIT 5000
             """) or []
         else:
             rows = _q(f"""
