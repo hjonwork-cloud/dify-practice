@@ -1,0 +1,185 @@
+{% extends "portal_base.html" %}
+{% block title %}AI 코드매핑{% endblock %}
+
+{% block content %}
+<style>
+.aid-wrap{max-width:900px;margin:0 auto;}
+.aid-head{margin-bottom:1.1rem;}
+.aid-head h2{font-size:1.3rem;font-weight:800;color:#0f172a;margin:0 0 .25rem;}
+.aid-head p{color:#64748b;font-size:.86rem;margin:0;}
+.aid-form{background:#fff;border-radius:12px;padding:1.2rem 1.4rem;box-shadow:0 1px 4px rgba(0,0,0,.07);margin-bottom:1.1rem;}
+.aid-form .row{display:flex;gap:.7rem;flex-wrap:wrap;margin-bottom:.7rem;}
+.aid-form label{display:block;font-size:.76rem;font-weight:700;color:#64748b;margin-bottom:.3rem;}
+.aid-form input,.aid-form select{width:100%;border:1.5px solid #cbd5e1;border-radius:8px;padding:.55rem .8rem;font-size:.88rem;outline:none;font-family:inherit;}
+.aid-form input:focus{border-color:#4f46e5;}
+.aid-form .f1{flex:2;min-width:220px;} .aid-form .f2{flex:1;min-width:150px;}
+.aid-required{color:#ef4444;}
+.aid-btn{background:#4f46e5;color:#fff;border:none;border-radius:8px;padding:.6rem 1.6rem;font-weight:700;font-size:.88rem;cursor:pointer;}
+.aid-btn:hover{opacity:.88;} .aid-btn:disabled{background:#9ca3af;cursor:not-allowed;}
+.aid-hint{font-size:.76rem;color:#94a3b8;margin-top:.4rem;}
+.aid-loading{text-align:center;padding:2.5rem;color:#94a3b8;}
+.spinner{display:inline-block;width:32px;height:32px;border:4px solid #e5e7eb;border-top-color:#4f46e5;border-radius:50%;animation:spin .7s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg);}}
+.aid-results{display:none;}
+.aid-empty{text-align:center;padding:2.5rem;color:#94a3b8;background:#fff;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,.07);}
+.sug-card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:1rem 1.2rem;margin-bottom:.7rem;display:flex;gap:1rem;align-items:center;}
+.sug-rank{font-size:1.3rem;font-weight:900;color:#c7c7d1;min-width:28px;}
+.sug-body{flex:1;min-width:0;}
+.sug-code{font-size:.72rem;color:#94a3b8;font-family:monospace;}
+.sug-name{font-size:.95rem;font-weight:700;color:#0f172a;margin:.15rem 0;}
+.sug-meta{font-size:.78rem;color:#64748b;}
+.sug-conf{text-align:right;min-width:90px;}
+.conf-score{font-size:1.5rem;font-weight:900;}
+.conf-score.high{color:#059669;} .conf-score.mid{color:#d97706;} .conf-score.low{color:#9ca3af;}
+.conf-label{font-size:.72rem;color:#94a3b8;font-weight:700;}
+.aid-feedback{background:#fff;border-radius:12px;padding:1.1rem 1.3rem;box-shadow:0 1px 4px rgba(0,0,0,.07);margin-top:.6rem;}
+.aid-feedback .q{font-size:.88rem;font-weight:700;color:#1e293b;margin-bottom:.6rem;}
+.fb-btns{display:flex;gap:.6rem;}
+.fb-btn{border:1.5px solid #e5e7eb;background:#fff;border-radius:8px;padding:.5rem 1.2rem;font-size:1.1rem;cursor:pointer;transition:all .12s;}
+.fb-btn:hover{background:#f8fafc;}
+.fb-btn.sel-up{background:#ecfdf5;border-color:#10b981;}
+.fb-btn.sel-down{background:#fef2f2;border-color:#ef4444;}
+.fb-detail{margin-top:.8rem;display:none;}
+.fb-detail textarea{width:100%;border:1.5px solid #cbd5e1;border-radius:8px;padding:.6rem .8rem;font-size:.85rem;font-family:inherit;min-height:70px;resize:vertical;}
+.fb-detail .row{display:flex;gap:.6rem;margin-top:.5rem;flex-wrap:wrap;}
+.fb-detail input{flex:1;min-width:160px;border:1.5px solid #cbd5e1;border-radius:8px;padding:.5rem .7rem;font-size:.84rem;}
+.fb-submit{margin-top:.7rem;background:#4f46e5;color:#fff;border:none;border-radius:8px;padding:.5rem 1.3rem;font-weight:700;font-size:.84rem;cursor:pointer;}
+.fb-done{color:#059669;font-weight:700;font-size:.85rem;margin-top:.6rem;display:none;}
+</style>
+
+<div class="aid-wrap">
+  <div class="aid-head">
+    <h2>🤖 AI 코드매핑 (데모)</h2>
+    <p>매핑워크스페이스와 동일한 AI 채점 로직으로, 상품명 1건을 입력하면 우리 상품코드 후보 상위 3건을 신뢰도 점수와 함께 즉시 제안합니다.</p>
+  </div>
+
+  <div class="aid-form">
+    <div class="row">
+      <div class="f1">
+        <label>상품명 <span class="aid-required">*필수</span></label>
+        <input type="text" id="aidName" placeholder="예: 동원 양반김치찌개용 500g">
+      </div>
+      <div class="f2">
+        <label>규격/중량 (선택)</label>
+        <input type="text" id="aidSpec" placeholder="예: 500g, 1kg">
+      </div>
+      <div class="f2">
+        <label>대분류 (선택)</label>
+        <input type="text" id="aidCategory" placeholder="예: 김치, 소스류">
+      </div>
+    </div>
+    <button class="aid-btn" id="aidRunBtn" onclick="aidRun()">AI 제안 받기</button>
+    <div class="aid-hint">※ 데모 화면은 1회에 1건씩 실행됩니다. 결과가 나오면 👍/👎 피드백을 남겨주세요 — 관리자가 확인하여 알고리즘 개선에 활용합니다.</div>
+  </div>
+
+  <div class="aid-loading" id="aidLoading" style="display:none;"><div class="spinner"></div></div>
+
+  <div class="aid-results" id="aidResults"></div>
+  <div class="aid-empty" id="aidEmpty" style="display:none;">제안 가능한 후보를 찾지 못했습니다. 상품명을 조금 더 구체적으로 입력해보세요.</div>
+</div>
+
+<script>
+let aidLastPayload = null;
+let aidRating = '';
+
+function confClass(score){ if(score>=70) return 'high'; if(score>=40) return 'mid'; return 'low'; }
+
+async function aidRun(){
+  const name = document.getElementById('aidName').value.trim();
+  if(!name){ alert('상품명을 입력해주세요.'); return; }
+  const spec = document.getElementById('aidSpec').value.trim();
+  const category = document.getElementById('aidCategory').value.trim();
+
+  const btn = document.getElementById('aidRunBtn');
+  btn.disabled = true;
+  document.getElementById('aidResults').style.display = 'none';
+  document.getElementById('aidResults').innerHTML = '';
+  document.getElementById('aidEmpty').style.display = 'none';
+  document.getElementById('aidLoading').style.display = 'block';
+
+  try{
+    const res = await fetch('/portal/price-monitor/api/ai-demo/suggest', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({product_name: name, spec: spec, category: category, plant: 'ALL'})
+    });
+    const data = await res.json();
+    document.getElementById('aidLoading').style.display = 'none';
+    btn.disabled = false;
+
+    aidLastPayload = {product_name: name, spec: spec, category: category, suggestions: data.suggestions || []};
+    aidRating = '';
+
+    if(!data.suggestions || data.suggestions.length === 0){
+      document.getElementById('aidEmpty').style.display = 'block';
+      return;
+    }
+
+    const cards = data.suggestions.map((s, i) => `
+      <div class="sug-card">
+        <div class="sug-rank">${i+1}</div>
+        <div class="sug-body">
+          <div class="sug-code">${s.product_code}</div>
+          <div class="sug-name">${s.product_name || ''}</div>
+          <div class="sug-meta">${s.category || '-'} · ${s.brand || '-'} · ${s.unit || ''}</div>
+        </div>
+        <div class="sug-conf">
+          <div class="conf-score ${confClass(s.score)}">${s.score}</div>
+          <div class="conf-label">신뢰도 ${s.confidence}</div>
+        </div>
+      </div>`).join('');
+
+    const feedbackHtml = `
+      <div class="aid-feedback">
+        <div class="q">이 제안 결과가 도움이 되었나요?</div>
+        <div class="fb-btns">
+          <button class="fb-btn" id="fbUp" onclick="aidSetRating('up')">👍 도움됨</button>
+          <button class="fb-btn" id="fbDown" onclick="aidSetRating('down')">👎 아쉬워요</button>
+        </div>
+        <div class="fb-detail" id="fbDetail">
+          <textarea id="fbComment" placeholder="(선택) 어떤 점이 아쉬웠는지 알려주세요."></textarea>
+          <div class="row">
+            <input type="text" id="fbCode" placeholder="(선택) 정답 상품코드">
+            <input type="text" id="fbNameCorrect" placeholder="(선택) 정답 상품명">
+          </div>
+          <button class="fb-submit" onclick="aidSubmitFeedback()">피드백 제출</button>
+        </div>
+        <div class="fb-done" id="fbDone">피드백이 저장되었습니다. 감사합니다!</div>
+      </div>`;
+
+    document.getElementById('aidResults').innerHTML = cards + feedbackHtml;
+    document.getElementById('aidResults').style.display = 'block';
+  }catch(e){
+    document.getElementById('aidLoading').style.display = 'none';
+    btn.disabled = false;
+    alert('제안 조회 중 오류가 발생했습니다.');
+  }
+}
+
+function aidSetRating(r){
+  aidRating = r;
+  document.getElementById('fbUp').classList.toggle('sel-up', r==='up');
+  document.getElementById('fbDown').classList.toggle('sel-down', r==='down');
+  document.getElementById('fbDetail').style.display = (r==='down') ? 'block' : 'none';
+  if(r === 'up'){ aidSubmitFeedback(); }
+}
+
+async function aidSubmitFeedback(){
+  if(!aidLastPayload) return;
+  const body = Object.assign({}, aidLastPayload, {
+    rating: aidRating,
+    comment: document.getElementById('fbComment') ? document.getElementById('fbComment').value.trim() : '',
+    correct_product_code: document.getElementById('fbCode') ? document.getElementById('fbCode').value.trim() : '',
+    correct_product_name: document.getElementById('fbNameCorrect') ? document.getElementById('fbNameCorrect').value.trim() : '',
+  });
+  try{
+    await fetch('/portal/price-monitor/api/ai-demo/feedback', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(body)
+    });
+    document.getElementById('fbDone').style.display = 'block';
+  }catch(e){ /* 무시 */ }
+}
+</script>
+{% endblock %}

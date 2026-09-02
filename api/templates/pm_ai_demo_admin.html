@@ -1,0 +1,102 @@
+{% extends "portal_base.html" %}
+{% block title %}AI 코드매핑 피드백 관리{% endblock %}
+
+{% block content %}
+<style>
+.afb-wrap{max-width:1200px;margin:0 auto;}
+.afb-head{margin-bottom:1.1rem;}
+.afb-head h2{font-size:1.3rem;font-weight:800;color:#0f172a;margin:0 0 .25rem;}
+.afb-head p{color:#64748b;font-size:.86rem;margin:0;}
+.afb-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:.75rem;margin-bottom:1rem;}
+@media(max-width:760px){.afb-stats{grid-template-columns:repeat(2,1fr);}}
+.afb-stat{background:#fff;border-radius:12px;padding:1rem 1.2rem;box-shadow:0 1px 4px rgba(0,0,0,.07);border-top:3px solid transparent;}
+.afb-stat.c-total{border-color:#64748b;} .afb-stat.c-up{border-color:#10b981;} .afb-stat.c-down{border-color:#ef4444;} .afb-stat.c-none{border-color:#94a3b8;}
+.afb-stat .l{font-size:.7rem;color:#94a3b8;font-weight:700;text-transform:uppercase;}
+.afb-stat .v{font-size:1.5rem;font-weight:900;margin-top:.2rem;}
+.afb-filter{display:flex;gap:.5rem;margin-bottom:.9rem;}
+.afb-filter button{border:1.5px solid #e2e8f0;background:#fff;border-radius:8px;padding:.4rem 1rem;font-size:.82rem;font-weight:600;cursor:pointer;color:#64748b;}
+.afb-filter button.active{background:#1677ff;border-color:#1677ff;color:#fff;}
+.afb-table-card{background:#fff;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,.07);overflow:hidden;}
+.afb-table{width:100%;border-collapse:collapse;font-size:.82rem;}
+.afb-table th{background:#f8fafc;padding:.55rem .8rem;text-align:left;font-weight:700;color:#64748b;font-size:.7rem;text-transform:uppercase;white-space:nowrap;}
+.afb-table td{padding:.55rem .8rem;border-top:1px solid #f1f5f9;vertical-align:top;}
+.rate-up{color:#059669;font-weight:700;} .rate-down{color:#dc2626;font-weight:700;} .rate-none{color:#94a3b8;}
+.top1{font-size:.78rem;color:#475569;}
+.afb-empty{text-align:center;padding:2.5rem;color:#94a3b8;}
+</style>
+
+<div class="afb-wrap">
+  <div class="afb-head">
+    <h2>🛠️ AI 코드매핑 데모 피드백 관리</h2>
+    <p>영업담당자가 AI 코드매핑 데모에서 남긴 피드백을 확인하고 알고리즘 개선에 활용합니다.</p>
+  </div>
+
+  <div class="afb-stats" id="afbStats">
+    <div class="afb-stat c-total"><div class="l">전체</div><div class="v" id="stTotal">-</div></div>
+    <div class="afb-stat c-up"><div class="l">👍 긍정</div><div class="v" id="stUp">-</div></div>
+    <div class="afb-stat c-down"><div class="l">👎 부정</div><div class="v" id="stDown">-</div></div>
+    <div class="afb-stat c-none"><div class="l">미평가</div><div class="v" id="stNone">-</div></div>
+  </div>
+
+  <div class="afb-filter">
+    <button class="active" onclick="afbLoad('', this)">전체</button>
+    <button onclick="afbLoad('up', this)">👍 긍정</button>
+    <button onclick="afbLoad('down', this)">👎 부정</button>
+  </div>
+
+  <div class="afb-table-card">
+    <table class="afb-table">
+      <thead><tr>
+        <th>일시</th><th>담당자</th><th>입력 상품명</th><th>1위 제안</th>
+        <th>평가</th><th>코멘트</th><th>제보한 정답코드/명</th>
+      </tr></thead>
+      <tbody id="afbBody"></tbody>
+    </table>
+    <div class="afb-empty" id="afbEmpty" style="display:none;">피드백 데이터가 없습니다.</div>
+  </div>
+</div>
+
+<script>
+async function afbLoad(rating, btn){
+  document.querySelectorAll('.afb-filter button').forEach(b => b.classList.remove('active'));
+  if(btn) btn.classList.add('active');
+  try{
+    const res = await fetch(`/portal/price-monitor/api/ai-demo/feedback-list?rating=${rating||''}`);
+    const data = await res.json();
+    const s = data.stats || {};
+    document.getElementById('stTotal').textContent = s.total ?? 0;
+    document.getElementById('stUp').textContent = s.up ?? 0;
+    document.getElementById('stDown').textContent = s.down ?? 0;
+    document.getElementById('stNone').textContent = s.none ?? 0;
+
+    const body = document.getElementById('afbBody');
+    if(!data.items || data.items.length === 0){
+      body.innerHTML = '';
+      document.getElementById('afbEmpty').style.display = 'block';
+      return;
+    }
+    document.getElementById('afbEmpty').style.display = 'none';
+    body.innerHTML = data.items.map(it => {
+      const top1 = (it.suggestions && it.suggestions[0]) ? `${it.suggestions[0].product_name||''} (${it.suggestions[0].product_code||''}, ${it.suggestions[0].score})` : '-';
+      const rateHtml = it.rating === 'up' ? '<span class="rate-up">👍 긍정</span>'
+                      : it.rating === 'down' ? '<span class="rate-down">👎 부정</span>'
+                      : '<span class="rate-none">미평가</span>';
+      const correct = (it.correct_product_code || it.correct_product_name)
+        ? `${it.correct_product_code||''} ${it.correct_product_name||''}` : '-';
+      return `<tr>
+        <td>${it.created_at||''}</td>
+        <td>${it.emp_name||''} (${it.team||''})</td>
+        <td>${it.input_product_name||''}${it.input_spec ? ' / '+it.input_spec : ''}</td>
+        <td class="top1">${top1}</td>
+        <td>${rateHtml}</td>
+        <td>${it.comment||'-'}</td>
+        <td>${correct}</td>
+      </tr>`;
+    }).join('');
+  }catch(e){
+    document.getElementById('afbEmpty').style.display = 'block';
+  }
+}
+afbLoad('', null);
+</script>
+{% endblock %}

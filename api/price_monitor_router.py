@@ -67,6 +67,25 @@ def _require_pm_access(request: Request) -> dict:
     return session
 
 
+def _require_login(request: Request) -> dict:
+    """전체 계정 공용 접근 헬퍼: 로그인 여부만 확인 (역할/베타 제한 없음).
+    상품 조회/GP 요약, AI 코드매핑 데모 등 전 직원 대상 기능에 사용."""
+    session = _get_session(request)
+    if not session:
+        raise HTTPException(status_code=401, detail="로그인이 필요합니다.")
+    return session
+
+
+def _require_admin(request: Request) -> dict:
+    """관리자 전용 접근 헬퍼 (emp_code 화이트리스트가 아닌 is_admin 플래그 기준)."""
+    session = _get_session(request)
+    if not session:
+        raise HTTPException(status_code=401, detail="로그인이 필요합니다.")
+    if not session.get("is_admin"):
+        raise HTTPException(status_code=403, detail="관리자만 접근 가능합니다.")
+    return session
+
+
 def _render(request: Request, template_name: str, **ctx) -> HTMLResponse:
     session = _get_session(request)
     tpl = _jinja_env.get_template(template_name)
@@ -1441,6 +1460,208 @@ async def pm_detail(
                    gp_alert_pct=GP_ALERT_PCT,
                    gp_warn_pct=GP_WARN_PCT,
                    plant=plant, plants=PLANTS)
+
+
+# ── 화면: 상품 가격/GP 요약 조회 (전체 계정 공용) ──────────────────────────
+# "범용상품 제안 솔루션" 하위 메뉴 — 담당자가 직접 상품코드/상품명으로
+# 검색해 매출순 목록을 보고, 상품 하나를 골라 가격모니터링 상세 페이지의
+# 핵심 정보(당사 판매가/구매가/GP, 플랫폼 최저/평균/최고가, 추이, 셀러별 현황)를
+# 요약된 형태로 확인할 수 있는 전체 계정 공용 화면.
+
+@router.get("/gp-lookup", response_class=HTMLResponse)
+async def pm_gp_lookup_page(request: Request, plant: str = "ALL"):
+    _require_login(request)
+    if plant not in PLANTS:
+        plant = "ALL"
+    return _render(request, "pm_gp_lookup.html", plant=plant, plants=PLANTS, PLANT_LABELS=PLANT_LABELS)
+
+
+@router.get("/api/gp-lookup/search")
+async def api_gp_lookup_search(request: Request, keyword: str = "", plant: str = "ALL"):
+    """상품코드/상품명으로 검색 → 전월 매출액 기준 내림차순 목록 (최대 50건)."""
+    _require_login(request)
+    if plant not in PLANTS:
+        plant = "ALL"
+    keyword = (keyword or "").strip()
+    our_products = _get_our_products(plant)
+    prev_sales = _get_prev_month_sales_totals(plant)
+
+    if keyword:
+        kw_low = keyword.lower()
+        matched = [
+            p for p in our_products
+            if kw_low in (p.get("product_code") or "").lower()
+            or kw_low in (p.get("product_name") or "").lower()
+        ]
+    else:
+        matched = list(our_products)
+
+    results = []
+    for p in matched:
+        code = p.get("product_code")
+        sales = prev_sales.get(code, {})
+        results.append({
+            "product_code":    code,
+            "product_name":    p.get("product_name"),
+            "brand":           p.get("brand"),
+            "category":        p.get("category"),
+            "unit":            p.get("unit"),
+            "prev_sales_amt":  sales.get("prev_sales_amt") or 0,
+            "prev_sales_qty":  sales.get("prev_sales_qty") or 0,
+        })
+    results.sort(key=lambda r: r["prev_sales_amt"], reverse=True)
+    return JSONResponse({"items": results[:50], "total_matched": len(results)})
+
+
+@router.get("/api/gp-lookup/detail/{product_code}")
+async def api_gp_lookup_detail(request: Request, product_code: str, plant: str = "ALL"):
+    """상품 1건에 대한 가격/GP 요약 데이터 (JSON).
+    pm_detail 화면 계산 로직을 재사용해 요약형으로 반환."""
+    _require_login(request)
+    if plant not in PLANTS:
+        plant = "ALL"
+
+    price_rows = _get_base_prices(plant)
+    price_map  = {r["product_code"]: r for r in price_rows}
+    price_info = price_map.get(product_code, {})
+    buy_price  = price_info.get("avg_buy_price")
+    our_sale   = price_info.get("avg_sale_price")
+
+    our_products = _get_our_products(plant)
+    product_info_meta = next((p for p in our_products if p["product_code"] == product_code), {})
+    tax_status = product_info_meta.get("tax_class", "과세") or "과세"
+
+    mappings     = portal_db.pm_list_mappings(product_code, plant)
+    product_keys = [m["product_key"] for m in mappings]
+
+    today_rows = []
+    history_rows = []
+    if product_keys:
+        keys_str = ", ".join(f"'{k}'" for k in product_keys)
+        try:
+            today_rows = _q(f"""
+                SELECT p.product_key, p.platform, p.platform_seller_name,
+                       p.product_name, p.spec,
+                       p.price_sale, p.price_original, p.discount_rate,
+                       p.delivery_type, p.is_free_delivery, p.crawl_date
+                FROM {T_SILVER} p
+                INNER JOIN (
+                    SELECT product_key, MAX(crawl_date) AS max_date
+                    FROM {T_SILVER}
+                    WHERE product_key IN ({keys_str})
+                    GROUP BY product_key
+                ) md ON p.product_key = md.product_key
+                       AND p.crawl_date = md.max_date
+                ORDER BY p.platform, p.platform_seller_name
+            """)
+            history_rows = _q(f"""
+                SELECT crawl_date, platform, platform_seller_name,
+                       MIN(price_sale) AS min_price,
+                       AVG(price_sale) AS avg_price,
+                       COUNT(*) AS cnt
+                FROM {T_SILVER}
+                WHERE product_key IN ({keys_str})
+                  AND crawl_date >= DATE_SUB(CURRENT_DATE(), 30)
+                  AND price_sale IS NOT NULL
+                GROUP BY crawl_date, platform, platform_seller_name
+                ORDER BY crawl_date, platform, platform_seller_name
+            """)
+        except Exception as e:
+            logger.exception(f"[gp-lookup] 조회 실패: {e}")
+
+    for row in today_rows:
+        _pf, _sn, _dt = row.get("platform", ""), row.get("platform_seller_name", ""), row.get("delivery_type", "직배송")
+        gp = _calc_gp(row.get("price_sale"), buy_price, _dt, _pf, _sn, tax_status)
+        row["gp_pct"]    = gp
+        row["gp_status"] = _gp_status(gp)
+        row["crawl_date"] = str(row.get("crawl_date", ""))
+        fee = _get_fee(_dt, _pf, _sn)
+        row["fee_pct"] = round(fee * 100, 1)
+        ps = row.get("price_sale")
+        row["net_price"] = round(ps * (1 - fee), 0) if ps else None
+
+    _seen, _deduped = set(), []
+    for row in today_rows:
+        key = (row.get("platform"), row.get("platform_seller_name"), row.get("spec"), row.get("price_sale"))
+        if key not in _seen:
+            _seen.add(key)
+            _deduped.append(row)
+    today_rows = _deduped
+
+    prices = [r["price_sale"] for r in today_rows if r.get("price_sale")]
+    market_min = min(prices) if prices else None
+    market_max = max(prices) if prices else None
+    market_avg = round(sum(prices) / len(prices)) if prices else None
+    market_min_gp = _calc_gp(market_min, buy_price, "직배송", tax_status=tax_status) if market_min else None
+    market_max_gp = _calc_gp(market_max, buy_price, "직배송", tax_status=tax_status) if market_max else None
+    market_avg_gp = _calc_gp(market_avg, buy_price, "직배송", tax_status=tax_status) if market_avg else None
+
+    our_gp_pct = None
+    if our_sale and buy_price and our_sale > 0:
+        try:
+            our_gp_pct = round((our_sale - buy_price) / our_sale * 100, 1)
+        except Exception:
+            our_gp_pct = None
+
+    # 최저/최고가 셀러 식별
+    min_seller = next((f"{'배민' if r['platform']=='baemin' else '식봄'} {r['platform_seller_name']}"
+                        for r in today_rows if r.get("price_sale") == market_min), None) if market_min else None
+    max_seller = next((f"{'배민' if r['platform']=='baemin' else '식봄'} {r['platform_seller_name']}"
+                        for r in today_rows if r.get("price_sale") == market_max), None) if market_max else None
+
+    import json as _json
+    chart_dates = sorted({str(r["crawl_date"]) for r in history_rows})
+    _pf_colors = {
+        "baemin":     {"최저": "#1d4ed8", "평균": "#3b82f6", "최고": "#93c5fd"},
+        "foodspring": {"최저": "#065f46", "평균": "#10b981", "최고": "#6ee7b7"},
+    }
+    from collections import defaultdict as _defaultdict
+    chart_datasets = []
+    for pf_key in ["baemin", "foodspring"]:
+        pf_label = "배민상회" if pf_key == "baemin" else "식봄"
+        pf_rows  = [r for r in history_rows if r["platform"] == pf_key]
+        if not pf_rows:
+            continue
+        _by_date = _defaultdict(list)
+        for r in pf_rows:
+            if r["min_price"] is not None:
+                _by_date[str(r["crawl_date"])].append(float(r["min_price"]))
+        for stat, fn, dash in [("최저", min, None), ("평균", lambda v: sum(v) / len(v), [5, 3]), ("최고", max, [2, 2])]:
+            data = [round(fn(_by_date[d]), 0) if _by_date.get(d) else None for d in chart_dates]
+            ds = {"label": f"{pf_label} {stat}", "data": data,
+                  "borderColor": _pf_colors[pf_key][stat], "backgroundColor": "transparent",
+                  "tension": 0.3, "spanGaps": True}
+            if dash:
+                ds["borderDash"] = dash
+            chart_datasets.append(ds)
+    if our_sale:
+        chart_datasets.append({"label": "당사 판매단가", "data": [our_sale] * len(chart_dates),
+                                "borderColor": "#0f172a", "borderDash": [6, 3],
+                                "backgroundColor": "transparent", "pointRadius": 0, "tension": 0})
+
+    return JSONResponse({
+        "product_code":  product_code,
+        "product_name":  product_info_meta.get("product_name", product_code),
+        "category":      product_info_meta.get("category"),
+        "unit":          product_info_meta.get("unit"),
+        "our_sale_price": our_sale,
+        "buy_price":      buy_price,
+        "our_gp_pct":     our_gp_pct,
+        "market_min":     market_min,
+        "market_avg":     market_avg,
+        "market_max":     market_max,
+        "market_min_gp":  market_min_gp,
+        "market_avg_gp":  market_avg_gp,
+        "market_max_gp":  market_max_gp,
+        "min_seller":     min_seller,
+        "max_seller":     max_seller,
+        "gp_alert_pct":   GP_ALERT_PCT,
+        "gp_warn_pct":    GP_WARN_PCT,
+        "seller_rows":    _serialize_rows(today_rows),
+        "chart_dates":    chart_dates,
+        "chart_datasets": chart_datasets,
+        "has_mapping":    bool(product_keys),
+    })
 
 
 # ── 화면 5: 매핑 수정요청 (DELETE/REPLACE) ────────────────────────────────
@@ -3135,6 +3356,137 @@ def _do_ai_suggest(request, platform, seller_name, plant, limit, _job_id=None):
     # 신뢰도 높은 순 정렬 (제안 없는 항목은 뒤로)
     items.sort(key=lambda x: x["suggestions"][0]["score"] if x["suggestions"] else -1, reverse=True)
     return JSONResponse({"items": items[:limit], "total_unmapped": len(unmapped)})
+
+
+# ── AI 코드매핑 데모 (전체 계정 공용) ────────────────────────────────────────
+# 영업담당자가 상품명 1건을 입력하면 매핑워크스페이스와 동일한 채점 로직으로
+# 상위 3건의 제안(신뢰도 점수 포함)을 즉시 반환하는 셀프서비스 데모 화면.
+# 결과에 대해 👍/👎 피드백을 남길 수 있고, 관리자는 별도 메뉴에서 피드백을 조회한다.
+
+def _confidence_label(score: float) -> str:
+    if score >= 70:
+        return "높음"
+    if score >= 40:
+        return "보통"
+    return "낮음"
+
+
+@router.get("/ai-demo", response_class=HTMLResponse)
+async def pm_ai_demo_page(request: Request):
+    _require_login(request)
+    return _render(request, "pm_ai_demo.html")
+
+
+@router.post("/api/ai-demo/suggest")
+async def api_ai_demo_suggest(request: Request):
+    """상품명(+선택 입력) 1건 → 상위 3건 매핑 제안 (동기 처리, 1회 1건).
+    입력: product_name(필수), spec(선택, 규격/중량 등 — 매칭 정확도 향상),
+          category(선택, 대분류 — 검색 참고용), plant(선택, 기본 ALL)
+    """
+    session = _require_login(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    product_name = (body.get("product_name") or "").strip()
+    spec         = (body.get("spec") or "").strip()
+    category     = (body.get("category") or "").strip()
+    plant        = body.get("plant") or "ALL"
+    if plant not in PLANTS:
+        plant = "ALL"
+    if not product_name:
+        raise HTTPException(status_code=400, detail="상품명을 입력해주세요.")
+
+    combined_input = " ".join(filter(None, [product_name, spec]))
+
+    our_products = _get_our_products(plant)
+    base_prices  = {r["product_code"]: r for r in _get_base_prices(plant)}
+
+    # 대분류가 입력되면 우선 해당 카테고리 내에서만 채점 (결과 없으면 전체로 폴백)
+    candidates = our_products
+    if category:
+        cat_low = category.lower()
+        narrowed = [p for p in our_products if cat_low in (p.get("category") or "").lower()]
+        if narrowed:
+            candidates = narrowed
+
+    scored = []
+    for p in candidates:
+        code = p.get("product_code")
+        bp = base_prices.get(code, {})
+        try:
+            s = _score_mapping(
+                combined_input, None,
+                p.get("product_name", ""), bp.get("avg_sale_price"), bp.get("avg_buy_price"),
+                "직배송", "", "", 0.0, p,
+            )
+        except Exception:
+            s = 0.0
+        if s > 0:
+            scored.append({
+                "product_code": code,
+                "product_name": p.get("product_name"),
+                "brand":        p.get("brand"),
+                "category":     p.get("category"),
+                "unit":         p.get("unit"),
+                "score":        s,
+                "confidence":   _confidence_label(s),
+            })
+    scored.sort(key=lambda x: -x["score"])
+    top3 = scored[:3]
+
+    return JSONResponse({
+        "input": {"product_name": product_name, "spec": spec, "category": category, "plant": plant},
+        "suggestions": top3,
+        "candidate_count": len(candidates),
+        "emp_name": session.get("name", ""),
+    })
+
+
+@router.post("/api/ai-demo/feedback")
+async def api_ai_demo_feedback_save(request: Request):
+    """AI 코드매핑 데모 결과에 대한 사용자 피드백 저장 (👍/👎)."""
+    session = _require_login(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    rating = (body.get("rating") or "").strip()
+    if rating not in ("up", "down", ""):
+        raise HTTPException(status_code=400, detail="rating 값이 올바르지 않습니다.")
+    feedback_id = portal_db.pm_save_ai_demo_feedback(
+        emp_code=session.get("emp_code", ""),
+        emp_name=session.get("name", ""),
+        team=session.get("team", ""),
+        input_product_name=(body.get("product_name") or "").strip(),
+        input_spec=(body.get("spec") or "").strip(),
+        input_category=(body.get("category") or "").strip(),
+        suggestions=body.get("suggestions") or [],
+        rating=rating,
+        comment=(body.get("comment") or "").strip(),
+        correct_product_code=(body.get("correct_product_code") or "").strip(),
+        correct_product_name=(body.get("correct_product_name") or "").strip(),
+    )
+    return JSONResponse({"ok": True, "feedback_id": feedback_id})
+
+
+@router.get("/admin/ai-demo-feedback", response_class=HTMLResponse)
+async def pm_admin_ai_demo_feedback_page(request: Request):
+    """AI 코드매핑 데모 피드백 조회 (관리자 전용)."""
+    _require_admin(request)
+    return _render(request, "pm_ai_demo_admin.html")
+
+
+@router.get("/api/ai-demo/feedback-list")
+async def api_ai_demo_feedback_list(request: Request, rating: str = ""):
+    """관리자용 피드백 목록 + 집계 (JSON)."""
+    _require_admin(request)
+    rating = rating.strip() or None
+    if rating not in (None, "up", "down"):
+        rating = None
+    rows  = portal_db.pm_list_ai_demo_feedback(rating=rating)
+    stats = portal_db.pm_ai_demo_feedback_stats()
+    return JSONResponse({"items": _serialize_rows(rows), "stats": stats})
 
 
 # ── API: 유사 플랫폼 상품 조회 (팝업용, 전체 셀러) ─────────────────────────

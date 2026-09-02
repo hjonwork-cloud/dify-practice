@@ -78,7 +78,9 @@
       <a class="{% if request.url.path == '/portal' or request.url.path == '/portal/' %}active{% endif %}" href="/portal">
         <span class="nav-icon">📊</span><span class="nav-label">대시보드</span>
       </a>
-      {% set brand_active = '/portal/brand-report' in request.url.path %}
+      {% set brand_active = '/portal/brand-report' in request.url.path
+                              or '/price-monitor/gp-lookup' in request.url.path
+                              or '/price-monitor/ai-demo' in request.url.path %}
       <div class="nav-parent {% if brand_active %}active open{% endif %}"
            id="navBrandParent" onclick="sbSubToggle('navBrandSub','navBrandParent')">
         <span class="nav-icon">🎯</span>
@@ -95,7 +97,14 @@
         <a class="{% if '/brand-report/results' in request.url.path %}active{% endif %}" href="/portal/brand-report/results">
           <span class="nav-icon">📊</span><span class="nav-label">액션 실적</span>
         </a>
+        <a class="{% if '/price-monitor/gp-lookup' in request.url.path %}active{% endif %}" href="/portal/price-monitor/gp-lookup">
+          <span class="nav-icon">💰</span><span class="nav-label">가격/GP 조회</span>
+        </a>
+        <a class="{% if '/price-monitor/ai-demo' in request.url.path %}active{% endif %}" href="/portal/price-monitor/ai-demo">
+          <span class="nav-icon">🤖</span><span class="nav-label">AI 코드매핑</span>
+        </a>
       </div>
+
       <a href="https://fsi-rst-stock-tf.web.app/" target="_blank" rel="noopener">
         <span class="nav-icon">🔄</span><span class="nav-label">무회전재고관리</span>
       </a>
@@ -113,6 +122,9 @@
         </a>
         <a class="{% if '/portal/price-monitor' in request.url.path %}active{% endif %}" href="/portal/price-monitor/">
           <span class="nav-icon">📊</span><span class="nav-label">가격 모니터링</span>
+        </a>
+        <a class="{% if '/admin/ai-demo-feedback' in request.url.path %}active{% endif %}" href="/portal/price-monitor/admin/ai-demo-feedback">
+          <span class="nav-icon">💬</span><span class="nav-label">AI매핑 피드백</span>
         </a>
       </div>
       {% endif %}

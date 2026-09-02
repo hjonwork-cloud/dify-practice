@@ -244,6 +244,27 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_price_cr_status
                 ON price_map_change_request(status, requested_at DESC);
 
+            -- AI 코드매핑 데모 피드백 (영업사원 데모 실행 결과 + 관리자 검수용)
+            CREATE TABLE IF NOT EXISTS ai_demo_feedback (
+                feedback_id       INTEGER PRIMARY KEY AUTOINCREMENT,
+                emp_code          TEXT,
+                emp_name          TEXT,
+                team              TEXT,
+                input_product_name TEXT NOT NULL,
+                input_spec        TEXT,
+                input_category    TEXT,
+                suggestions_json  TEXT,
+                rating            TEXT,
+                comment           TEXT,
+                correct_product_code TEXT,
+                correct_product_name TEXT,
+                created_at        TEXT DEFAULT (datetime('now','localtime'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_ai_demo_feedback_created
+                ON ai_demo_feedback(created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_ai_demo_feedback_rating
+                ON ai_demo_feedback(rating, created_at DESC);
+
             CREATE TABLE IF NOT EXISTS price_baemin_sellers (
                 seller_id    INTEGER PRIMARY KEY,
                 seller_name  TEXT,
@@ -1295,6 +1316,62 @@ def pm_toggle_foodspring_seller(seller_id: int, is_active: int) -> None:
             "UPDATE price_foodspring_sellers SET is_active=?, updated_at=datetime('now','localtime') WHERE seller_id=?",
             (is_active, seller_id),
         )
+
+
+# ── AI 코드매핑 데모 피드백 ──────────────────────────────────────────────
+
+def pm_save_ai_demo_feedback(emp_code: str, emp_name: str, team: str,
+                              input_product_name: str, input_spec: str, input_category: str,
+                              suggestions: list, rating: str, comment: str,
+                              correct_product_code: str, correct_product_name: str) -> int:
+    """AI 코드매핑 데모 실행 결과에 대한 사용자 피드백 저장.
+    rating: 'up' | 'down' | '' (미평가)
+    """
+    import json
+    init_db()
+    with _connect() as conn:
+        cur = conn.execute(
+            """INSERT INTO ai_demo_feedback
+               (emp_code, emp_name, team, input_product_name, input_spec, input_category,
+                suggestions_json, rating, comment, correct_product_code, correct_product_name)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            (emp_code, emp_name, team, input_product_name, input_spec or "", input_category or "",
+             json.dumps(suggestions or [], ensure_ascii=False), rating or "", comment or "",
+             correct_product_code or "", correct_product_name or ""),
+        )
+        return cur.lastrowid
+
+
+def pm_list_ai_demo_feedback(rating: str | None = None, limit: int = 300):
+    """관리자용 AI 코드매핑 데모 피드백 목록 (최신순)."""
+    import json
+    init_db()
+    where = "WHERE rating=?" if rating else ""
+    params: tuple = (rating,) if rating else ()
+    with _connect() as conn:
+        rows = conn.execute(
+            f"SELECT * FROM ai_demo_feedback {where} ORDER BY created_at DESC LIMIT ?",
+            (*params, limit),
+        ).fetchall()
+    result = []
+    for r in rows:
+        d = dict(r)
+        try:
+            d["suggestions"] = json.loads(d.get("suggestions_json") or "[]")
+        except Exception:
+            d["suggestions"] = []
+        result.append(d)
+    return result
+
+
+def pm_ai_demo_feedback_stats() -> dict:
+    """관리자 대시보드용 집계: 전체/긍정/부정/미평가 건수."""
+    init_db()
+    with _connect() as conn:
+        total = conn.execute("SELECT COUNT(*) AS c FROM ai_demo_feedback").fetchone()["c"]
+        up    = conn.execute("SELECT COUNT(*) AS c FROM ai_demo_feedback WHERE rating='up'").fetchone()["c"]
+        down  = conn.execute("SELECT COUNT(*) AS c FROM ai_demo_feedback WHERE rating='down'").fetchone()["c"]
+    return {"total": total, "up": up, "down": down, "none": total - up - down}
 
 
 # ── 모듈 로드 시 DB 초기화 ──────────────────────────────────────────────────

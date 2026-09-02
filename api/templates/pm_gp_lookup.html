@@ -1,0 +1,196 @@
+{% extends "portal_base.html" %}
+{% block title %}상품 가격/GP 조회{% endblock %}
+
+{% block content %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+.gpl-wrap{max-width:1180px;margin:0 auto;}
+.gpl-head{margin-bottom:1.1rem;}
+.gpl-head h2{font-size:1.3rem;font-weight:800;color:#0f172a;margin:0 0 .25rem;}
+.gpl-head p{color:#64748b;font-size:.86rem;margin:0;}
+.gpl-search{background:#fff;border-radius:12px;padding:1rem 1.2rem;box-shadow:0 1px 4px rgba(0,0,0,.07);display:flex;gap:.6rem;flex-wrap:wrap;align-items:center;margin-bottom:1rem;}
+.gpl-search input[type=text]{flex:1;min-width:220px;border:1.5px solid #cbd5e1;border-radius:8px;padding:.55rem .8rem;font-size:.88rem;outline:none;}
+.gpl-search input[type=text]:focus{border-color:#1677ff;}
+.gpl-search select{border:1.5px solid #cbd5e1;border-radius:8px;padding:.55rem .7rem;font-size:.85rem;background:#fff;}
+.gpl-search button{background:#1677ff;color:#fff;border:none;border-radius:8px;padding:.55rem 1.3rem;font-weight:700;font-size:.86rem;cursor:pointer;}
+.gpl-search button:hover{opacity:.88;}
+.gpl-results{background:#fff;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,.07);margin-bottom:1rem;overflow:hidden;display:none;}
+.gpl-results table{width:100%;border-collapse:collapse;font-size:.83rem;}
+.gpl-results th{background:#f8fafc;padding:.55rem .8rem;text-align:left;font-weight:700;color:#64748b;font-size:.72rem;text-transform:uppercase;white-space:nowrap;}
+.gpl-results td{padding:.55rem .8rem;border-top:1px solid #f1f5f9;}
+.gpl-results tr.rowbtn{cursor:pointer;}
+.gpl-results tr.rowbtn:hover td{background:#f0f7ff;}
+.gpl-empty,.gpl-loading{text-align:center;padding:2.5rem;color:#94a3b8;font-size:.88rem;}
+.gpl-detail{display:none;}
+.gpl-kpi-row{display:grid;grid-template-columns:repeat(3,1fr);gap:.75rem;margin-bottom:.9rem;}
+@media(max-width:760px){.gpl-kpi-row{grid-template-columns:1fr;}}
+.gpl-kpi{background:#fff;border-radius:12px;padding:1rem 1.2rem;box-shadow:0 1px 4px rgba(0,0,0,.07);}
+.gpl-kpi .l{font-size:.7rem;color:#94a3b8;font-weight:700;text-transform:uppercase;letter-spacing:.04em;}
+.gpl-kpi .v{font-size:1.4rem;font-weight:900;margin-top:.2rem;color:#0f172a;}
+.market-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:.75rem;margin-bottom:1rem;}
+@media(max-width:760px){.market-grid{grid-template-columns:1fr;}}
+.market-card{background:#fff;border-radius:12px;padding:1rem 1.2rem;box-shadow:0 1px 4px rgba(0,0,0,.07);border-top:3px solid transparent;}
+.market-card.c-min{border-color:#3b82f6;} .market-card.c-avg{border-color:#10b981;} .market-card.c-max{border-color:#ef4444;}
+.mc-label{font-size:.7rem;color:#94a3b8;font-weight:700;text-transform:uppercase;letter-spacing:.04em;}
+.mc-val{font-size:1.4rem;font-weight:900;margin-top:.2rem;}
+.mc-sub{font-size:.76rem;color:#64748b;margin-top:.25rem;}
+.gp-alert{color:#b91c1c;font-weight:700;} .gp-warn{color:#92400e;font-weight:700;} .gp-ok{color:#15803d;font-weight:700;}
+.chart-card{background:#fff;border-radius:12px;padding:1.2rem 1.4rem;box-shadow:0 1px 4px rgba(0,0,0,.07);margin-bottom:1rem;}
+.chart-card h4{font-size:.9rem;font-weight:700;color:#1e293b;margin:0 0 .7rem;}
+.chart-wrap{position:relative;height:300px;}
+.seller-card{background:#fff;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,.07);overflow:hidden;}
+.seller-card .head{padding:.9rem 1.2rem;font-weight:700;font-size:.9rem;border-bottom:1px solid #f1f5f9;}
+.seller-table{width:100%;border-collapse:collapse;font-size:.82rem;}
+.seller-table th{background:#f8fafc;padding:.5rem .8rem;text-align:left;font-weight:700;color:#64748b;font-size:.7rem;text-transform:uppercase;white-space:nowrap;}
+.seller-table td{padding:.5rem .8rem;border-top:1px solid #f8fafc;}
+.badge{display:inline-block;padding:.15rem .5rem;border-radius:99px;font-size:.72rem;font-weight:700;}
+.badge-baemin{background:#fff0e8;color:#d4380d;} .badge-foodspring{background:#e6f4ff;color:#0958d9;}
+.back-link{display:inline-flex;align-items:center;gap:.3rem;color:#1677ff;font-weight:700;font-size:.85rem;text-decoration:none;margin-bottom:.8rem;cursor:pointer;}
+</style>
+
+<div class="gpl-wrap">
+  <div class="gpl-head">
+    <h2>📈 상품 가격/GP 조회</h2>
+    <p>상품코드 또는 상품명으로 검색해 매출 상위 상품을 확인하고, 플랫폼 대비 가격/GP 현황을 한눈에 조회합니다.</p>
+  </div>
+
+  <div class="gpl-search">
+    <input type="text" id="gplKeyword" placeholder="상품코드 또는 상품명 입력 (예: 동원참치, 100123)" onkeydown="if(event.key==='Enter') gplSearch()">
+    <select id="gplPlant">
+      {% for p in plants %}
+      <option value="{{ p }}" {% if p==plant %}selected{% endif %}>{{ PLANT_LABELS[p] }}</option>
+      {% endfor %}
+    </select>
+    <button onclick="gplSearch()">검색</button>
+  </div>
+
+  <div class="gpl-results" id="gplResults">
+    <table>
+      <thead><tr><th>상품코드</th><th>상품명</th><th>대분류</th><th>전월 매출액</th><th>전월 매출수량</th></tr></thead>
+      <tbody id="gplResultsBody"></tbody>
+    </table>
+  </div>
+  <div class="gpl-loading" id="gplLoading" style="display:none;">검색 중...</div>
+  <div class="gpl-empty" id="gplEmpty" style="display:none;">검색 결과가 없습니다.</div>
+
+  <div class="gpl-detail" id="gplDetail">
+    <a class="back-link" onclick="gplBackToList()">← 목록으로</a>
+    <div class="gpl-kpi-row">
+      <div class="gpl-kpi"><div class="l">당사 평균 판매가</div><div class="v" id="dOurSale">-</div></div>
+      <div class="gpl-kpi"><div class="l">추정 구매단가</div><div class="v" id="dBuy">-</div></div>
+      <div class="gpl-kpi"><div class="l">당사 GP%</div><div class="v" id="dOurGp">-</div></div>
+    </div>
+    <div class="market-grid">
+      <div class="market-card c-min"><div class="mc-label">플랫폼 최저가</div><div class="mc-val" id="dMin">-</div><div class="mc-sub" id="dMinSub">-</div></div>
+      <div class="market-card c-avg"><div class="mc-label">플랫폼 평균가</div><div class="mc-val" id="dAvg">-</div><div class="mc-sub" id="dAvgSub">-</div></div>
+      <div class="market-card c-max"><div class="mc-label">플랫폼 최고가</div><div class="mc-val" id="dMax">-</div><div class="mc-sub" id="dMaxSub">-</div></div>
+    </div>
+    <div class="chart-card">
+      <h4>최근 30일 가격 추이 (플랫폼별 최저/평균/최고 + 당사 판매단가)</h4>
+      <div class="chart-wrap"><canvas id="gplChart"></canvas></div>
+    </div>
+    <div class="seller-card">
+      <div class="head">플랫폼-셀러별 현재 현황</div>
+      <table class="seller-table">
+        <thead><tr><th>플랫폼</th><th>셀러</th><th>외부 상품명</th><th>외부 판매가</th><th>실판매가(수수료차감)</th><th>당사 매칭 GP</th></tr></thead>
+        <tbody id="dSellerRows"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+let gplChartInst = null;
+function fmt(n){ return (n===null||n===undefined) ? '-' : Math.round(n).toLocaleString()+'원'; }
+function fmtPct(n){ return (n===null||n===undefined) ? '-' : n.toFixed(1)+'%'; }
+function gpClass(v, alert, warn){ if(v===null||v===undefined) return ''; if(v<alert) return 'gp-alert'; if(v<warn) return 'gp-warn'; return 'gp-ok'; }
+
+async function gplSearch(){
+  const kw = document.getElementById('gplKeyword').value.trim();
+  const plant = document.getElementById('gplPlant').value;
+  document.getElementById('gplDetail').style.display='none';
+  document.getElementById('gplResults').style.display='none';
+  document.getElementById('gplEmpty').style.display='none';
+  document.getElementById('gplLoading').style.display='block';
+  try{
+    const res = await fetch(`/portal/price-monitor/api/gp-lookup/search?keyword=${encodeURIComponent(kw)}&plant=${plant}`);
+    const data = await res.json();
+    document.getElementById('gplLoading').style.display='none';
+    if(!data.items || data.items.length===0){
+      document.getElementById('gplEmpty').style.display='block';
+      return;
+    }
+    const body = document.getElementById('gplResultsBody');
+    body.innerHTML = data.items.map(it => `
+      <tr class="rowbtn" onclick="gplShowDetail('${it.product_code}','${plant}')">
+        <td>${it.product_code}</td>
+        <td>${it.product_name||''}</td>
+        <td>${it.category||'-'}</td>
+        <td>${it.prev_sales_amt ? Math.round(it.prev_sales_amt).toLocaleString()+'원' : '-'}</td>
+        <td>${it.prev_sales_qty ? Math.round(it.prev_sales_qty).toLocaleString() : '-'}</td>
+      </tr>`).join('');
+    document.getElementById('gplResults').style.display='block';
+  }catch(e){
+    document.getElementById('gplLoading').style.display='none';
+    document.getElementById('gplEmpty').style.display='block';
+  }
+}
+
+function gplBackToList(){
+  document.getElementById('gplDetail').style.display='none';
+  document.getElementById('gplResults').style.display='block';
+}
+
+async function gplShowDetail(code, plant){
+  document.getElementById('gplResults').style.display='none';
+  document.getElementById('gplLoading').style.display='block';
+  try{
+    const res = await fetch(`/portal/price-monitor/api/gp-lookup/detail/${encodeURIComponent(code)}?plant=${plant}`);
+    const d = await res.json();
+    document.getElementById('gplLoading').style.display='none';
+    document.getElementById('gplDetail').style.display='block';
+
+    document.getElementById('dOurSale').textContent = fmt(d.our_sale_price);
+    document.getElementById('dBuy').textContent = fmt(d.buy_price);
+    const gpEl = document.getElementById('dOurGp');
+    gpEl.textContent = fmtPct(d.our_gp_pct);
+    gpEl.className = 'v ' + gpClass(d.our_gp_pct, d.gp_alert_pct, d.gp_warn_pct);
+
+    document.getElementById('dMin').textContent = fmt(d.market_min);
+    document.getElementById('dMinSub').textContent = (d.min_seller||'-') + ' · GP ' + fmtPct(d.market_min_gp);
+    document.getElementById('dAvg').textContent = fmt(d.market_avg);
+    document.getElementById('dAvgSub').textContent = 'GP ' + fmtPct(d.market_avg_gp);
+    document.getElementById('dMax').textContent = fmt(d.market_max);
+    document.getElementById('dMaxSub').textContent = (d.max_seller||'-') + ' · GP ' + fmtPct(d.market_max_gp);
+
+    const rowsBody = document.getElementById('dSellerRows');
+    if(!d.seller_rows || d.seller_rows.length===0){
+      rowsBody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#94a3b8;padding:1.2rem;">매핑된 플랫폼 상품이 없습니다.</td></tr>';
+    }else{
+      rowsBody.innerHTML = d.seller_rows.map(r => `
+        <tr>
+          <td><span class="badge badge-${r.platform}">${r.platform==='baemin'?'배민상회':'식봄'}</span></td>
+          <td>${r.platform_seller_name||''}</td>
+          <td>${r.product_name||''}</td>
+          <td>${r.price_sale ? Math.round(r.price_sale).toLocaleString()+'원' : '-'}</td>
+          <td>${r.net_price ? Math.round(r.net_price).toLocaleString()+'원' : '-'}</td>
+          <td class="${gpClass(r.gp_pct, d.gp_alert_pct, d.gp_warn_pct)}">${fmtPct(r.gp_pct)}</td>
+        </tr>`).join('');
+    }
+
+    if(gplChartInst){ gplChartInst.destroy(); }
+    const ctx = document.getElementById('gplChart').getContext('2d');
+    gplChartInst = new Chart(ctx, {
+      type: 'line',
+      data: { labels: d.chart_dates, datasets: d.chart_datasets },
+      options: { responsive:true, maintainAspectRatio:false,
+        plugins:{ legend:{ position:'bottom', labels:{ boxWidth:12, font:{size:11} } } },
+        scales:{ y:{ ticks:{ callback:(v)=>Math.round(v).toLocaleString() } } } }
+    });
+  }catch(e){
+    document.getElementById('gplLoading').style.display='none';
+    alert('상세 조회 중 오류가 발생했습니다.');
+  }
+}
+</script>
+{% endblock %}
