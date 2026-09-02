@@ -592,19 +592,22 @@ def _get_fee(delivery_type: str = "직배송", platform: str = "", seller_name: 
 
 def _calc_gp(platform_price: float | None, buy_price: float | None,
              delivery_type: str = "직배송",
-             platform: str = "", seller_name: str = "") -> float | None:
+             platform: str = "", seller_name: str = "",
+             tax_status: str = "과세") -> float | None:
     """
     수수료 차감 후 GP율 계산.
-    - 직배송: 외부판매가 × (1 - 0.066) / 1.1 = 수취액 A
-    - 싱싱배송: 외부판매가 × (1 - 0.171) / 1.1 = 수취액 A
-    - CJ프레시웨이(식봄): 외부판매가 × (1 - 0.048) / 1.1 = 수취액 A
+    - 직배송: 외부판매가 × (1 - 0.066) / VAT제수 = 수취액 A
+    - 싱싱배송: 외부판매가 × (1 - 0.171) / VAT제수 = 수취액 A
+    - CJ프레시웨이(식봄): 외부판매가 × (1 - 0.048) / VAT제수 = 수취액 A
+    - VAT제수: 과세 상품은 1.1(부가세 10% 제외), 면세 상품은 1.0(제외 없음)
     - GP% = (A - 구매단가) / A × 100
     """
     if not platform_price or not buy_price:
         return None
     try:
         fee = _get_fee(delivery_type, platform, seller_name)
-        a = platform_price * (1.0 - fee) / 1.1   # 수수료 차감 후 부가세(10%) 제외
+        vat_mult = 1.1 if tax_status == "과세" else 1.0
+        a = platform_price * (1.0 - fee) / vat_mult   # 수수료 차감 후 (과세 상품만) 부가세 10% 제외
         return round((a - buy_price) / a * 100, 1)
     except Exception:
         return None
@@ -640,10 +643,16 @@ async def pm_dashboard(
     }
 
     # 우리 상품명 맵 (T_ZMM60 기준) — miss 시 T_ZMM60 직접 fallback
+    _our_products_cache = _get_our_products(plant)
     our_name_map = {
         p["product_code"]: p["product_name"]
-        for p in _get_our_products(plant)
+        for p in _our_products_cache
         if p.get("product_name")
+    }
+    # 세금분류 맵 (면세 상품은 부가세 10% 차감 없이 GP 계산)
+    our_tax_map = {
+        p["product_code"]: (p.get("tax_class") or "과세")
+        for p in _our_products_cache
     }
 
     def _resolve_name(p_code: str) -> str:
@@ -693,7 +702,8 @@ async def pm_dashboard(
         delivery_type = pf_data.get("delivery_type", "직배송")
         _platform    = pf_data.get("platform", "")
         _seller_name = pf_data.get("platform_seller_name", "")
-        gp = _calc_gp(sale_price, buy_price, delivery_type, _platform, _seller_name)
+        _tax_status  = our_tax_map.get(p_code, "과세")
+        gp = _calc_gp(sale_price, buy_price, delivery_type, _platform, _seller_name, _tax_status)
         status = _gp_status(gp)
         if alert_only and status not in ("alert", "warn"):
             continue
@@ -1214,6 +1224,11 @@ async def pm_history(
     price_map = {r["product_code"]: r for r in price_rows}
     price_info = price_map.get(product_code, {})
 
+    # 제품명 / 세금분류 (면세 상품은 부가세 10% 차감 없이 GP 계산)
+    our_products = _get_our_products(plant)
+    product_info = next((p for p in our_products if p["product_code"] == product_code), {})
+    _tax_status = product_info.get("tax_class") or "과세"
+
     # GP 계산 추가
     for row in history_rows:
         gp = _calc_gp(
@@ -1222,14 +1237,11 @@ async def pm_history(
             row.get("delivery_type", "직배송"),
             row.get("platform", ""),
             row.get("platform_seller_name", ""),
+            _tax_status,
         )
         row["gp_pct"] = gp
         row["gp_status"] = _gp_status(gp)
         row["crawl_date"] = str(row.get("crawl_date", ""))
-
-    # 제품명
-    our_products = _get_our_products(plant)
-    product_info = next((p for p in our_products if p["product_code"] == product_code), {})
 
     return _render(request, "pm_history.html",
                    product_code=product_code,
@@ -1256,6 +1268,11 @@ async def pm_detail(
     price_map  = {r["product_code"]: r for r in price_rows}
     price_info = price_map.get(product_code, {})
     buy_price  = price_info.get("avg_buy_price")
+
+    # 세금분류 (면세 상품은 부가세 10% 차감 없이 GP 계산)
+    our_products = _get_our_products(plant)
+    product_info_meta = next((p for p in our_products if p["product_code"] == product_code), {})
+    tax_status = product_info_meta.get("tax_class", "과세") or "과세"
 
     # 매핑된 product_keys
     mappings     = portal_db.pm_list_mappings(product_code, plant)
@@ -1302,7 +1319,7 @@ async def pm_detail(
         _pf  = row.get("platform", "")
         _sn  = row.get("platform_seller_name", "")
         _dt  = row.get("delivery_type", "직배송")
-        gp = _calc_gp(row.get("price_sale"), buy_price, _dt, _pf, _sn)
+        gp = _calc_gp(row.get("price_sale"), buy_price, _dt, _pf, _sn, tax_status)
         row["gp_pct"]    = gp
         row["gp_status"] = _gp_status(gp)
         row["crawl_date"] = str(row.get("crawl_date", ""))
@@ -1331,12 +1348,9 @@ async def pm_detail(
     market_avg  = round(sum(prices)/len(prices)) if prices else None
     market_min_net = round(min(net_prices)) if net_prices else None
     market_avg_net = round(sum(net_prices)/len(net_prices)) if net_prices else None
-    market_min_gp = _calc_gp(market_min, buy_price, "직배송") if market_min else None
+    market_min_gp = _calc_gp(market_min, buy_price, "직배송", tax_status=tax_status) if market_min else None
 
-    # 과세여부 및 VAT 포함 판매가
-    our_products = _get_our_products(plant)
-    product_info_meta = next((p for p in our_products if p["product_code"] == product_code), {})
-    tax_status = product_info_meta.get("tax_class", "과세") or "과세"
+    # VAT 포함 판매가 (경쟁등급 산출용, 세금분류는 위에서 이미 조회함)
     vat_mult = 1.1 if tax_status == "과세" else 1.0
     our_sale_vat = round(our_sale * vat_mult) if our_sale else None  # VAT 포함 판매가
 
@@ -1616,10 +1630,16 @@ async def api_competition(request: Request, plant: str = "ALL"):
     price_map = {r["product_code"]: r for r in price_rows}
 
     # 상품명 맵
+    _our_products_cache = _get_our_products(plant)
     our_name_map = {
         p["product_code"]: p["product_name"]
-        for p in _get_our_products(plant)
+        for p in _our_products_cache
         if p.get("product_name")
+    }
+    # 세금분류 맵 (면세 상품은 부가세 10% 차감 없이 GP 계산)
+    our_tax_map = {
+        p["product_code"]: (p.get("tax_class") or "과세")
+        for p in _our_products_cache
     }
 
     def _resolve(p_code: str) -> str:
@@ -1669,10 +1689,13 @@ async def api_competition(request: Request, plant: str = "ALL"):
             crawl_dates[platform] = str(pf_data.get("crawl_date", ""))
 
         # ── 경쟁사 실수취가: 소비자가에서 수수료·VAT 제거 ──
-        # comp_net = price_sale × (1 − fee) / 1.1 / multiplier
+        # comp_net = price_sale × (1 − fee) / VAT제수 / multiplier
+        # VAT제수: 우리 상품이 면세면 1.0(차감 없음), 과세면 1.1
         fee = _get_fee(delivery_type, platform, seller_name)
+        _tax_status = our_tax_map.get(p_code, "과세")
+        _vat_mult = 1.1 if _tax_status == "과세" else 1.0
         if comp_price:
-            comp_net = round(float(comp_price) * (1.0 - fee) / 1.1 / multiplier, 0)
+            comp_net = round(float(comp_price) * (1.0 - fee) / _vat_mult / multiplier, 0)
         else:
             comp_net = None
 
@@ -1857,10 +1880,16 @@ async def api_simulation(
     prev_sales = _get_prev_month_sales_totals(plant)
 
     # 상품명 맵
+    _our_products_cache = _get_our_products(plant)
     our_name_map = {
         p["product_code"]: p["product_name"]
-        for p in _get_our_products(plant)
+        for p in _our_products_cache
         if p.get("product_name")
+    }
+    # 세금분류 맵 (면세 상품은 부가세 10% 차감 없이 GP 계산)
+    our_tax_map = {
+        p["product_code"]: (p.get("tax_class") or "과세")
+        for p in _our_products_cache
     }
     def _resolve(p_code: str) -> str:
         name = our_name_map.get(p_code)
@@ -1902,8 +1931,11 @@ async def api_simulation(
         buy_price     = (price_map.get(p_code) or {}).get("avg_buy_price")
         multiplier    = float(m.get("multiplier") or 1.0)
         tag           = m.get("tag", "normal")
+        # 세금분류: 면세 상품은 부가세 10% 차감 없이 경쟁사 실수취가 계산
+        _tax_status   = our_tax_map.get(p_code, "과세")
+        _vat_mult     = 1.1 if _tax_status == "과세" else 1.0
 
-        comp_net = round(float(comp_price) * (1.0 - fee) / 1.1 / multiplier, 0) if comp_price else None
+        comp_net = round(float(comp_price) * (1.0 - fee) / _vat_mult / multiplier, 0) if comp_price else None
         if comp_net and buy_price:
             match_margin = round((float(comp_net) - float(buy_price)) / float(comp_net) * 100, 1)
         else:
