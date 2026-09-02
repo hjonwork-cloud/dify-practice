@@ -2863,7 +2863,14 @@ async def api_mapping_ai_suggest(
             try:
                 result = _fut.result(timeout=1800)  # 30분 — 1844건 스코어링 완주 허용
                 data = _json.loads(result.body)
-                data["status"] = "done"
+                # _do_ai_suggest가 예외를 던지지 않고 {"items": [], "error": ...}로
+                # 실패를 반환하는 경우가 있음(플랫폼/셀러 누락, DB 조회 실패 등).
+                # 이 경우를 "done"으로 잘못 표시하면 프런트가 "미매핑 상품 없음"으로
+                # 오인 표시하므로, error 키가 있으면 반드시 status=error로 표시한다.
+                if data.get("error"):
+                    data["status"] = "error"
+                else:
+                    data["status"] = "done"
                 _job_store[job_id].update(data)
             except _cf.TimeoutError:
                 # 중간 결과가 있으면 done으로 반환, 없으면 에러
@@ -2896,9 +2903,8 @@ async def api_mapping_ai_suggest(
 
 
 def _do_ai_suggest(request, platform, seller_name, plant, limit, _job_id=None):
-    import time as _t
-    _t0 = _t.time()
-    def _log(msg): logger.info(f"[pm-ai][{_job_id}] {msg} ({_t.time()-_t0:.1f}s)")
+    _t0 = time.time()
+    def _log(msg): logger.info(f"[pm-ai][{_job_id}] {msg} ({time.time()-_t0:.1f}s)")
 
     if not platform or not seller_name:
         return JSONResponse({"items": [], "error": "platform/seller_name 필요"})
@@ -2987,8 +2993,8 @@ def _do_ai_suggest(request, platform, seller_name, plant, limit, _job_id=None):
         for _p in our_scan:
             _c = _p["product_code"]
             _prod_map_new[_c] = _p
-            for _t in _tokenize(_p.get("product_name") or ""):
-                _tok_inv_new[_t].add(_c)
+            for _tok in _tokenize(_p.get("product_name") or ""):
+                _tok_inv_new[_tok].add(_c)
         _inv_cache[_inv_key] = (time.time(), dict(_tok_inv_new), _prod_map_new)
         logger.info(f"[pm-ai] inv_cache 재구축 plant={plant} 상품={len(_prod_map_new):,}개")
     _tok_inv     = _inv_cache[_inv_key][1]
@@ -2998,7 +3004,7 @@ def _do_ai_suggest(request, platform, seller_name, plant, limit, _job_id=None):
     scan_count = min(len(unmapped), limit)  # limit개만 스캔
     _score_lock = threading.Lock()
     _progress_counter = [0]  # 스레드 안전 카운터 (list로 mutable 참조)
-    _score_start = _t.time()  # 스코어링 시작 시각
+    _score_start = time.time()  # 스코어링 시작 시각
 
     def _score_one(row):
         """row 1개 스코어링 — 피드백 캐시 우선, 없으면 유사도 계산."""
@@ -3112,7 +3118,7 @@ def _do_ai_suggest(request, platform, seller_name, plant, limit, _job_id=None):
                 _job_store[_job_id]["progress"] = done_cnt
             # 50개마다 중간 결과 저장 + 속도 측정
             if done_cnt % 50 == 0 and _job_id and _job_id in _job_store:
-                _elapsed = _t.time() - _score_start
+                _elapsed = time.time() - _score_start
                 _ips = done_cnt / _elapsed if _elapsed > 0 else 0
                 _eta = (scan_count - done_cnt) / _ips if _ips > 0 else 0
                 _job_store[_job_id]["_partial_items"] = list(items)
