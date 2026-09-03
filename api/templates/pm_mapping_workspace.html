@@ -120,7 +120,7 @@
 #mappingModal { display:none; position:fixed; inset:0; z-index:9000; }
 #mappingModal.open { display:flex; align-items:center; justify-content:center; }
 .modal-backdrop { position:absolute; inset:0; background:rgba(0,0,0,.45); }
-.modal-box { position:relative; background:#fff; border-radius:16px; width:92vw; max-width:1050px; max-height:88vh; display:flex; flex-direction:column; overflow:hidden; box-shadow:0 20px 60px rgba(0,0,0,.25); }
+.modal-box { position:relative; background:#fff; border-radius:16px; width:95vw; max-width:1280px; height:90vh; display:flex; flex-direction:column; overflow:hidden; box-shadow:0 20px 60px rgba(0,0,0,.25); }
 .modal-header { padding:16px 20px; border-bottom:1px solid #e5e7eb; display:flex; align-items:center; gap:12px; }
 .modal-header h3 { font-size:15px; font-weight:700; flex:1; }
 .modal-body { display:flex; gap:0; flex:1; overflow:hidden; }
@@ -1090,12 +1090,12 @@ async function openMappingModal(productKey) {
   document.getElementById('ourChangePanel').classList.remove('open');
   if (!top) openOurChangePanel();
 
-  // 유사 플랫폼 상품 로드 (전체 셀러)
+  // 유사 플랫폼 상품 로드 (전체 셀러, 배민+식봄 전체 플랫폼 대상 — platform 필터 미지정)
   document.getElementById('modalPlatList').innerHTML = '<div style="text-align:center;padding:20px"><div class="spinner"></div></div>';
   try {
     // display_name(셀러명 제거) 기준으로 유사 상품 검색 → 더 정확한 매칭
     const searchName = item.display_name || item.product_name;
-    const r = await fetch(`/portal/price-monitor/api/pm-ai/similar?product_name=${encodeURIComponent(searchName)}&platform=${currentPlatform}&exclude_key=&anchor_key=${encodeURIComponent(item.product_key)}`);
+    const r = await fetch(`/portal/price-monitor/api/pm-ai/similar?product_name=${encodeURIComponent(searchName)}&platform=&exclude_key=&anchor_key=${encodeURIComponent(item.product_key)}`);
     const d = await r.json();
     modalPlatItemsBase = d.data || []; // 고정 목록 저장
     modalPlatItems = [...modalPlatItemsBase];
@@ -1207,7 +1207,8 @@ function filterModalList() {
   // 400ms 후 API 호출로 추가 결과 병합 (와일드카드 포함 그대로 전달)
   _modalSearchTimer = setTimeout(async () => {
     try {
-      const r = await fetch(`/portal/price-monitor/api/pm-ai/similar?product_name=${encodeURIComponent(query)}&platform=${currentPlatform}`);
+      // 팝업 내 검색도 배민+식봄 전체 플랫폼 대상으로 조회 (platform 필터 미지정)
+      const r = await fetch(`/portal/price-monitor/api/pm-ai/similar?product_name=${encodeURIComponent(query)}&platform=`);
       const d = await r.json();
       const searchResults = d.data || [];
       const baseKeys = new Set(modalPlatItemsBase.map(i => i.product_key));
