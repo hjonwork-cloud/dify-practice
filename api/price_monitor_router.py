@@ -3547,10 +3547,15 @@ async def api_mapping_similar_platform(
         parts = [f"p.product_name LIKE '%{_escape_sql(t)}%'" for t in toks]
         return f" {operator} ".join(parts) if parts else "1=1"
 
-    def _wildcard_to_like(pattern: str) -> str:
-        """*오뚜기*1.8* → %오뚜기%1.8% (SQL LIKE 패턴)"""
-        parts = [_escape_sql(p) for p in pattern.split('*')]
-        return '%' + '%'.join(parts) + '%'
+    def _wildcard_tokens(pattern: str) -> list:
+        """*오뚜기*1.8* → ['오뚜기', '1.8'] (순서 무관 AND 매칭용 토큰).
+        기존에는 좌→우 순서를 강제하는 단일 LIKE 패턴('%오뚜기%1.8%')을 만들어
+        토큰 입력 순서가 실제 상품명 등장 순서와 다르면 매칭이 실패했다
+        (예: 상품명은 '...참깨...시아스...'인데 검색어가 '*시아스*참*'이면
+        순서가 맞지 않아 검색 도중 결과가 사라지는 문제). 토큰 리스트로 분리해
+        AND 조건으로 각각 '%token%' LIKE 검사하면 순서와 무관하게 매칭된다.
+        """
+        return [p.strip() for p in pattern.split('*') if p.strip()]
 
     def _word_tokens(name: str):
         """공백 분리 단어만 (bi/tri-gram 제외). 한글 2자+, 영문/숫자 2자+ 허용."""
@@ -3604,9 +3609,10 @@ async def api_mapping_similar_platform(
 
     try:
         if _is_wildcard:
-            # 와일드카드 모드: *오뚜기*1.8* → p.product_name LIKE '%오뚜기%1.8%'
-            like_pattern = _wildcard_to_like(product_name)
-            rows = _run_query(f"p.product_name LIKE '{like_pattern}'")
+            # 와일드카드 모드: *오뚜기*1.8* → 토큰별 AND 매칭(순서 무관)
+            # 예: '*시아스*참*' → product_name LIKE '%시아스%' AND product_name LIKE '%참%'
+            wc_tokens = _wildcard_tokens(product_name)
+            rows = _run_query(_build_like_clause(wc_tokens, "AND")) if wc_tokens else []
         else:
             # 일반 모드: 단어 토큰 OR 조건으로 넓게 조회
             word_toks = _word_tokens(product_name)
