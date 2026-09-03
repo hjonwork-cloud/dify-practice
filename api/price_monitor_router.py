@@ -3522,10 +3522,14 @@ async def api_mapping_similar_platform(
     product_name: str = "",
     platform: str = "",
     exclude_key: str = "",
+    anchor_key: str = "",
 ):
     """특정 플랫폼 상품명과 유사한 전체 셀러 플랫폼 상품 반환 (매핑 팝업용).
     - 동일 product_name 포함 상품을 전 셀러에서 조회
     - 이미 매핑된 product_key는 is_mapped=True 표시
+    - anchor_key(매핑하기를 누른 기준 상품의 product_key)가 지정되면,
+      LIKE 검색/LIMIT 300 절삭으로 목록에서 빠지더라도 항상 결과에 포함시켜
+      팝업 좌측 목록에서 기본 체크 표시가 보이도록 보장한다.
     """
     _require_pm_access(request)
     if not product_name:
@@ -3607,15 +3611,36 @@ async def api_mapping_similar_platform(
             # 일반 모드: 단어 토큰 OR 조건으로 넓게 조회
             word_toks = _word_tokens(product_name)
             if not word_toks:
-                return JSONResponse({"data": []})
-            like_or = _build_like_clause(word_toks, "OR")
-            rows = _run_query(like_or)
-            # fallback: 결과 없으면 가장 긴 단어 1개로 재시도
-            if not rows and word_toks:
-                longest = sorted(word_toks, key=len, reverse=True)[0]
-                rows = _run_query(f"p.product_name LIKE '%{_escape_sql(longest)}%'")
+                rows = []
+            else:
+                like_or = _build_like_clause(word_toks, "OR")
+                rows = _run_query(like_or)
+                # fallback: 결과 없으면 가장 긴 단어 1개로 재시도
+                if not rows:
+                    longest = sorted(word_toks, key=len, reverse=True)[0]
+                    rows = _run_query(f"p.product_name LIKE '%{_escape_sql(longest)}%'")
     except Exception as e:
         return JSONResponse({"data": [], "error": str(e)})
+
+    # ── 기준 상품(anchor_key) 누락 방지 ──────────────────────────────────
+    # LIKE 검색 결과가 300건을 넘어 LIMIT에서 잘리면(흔한 재료명 등) 정작
+    # 매핑하기를 누른 기준 상품 자체가 목록에서 빠져 "기본 선택"이 화면에
+    # 보이지 않는 문제가 생긴다. anchor_key가 넘어오면 결과에 없을 때
+    # 직접 조회해서 앞에 끼워 넣어 항상 보이도록 한다.
+    if anchor_key and not any(r.get("product_key") == anchor_key for r in rows):
+        try:
+            anchor_rows = _q(f"""
+                SELECT p.product_key, p.platform, p.platform_seller_name,
+                       p.product_name, p.spec, p.price_sale, p.delivery_type, p.is_free_delivery
+                FROM {T_SILVER} p
+                WHERE p.product_key = '{_escape_sql(anchor_key)}'
+                ORDER BY p.crawl_date DESC
+                LIMIT 1
+            """) or []
+            if anchor_rows:
+                rows = anchor_rows + rows
+        except Exception:
+            pass
 
     # 매핑 여부 표시
     all_mappings = portal_db.pm_list_all_mappings("ALL")

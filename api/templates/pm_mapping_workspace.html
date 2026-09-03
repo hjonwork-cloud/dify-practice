@@ -1095,7 +1095,7 @@ async function openMappingModal(productKey) {
   try {
     // display_name(셀러명 제거) 기준으로 유사 상품 검색 → 더 정확한 매칭
     const searchName = item.display_name || item.product_name;
-    const r = await fetch(`/portal/price-monitor/api/pm-ai/similar?product_name=${encodeURIComponent(searchName)}&platform=${currentPlatform}&exclude_key=`);
+    const r = await fetch(`/portal/price-monitor/api/pm-ai/similar?product_name=${encodeURIComponent(searchName)}&platform=${currentPlatform}&exclude_key=&anchor_key=${encodeURIComponent(item.product_key)}`);
     const d = await r.json();
     modalPlatItemsBase = d.data || []; // 고정 목록 저장
     modalPlatItems = [...modalPlatItemsBase];
