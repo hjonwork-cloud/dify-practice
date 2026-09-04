@@ -888,7 +888,7 @@ def _dm_message(brand_name: str, customer: dict, brand_avg: float, products: lis
     ) or "• 추천 후보 상품 확인 필요"
     return (
         f"안녕하세요, {customer.get('customer_name')} 사장님.\n\n"
-        f"{brand_name}을 운영해주셔서 감사드립니다. "
+        f"동원홈푸드를 이용해 주셔서 감사합니다. "
         f"동원홈푸드 영업담당자입니다.\n\n"
         "동일 브랜드 내 다른 가맹점에서 사용 빈도가 높은 상품 중 아직 주문이 없는 품목이 있어 추천드립니다.\n\n"
         f"추천 품목\n{product_lines}\n\n"

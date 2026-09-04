@@ -107,10 +107,18 @@
   <strong style="font-size:1.1rem;">{{ report.brand.brand_name }}</strong>
   <span style="color:#9ca3af;font-size:.82rem;">{{ report.prev_ym }} 기준</span>
   <form method="get" action="/portal/brand-report/action" style="margin-left:auto;">
-    <select name="brand" onchange="this.form.submit()" style="font-size:.82rem;padding:.2rem .4rem;border:1px solid #d1d5db;border-radius:.35rem;">
+    <select id="brandActionSelect" name="brand" onchange="this.form.submit()" style="display:none;">
       {% for b in report.brands %}<option value="{{ b.brand_name }}" {% if b.brand_name == report.brand.brand_name %}selected{% endif %}>{{ b.brand_name }}</option>{% endfor %}
     </select>
+    <button type="button" id="brandActionSelectBtn" style="font-size:.82rem;padding:.3rem .6rem;border:1px solid #d1d5db;border-radius:.35rem;background:#fff;cursor:pointer;white-space:nowrap;">
+      <span id="brandActionSelectBtnLabel">{{ report.brand.brand_name }}</span> ▾
+    </button>
   </form>
+  <script>
+    if (window.initBrandPickerFor) {
+      window.initBrandPickerFor('brandActionSelect', 'brandActionSelectBtn', 'brandActionSelectBtnLabel', {title: '브랜드 선택'});
+    }
+  </script>
 </div>
 
 <!-- 컴팩트 요약 바 -->
@@ -380,7 +388,7 @@
       const productLines = lines.length ? lines.join('\n') : '\u2022 추천 후보 상품 확인 필요';
       const newMsg =
         `안녕하세요, ${custName} 사장님.\n\n` +
-        `${brandName}을 운영해주셔서 감사드립니다. ` +
+        `동원홈푸드를 이용해 주셔서 감사합니다. ` +
         `동원홈푸드 영업담당자입니다.\n\n` +
         `동일 브랜드 내 다른 가맹점에서 사용 빈도가 높은 상품 중 아직 주문이 없는 품목이 있어 추천드립니다.\n\n` +
         `추천 품목\n${productLines}\n\n` +

@@ -3173,15 +3173,29 @@ def _do_ai_suggest(request, platform, seller_name, plant, limit, _job_id=None):
         _f_our_products = _pex.submit(_get_our_products, plant)
         _f_price_totals = _pex.submit(_get_prev_month_sales_totals, plant)
         _f_base_prices  = _pex.submit(_get_base_prices, plant)
+        _f_products_wb  = _pex.submit(_get_our_products_with_batch, plant)
         try:
             all_mappings  = _f_mappings.result(timeout=360)     or []
             our_products  = _f_our_products.result(timeout=360) or []
             price_totals  = _f_price_totals.result(timeout=360) or {}
             _bp_rows      = _f_base_prices.result(timeout=360)  or []
+            _products_wb  = _f_products_wb.result(timeout=360)  or []
         except _cf2.TimeoutError:
             return JSONResponse({"items": [], "error": "DB 조회 제한시간(6분) 초과 — Databricks 웨어하우스 응답 지연"})
     base_prices = {r["product_code"]: r for r in _bp_rows}
     _log(f"DB 병렬 조회 완료 매핑={len(all_mappings)}건 우리상품={len(our_products)}개")
+
+    # 상품코드 → [{plant, batch, use_hold}, ...] 매핑 (운영여부 배지 표시용)
+    _plant_status_map: dict = {}
+    for _pw in _products_wb:
+        _pw_code = _pw.get("product_code")
+        if not _pw_code:
+            continue
+        _plant_status_map.setdefault(_pw_code, []).append({
+            "plant":    _pw.get("plant", ""),
+            "batch":    _pw.get("batch", ""),
+            "use_hold": _pw.get("use_hold", ""),
+        })
 
     # 이미 매핑된 product_key 집합
     mapped_keys = {m["product_key"] for m in all_mappings if m.get("is_active", 1)}
@@ -3277,6 +3291,7 @@ def _do_ai_suggest(request, platform, seller_name, plant, limit, _job_id=None):
                 "net_comp_price":   int(net_price) if net_price else None,
                 "prev_sales_amt":   0,
                 "_feedback": True,  # 피드백 출처 표시
+                "plant_batch_status": _plant_status_map.get(fb["our_product_code"], []),
             }]
             return {
                 "product_key":    pkey,
@@ -3331,6 +3346,7 @@ def _do_ai_suggest(request, platform, seller_name, plant, limit, _job_id=None):
                     "net_comp_price":   int(net_price) if net_price else None,
                     "prev_sales_amt":   int(price_totals.get(code, {}).get("prev_sales_amt") or 0),
                     "_is_n":            is_n_prefix,
+                    "plant_batch_status": _plant_status_map.get(code, []),
                 })
         scored.sort(key=lambda x: (-x["score"], x["_is_n"]))
         for s in scored:

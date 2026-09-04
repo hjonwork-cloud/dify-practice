@@ -36,9 +36,12 @@
       <button type="button" id="ymBtnPrev" class="active" data-ym="prev">전월</button>
       <button type="button" id="ymBtnCurrent" data-ym="current">당월</button>
     </div>
-    <select id="brandSelect" style="padding:.4rem .75rem;border:1px solid #d1d5db;border-radius:.4rem;font-size:.9rem;cursor:pointer;">
+    <select id="brandSelect" style="display:none;">
       <option value="">로딩 중…</option>
     </select>
+    <button type="button" id="brandSelectBtn" style="padding:.4rem .75rem;border:1px solid #d1d5db;border-radius:.4rem;font-size:.9rem;cursor:pointer;background:#fff;white-space:nowrap;">
+      <span id="brandSelectBtnLabel">로딩 중…</span> ▾
+    </button>
     <a id="actionLink" href="#" class="btn portal-primary" style="white-space:nowrap;font-size:.85rem;padding:.45rem 1rem;opacity:.4;pointer-events:none;">&#9889; 액션 실행</a>
   </div>
 </div>
@@ -116,6 +119,9 @@
       loadBrandData(selectedBrand, null);
     });
   }
+  if (window.initBrandPickerFor) {
+    window.initBrandPickerFor('brandSelect', 'brandSelectBtn', 'brandSelectBtnLabel', {title: '브랜드 선택'});
+  }
 
   // 당월/전월 토글
   var ymBtnPrev = document.getElementById('ymBtnPrev');
@@ -189,6 +195,8 @@
 
     // 브랜드 셀렉터 채우기 (최초 1회)
     populateSelect(data.brands || [], bname);
+    var _bpLabelEl = document.getElementById('brandSelectBtnLabel');
+    if (_bpLabelEl) _bpLabelEl.textContent = bname;
 
     // 서버가 결정한 실제 ym_mode 로 토글 UI 동기화 (혹시 서버에서 스위칭된 경우 대비)
     if (data.ym_mode && data.ym_mode !== ymMode) {

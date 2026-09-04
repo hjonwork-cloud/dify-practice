@@ -41,6 +41,10 @@
 .sug-item.selected { border-color:#4f46e5; background:#eef2ff; box-shadow:0 0 0 2px #818cf8; }
 .sug-rank { position:absolute; top:8px; right:10px; font-size:11px; color:#9ca3af; font-weight:600; }
 .sug-code { font-size:11px; color:#6b7280; margin-bottom:2px; }
+.sug-plant-badges { display:inline-flex; gap:4px; margin-left:6px; vertical-align:middle; }
+.plant-status-badge { font-size:10px; padding:1px 6px; border-radius:8px; font-weight:600; white-space:nowrap; display:inline-block; }
+.plant-status-badge.active { background:#d1fae5; color:#065f46; }
+.plant-status-badge.stopped { background:#fee2e2; color:#b91c1c; }
 .sug-name { font-size:13px; font-weight:600; color:#111; margin-bottom:6px; }
 .sug-prices { display:flex; gap:10px; font-size:12px; flex-wrap:wrap; }
 .sug-prices .lbl { color:#6b7280; }
@@ -814,6 +818,16 @@ function _buildCardHtml(item) {
   const platLabel = p => p === 'baemin' ? '배민상회' : '식봄';
   const platClass = p => p === 'baemin' ? 'badge-baemin' : 'badge-food';
 
+  function _plantBadgesHtml(statusList) {
+    if (!statusList || !statusList.length) return '';
+    return '<span class="sug-plant-badges">' + statusList.map(s => {
+      const stopped = s.use_hold === 'X';
+      const cls = stopped ? 'stopped' : 'active';
+      const label = `${escHtml(s.plant||'')}/${escHtml(s.batch||'')} ${stopped ? '⚠운영중단' : '운영중'}`;
+      return `<span class="plant-status-badge ${cls}">${label}</span>`;
+    }).join('') + '</span>';
+  }
+
   let h = `<div class="suggest-card" data-key="${escHtml(item.product_key)}">
     <div class="suggest-card-header">
       <span class="plat-badge ${platClass(currentPlatform)}">${platLabel(currentPlatform)}</span>
@@ -843,7 +857,7 @@ function _buildCardHtml(item) {
       const salesV = s.prev_sales_amt > 0 ? Math.round(s.prev_sales_amt/10000)+'만원' : '-';
       h += `<div class="sug-item" data-pkey="${escHtml(item.product_key)}" data-si="${si}" onclick="selectSuggest(this.dataset.pkey, +this.dataset.si)" id="sug-${escHtml(item.product_key)}-${si}">
         <span class="sug-rank">#${si+1}</span>
-        <div class="sug-code">${escHtml(s.our_product_code)}</div>
+        <div class="sug-code">${escHtml(s.our_product_code)}${_plantBadgesHtml(s.plant_batch_status)}</div>
         <div class="sug-name">${escHtml(s.product_name)}</div>
         <div class="sug-prices">
           <span><span class="lbl">공급가</span> <span class="val sale">${saleV}</span></span>

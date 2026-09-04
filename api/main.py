@@ -368,6 +368,7 @@ T_MISULGO = "h_hmfo_fsi_dm.gd_rst_ing.unshipped_compat_v"
 T_PROFIT  = "h_hmfo.gd_dcube.`00_customers_cm`"          # 수익성
 T_AR      = "h_hmfo_fsi.gd_rst_ing.sap_zfird015_monthly_accounts_receivable_history_rst_ing_f"  # 고객 여신/미수채권
 T_CUSTOMER_MASTER = "h_hmfo_fsi.gd_rst_ing.sap_zsdrxd03_customers_master_rst_ing_d"  # 고객마스터
+T_INVENTORY_EXP = "h_hmfo_fsi.gd_fsi_ent.helo_inventory_status_by_expiration_date_f"  # 재고현황(소비기한)
 
 # 수익성 인텐트 키워드 패턴 (CM/공헌이익/수익성 등 다양한 표현 통합)
 _PROFIT_KW_PAT = r'수익성|[Cc][Mm]\b|공헌이익률?|공헌이익율?'
@@ -2552,6 +2553,7 @@ _CUSTOMER_MASTER_COLS = [
     "고객코드", "고객명", "사업자번호", "대표자", "전화번호", "이동전화번호",
     "부서명", "지점명", "사원번호", "영업사원명", "VOC담당자",
     "지급조건", "지급조건명", "가격그룹명", "배치명", "납품센터명",
+    "은행명", "가상계좌번호",
     "ZA대표거래처", "ZA대표거래처명", "FC본부", "FC본부명", "ZP본사", "ZP본부명", "ZB본부", "ZB본부명",
     "사업자주소", "사업자상세주소", "사업장주소", "사업장상세주소", "사업주소", "사업장주소2",
     "업태", "업종", "E_MAIL", "생성일자", "거래개시일", "거래종료일", "검색어", "LOEVM", "집계수행일자", "update_date",
@@ -2568,6 +2570,7 @@ _CUSTOMER_MASTER_FIELD_LABEL = {
     "fc": "FC본부",
     "zp": "ZP본사",
     "zb": "ZB본부",
+    "account": "가상계좌",
 }
 
 
@@ -2606,6 +2609,8 @@ def _detect_customer_master_intent(query: str) -> str | None:
         return "phone"
     if re.search(r'주소|위치|어디', q):
         return "address"
+    if re.search(r'가상\s*계좌|입금\s*계좌|계좌\s*번호|은행\s*명', q):
+        return "account"
     if re.search(r'지급\s*조건|결제\s*조건|수금\s*조건|여신\s*조건', q):
         return "payment"
     if re.search(r'영업\s*사원|담당\s*자|담당\s*영업|담당자|사원\s*누구', q):
@@ -2631,6 +2636,7 @@ def _extract_customer_master_query(query: str) -> tuple[str, str, str] | None:
     name = re.sub(r'(고객|거래처)?\s*(마스터|고객\s*마스터|고객\s*정보|고객정보)\s*(조회|알려줘|알려|확인|뭐야|뭐|해줘|보여줘)?', ' ', name)
     name = re.sub(r'(고객|거래처)?\s*코드\s*(조회|알려줘|알려|확인|뭐야|뭐|해줘)?', ' ', name)
     name = re.sub(r'(전화번호|전화|연락처|핸드폰|휴대폰|모바일|이동전화번호|이동전화)', ' ', name)
+    name = re.sub(r'(가상\s*계좌|입금\s*계좌|계좌\s*번호|은행\s*명)', ' ', name)
     name = re.sub(r'(주소|위치|어디|지급\s*조건|결제\s*조건|수금\s*조건|영업\s*사원|담당\s*자|담당자|누구야|누구|뭐야|뭐|알려줘|알려|조회|확인|해줘|보여줘)', ' ', name)
     name = re.sub(r'\s+', ' ', name).strip()
     return cust_code, name, intent
@@ -2735,6 +2741,7 @@ def _build_customer_master_card(row: dict) -> str:
         "[담당/거래조건]",
         f"담당: {_clean_customer_master_value(row.get('부서명')) or '-'} / {sales}",
         f"지급조건: {pay}",
+        f"가상계좌: {_join_nonempty(row.get('은행명'), row.get('가상계좌번호'), sep=' / ') or '-'}",
         f"가격그룹: {_clean_customer_master_value(row.get('가격그룹명')) or '-'}",
         f"배치/센터: {_clean_customer_master_value(row.get('배치명')) or '-'} / {_clean_customer_master_value(row.get('납품센터명')) or '-'}",
         "",
@@ -2770,6 +2777,8 @@ def _build_customer_master_field_answer(row: dict, intent: str) -> str:
             body.append(f"사업장주소: {site_addr}")
     elif intent == "payment":
         body = [f"지급조건: {_join_nonempty(row.get('지급조건'), row.get('지급조건명'), sep=' / ') or '-'}"]
+    elif intent == "account":
+        body = [f"가상계좌: {_join_nonempty(row.get('은행명'), row.get('가상계좌번호'), sep=' / ') or '-'}"]
     elif intent == "sales":
         body = [f"담당 영업사원: {_join_nonempty(row.get('사원번호'), row.get('영업사원명'), sep=' / ') or '-'}"]
         voc = _clean_customer_master_value(row.get("VOC담당자"))
@@ -2801,6 +2810,91 @@ def _build_customer_master_candidate_text(keyword: str, candidates: list[dict], 
         sales = c.get("영업사원명") or "-"
         team = c.get("부서명") or c.get("지점명") or "-"
         lines.append(f"{i}. {code}  {name}\n   담당 {team} / {sales}")
+    return "\n".join(lines)
+
+
+# ─── 재고조회 (소비기한 포함) ─────────────────────────────
+def _detect_inventory_query(query: str) -> str | None:
+    """'200882 재고조회' / '재고조회 200882' 형태에서 상품코드 추출."""
+    q = query.strip()
+    m = re.match(r'^(\d{5,10})\s*재고\s*조회$', q)
+    if m:
+        return m.group(1)
+    m = re.match(r'^재고\s*조회\s*(\d{5,10})$', q)
+    if m:
+        return m.group(1)
+    return None
+
+
+def _fetch_inventory_by_code(product_code: str) -> list[dict]:
+    """상품코드 기준 최신(update_date) 재고 현황 조회 (입고배치별)."""
+    code = _sql_literal(product_code)
+    return _safe_query(f"""
+        SELECT `물류센터명`, `상품코드`, `상품명`, `상품온도구분`,
+               `재고_수량`, `재고입고일자`, `제조일자`, `소비기한`, `재고담당자`
+        FROM {T_INVENTORY_EXP}
+        WHERE `상품코드` = '{code}'
+          AND `update_date` = (SELECT MAX(`update_date`) FROM {T_INVENTORY_EXP} WHERE `상품코드` = '{code}')
+          AND COALESCE(`재고_수량`, 0) > 0
+        ORDER BY `재고입고일자` ASC
+        LIMIT 200
+    """, raw=True)
+
+
+def _format_inv_date(value) -> str:
+    """YYYYMMDD → 'N월 N일' 형식 변환."""
+    text = _clean_customer_master_value(value)
+    if re.fullmatch(r'\d{8}', text):
+        return f"{int(text[4:6])}월 {int(text[6:8])}일"
+    return text or "-"
+
+
+def _format_inv_exp_date(value) -> str:
+    """YYYYMMDD → 'YY년 N월 N일' 형식 변환 (소비기한 표시용)."""
+    text = _clean_customer_master_value(value)
+    if re.fullmatch(r'\d{8}', text):
+        return f"{text[2:4]}년 {int(text[4:6])}월 {int(text[6:8])}일"
+    return text or "-"
+
+
+def _build_inventory_markdown(rows: list[dict], product_code: str) -> str:
+    """재고조회 결과 카드형 텍스트 생성 (입고일자별 그룹 + 소비기한 표시)."""
+    if not rows:
+        return f"⚠️ {product_code} 상품의 재고 데이터를 찾을 수 없습니다."
+
+    first = rows[0]
+    product_name = _clean_customer_master_value(first.get("상품명")) or product_code
+    temp_cond = _clean_customer_master_value(first.get("상품온도구분"))
+    manager = _clean_customer_master_value(first.get("재고담당자"))
+    centers = list(dict.fromkeys(
+        _clean_customer_master_value(r.get("물류센터명")) for r in rows if _clean_customer_master_value(r.get("물류센터명"))
+    ))
+
+    # (입고일자, 소비기한) 기준 그룹핑 후 수량 합산
+    groups: dict[tuple[str, str], int] = {}
+    for r in rows:
+        key = (str(r.get("재고입고일자") or ""), str(r.get("소비기한") or ""))
+        groups[key] = groups.get(key, 0) + int(r.get("재고_수량") or 0)
+    total_qty = sum(groups.values())
+
+    lines = [f"📦 [{product_code}] {product_name}"]
+    meta = []
+    if temp_cond:
+        meta.append(f"온도구분 {temp_cond}")
+    if centers:
+        meta.append(f"물류센터 {', '.join(centers)}")
+    if meta:
+        lines.append(" / ".join(meta))
+    lines.append(f"• 총 재고: {total_qty:,}EA")
+    lines.append("")
+
+    # 소비기한 임박순(오름차순) 정렬
+    for (in_date, exp_date), qty in sorted(groups.items(), key=lambda kv: kv[0][1]):
+        lines.append(f"• {qty:,}EA / {_format_inv_date(in_date)} 입고 / 소비기한 {_format_inv_exp_date(exp_date)}까지")
+
+    if manager:
+        lines.append("")
+        lines.append(f"재고담당자: {manager}")
     return "\n".join(lines)
 
 
@@ -4578,6 +4672,7 @@ _MAIN_MENU_QR = [
     {"label": "📊 매출 실적",    "action": "message", "messageText": "매출 실적 메뉴"},
     {"label": "💰 CM(공헌이익)", "action": "message", "messageText": "수익성 분석 메뉴"},
     {"label": "📦 미출고 현황",  "action": "message", "messageText": "미출고 현황"},
+    {"label": "🗃️ 재고조회",    "action": "message", "messageText": "재고조회"},
     {"label": "💳 미수채권",     "action": "message", "messageText": "미수채권"},
     {"label": "🧾 고객마스터",   "action": "message", "messageText": "고객마스터"},
     {"label": "💬 도움말",       "action": "message", "messageText": "도움말"},
@@ -5023,6 +5118,7 @@ _user_pending_ar_input: dict[str, dict] = {}   # user_id → 미수채권 고객
 _user_last_new_cm: dict[str, dict] = {}        # user_id → {ZC본부명: {detail fields}} 신규CM 세부내역용
 _user_pending_customer_master_input: dict[str, dict] = {}  # user_id → 고객마스터 고객코드/고객명 입력 대기
 _user_pending_profit_period: dict[str, dict] = {}  # user_id → 특정연월 입력 대기 {dim, ts}
+_user_pending_inventory_input: dict[str, dict] = {}  # user_id → 재고조회 상품코드 입력 대기
 
 _PERSONAL_DETAIL_PATTERN = re.compile(
     r'개인형\s*(세부|내역|상세|세부내역|디테일|목록)',
@@ -5042,6 +5138,7 @@ def _clear_user_pending_context(user_id: str):
     _user_pending_ar_input.pop(user_id, None)
     _user_pending_customer_master_input.pop(user_id, None)
     _user_pending_profit_period.pop(user_id, None)
+    _user_pending_inventory_input.pop(user_id, None)
 
 # 사업부/지점 월별 전체매출 직접 처리 패턴 (Dify 바이패스)
 # 예: "외식식재사업부 3월 매출액", "외식1팀 3월 전체매출"
@@ -5124,6 +5221,22 @@ def _customer_master_input_qr() -> list[dict]:
     ]
 
 
+_INVENTORY_GUIDE_MESSAGE = (
+    "📦 재고조회\n\n"
+    "상품코드를 입력해주세요.\n\n"
+    "입력 예시\n"
+    "• 200882\n"
+    "• 200882 재고조회"
+)
+
+
+def _inventory_input_qr() -> list[dict]:
+    return [
+        {"label": "예시: 200882", "action": "message", "messageText": "200882 재고조회"},
+        {"label": "🏠 메인 메뉴", "action": "message", "messageText": "메뉴"},
+    ]
+
+
 def _build_personal_detail(sp_compact: str) -> str:
     """개인형 세부내역 – ZA거래처 기준으로 조회 및 포맷"""
     year = time.strftime("%Y")
@@ -5197,6 +5310,19 @@ def _call_dify_and_callback(query: str, user_id: str, callback_url: str):
     """
     t0 = time.time()
     logger.info(f"[콜백] 시작: user={user_id}, query={query[:80]}")
+
+    # ─── 재고조회 (Dify 바이패스) ─────────────────────────────────
+    _inv_code = _detect_inventory_query(query)
+    if _inv_code:
+        logger.info(f"[콜백] 재고조회: code={_inv_code}")
+        try:
+            _inv_rows = _fetch_inventory_by_code(_inv_code)
+            _inv_text = _build_inventory_markdown(_inv_rows, _inv_code)
+            _send_kakao_callback_qr(callback_url, _inv_text, _inventory_input_qr(), "재고조회")
+        except Exception as _inv_e:
+            logger.error(f"[콜백] 재고조회 오류: {_inv_e}")
+            _send_kakao_callback(callback_url, "⚠️ 재고조회 중 오류가 발생했습니다.", "재고조회")
+        return
 
     # ─── 고객마스터 조회 (Dify 바이패스) ─────────────────────────────
     _cm_req = _extract_customer_master_query(query)
@@ -8144,6 +8270,11 @@ async def kakao_skill(request: Request, background_tasks: BackgroundTasks):
             _user_pending_customer_master_input[user_id] = {"ts": time.time()}
             return _kakao_quickreply(_CUSTOMER_MASTER_GUIDE_MESSAGE, _customer_master_input_qr())
 
+        # ── 3-0k-2) 재고조회 메뉴 버튼 클릭 ──
+        if re.match(r'^재고\s*조회$', utterance.strip()):
+            _user_pending_inventory_input[user_id] = {"ts": time.time()}
+            return _kakao_quickreply(_INVENTORY_GUIDE_MESSAGE, _inventory_input_qr())
+
         # ── 3-0c) 미출고 현황 버튼 클릭 ──
         if utterance.strip() == "미출고 현황":
             return _kakao_quickreply(
@@ -8233,6 +8364,36 @@ async def kakao_skill(request: Request, background_tasks: BackgroundTasks):
                     return {"version": "2.0", "useCallback": True}
                 return _kakao_quickreply(
                     "고객마스터 조회는 콜백 환경에서 처리됩니다.\n고객코드 또는 고객명과 함께 '고객마스터'를 입력해주세요.",
+                    _MAIN_MENU_QR,
+                )
+
+        # ── 3-0y-2) 재고조회 메뉴 이후: 상품코드만 입력해도 재고조회로 연결 ──
+        if user_id in _user_pending_inventory_input:
+            _pending_inv = _user_pending_inventory_input.get(user_id, {})
+            _inv_wait_started = float(_pending_inv.get("ts", 0) or 0)
+            if _inv_wait_started and (time.time() - _inv_wait_started) > 600:
+                _user_pending_inventory_input.pop(user_id, None)
+            else:
+                _inv_input = utterance.strip()
+                if re.match(r'^(취소|그만|아니오|아니|ㄴ)[\s!~]*$', _inv_input):
+                    _user_pending_inventory_input.pop(user_id, None)
+                    return _kakao_quickreply("재고조회를 취소했습니다.", _MAIN_MENU_QR)
+                _user_pending_inventory_input.pop(user_id, None)
+                _inv_code_m = re.search(r'(\d{5,10})', _inv_input)
+                if not _inv_code_m:
+                    return _kakao_quickreply(
+                        "상품코드(숫자)를 입력해주세요.\n예) 200882",
+                        _inventory_input_qr(),
+                    )
+                _inv_lookup_query = f"{_inv_code_m.group(1)} 재고조회"
+                logger.info(f"[재고조회입력] '{_inv_input}' → '{_inv_lookup_query}'")
+                if callback_url:
+                    background_tasks.add_task(
+                        _call_dify_and_callback, _inv_lookup_query, user_id, callback_url
+                    )
+                    return {"version": "2.0", "useCallback": True}
+                return _kakao_quickreply(
+                    "재고조회는 콜백 환경에서 처리됩니다.\n상품코드와 함께 '재고조회'를 입력해주세요.",
                     _MAIN_MENU_QR,
                 )
 

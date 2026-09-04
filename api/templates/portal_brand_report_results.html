@@ -72,12 +72,15 @@
 <!-- 필터 바 -->
 <form method="get" action="/portal/brand-report/results" class="results-filter-bar">
   <label>브랜드
-    <select name="brand_code">
+    <select id="brandResultsSelect" name="brand_code" style="display:none;">
       <option value="">전체</option>
       {% for b in brands %}
       <option value="{{ b.brand_code }}" {% if b.brand_code == sel_brand_code %}selected{% endif %}>{{ b.brand_name }}</option>
       {% endfor %}
     </select>
+    <button type="button" id="brandResultsSelectBtn" style="font-size:.82rem;padding:.3rem .5rem;border:1px solid #d1d5db;border-radius:.35rem;background:#fff;cursor:pointer;">
+      <span id="brandResultsSelectBtnLabel">전체</span> ▾
+    </button>
   </label>
   <label>액션월(부터)
     <input type="text" name="action_ym" value="{{ sel_action_ym }}" placeholder="예: 202601" maxlength="6" size="8">
@@ -243,6 +246,9 @@
 
 <script>
 (function(){
+  if (window.initBrandPickerFor) {
+    window.initBrandPickerFor('brandResultsSelect', 'brandResultsSelectBtn', 'brandResultsSelectBtnLabel', {title: '브랜드 선택'});
+  }
   var sortDir = {};
   window.sortTable = function(colIdx) {
     var table = document.getElementById('resultsTable');
