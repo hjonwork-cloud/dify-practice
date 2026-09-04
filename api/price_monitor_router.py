@@ -1503,7 +1503,8 @@ async def pm_gp_lookup_page(request: Request, plant: str = "ALL"):
 
 @router.get("/api/gp-lookup/search")
 async def api_gp_lookup_search(request: Request, keyword: str = "", plant: str = "ALL"):
-    """상품코드/상품명으로 검색 → 전월 매출액 기준 내림차순 목록 (최대 50건)."""
+    """상품코드/상품명으로 검색 → 전월 매출액 기준 내림차순 목록 (최대 50건).
+    외부상품과 매핑된 우리 상품코드만 조회 대상 (미매핑 상품 제외)."""
     _require_login(request)
     if plant not in PLANTS:
         plant = "ALL"
@@ -1511,15 +1512,18 @@ async def api_gp_lookup_search(request: Request, keyword: str = "", plant: str =
     our_products = _get_our_products(plant)
     prev_sales = _get_prev_month_sales_totals(plant)
 
+    # 외부상품과 매핑된 상품코드만 대상으로 제한
+    all_mappings = portal_db.pm_list_all_mappings(plant)
+    mapped_codes = {m["our_product_code"] for m in all_mappings}
+    matched = [p for p in our_products if p.get("product_code") in mapped_codes]
+
     if keyword:
         kw_low = keyword.lower()
         matched = [
-            p for p in our_products
+            p for p in matched
             if kw_low in (p.get("product_code") or "").lower()
             or kw_low in (p.get("product_name") or "").lower()
         ]
-    else:
-        matched = list(our_products)
 
     results = []
     for p in matched:
@@ -1687,6 +1691,51 @@ async def api_gp_lookup_detail(request: Request, product_code: str, plant: str =
         "chart_datasets": chart_datasets,
         "has_mapping":    bool(product_keys),
     })
+
+
+@router.get("/api/gp-lookup/platform-search")
+async def api_gp_lookup_platform_search(request: Request, keyword: str = ""):
+    """외부상품 단순 조회 (전체 계정 공용).
+    매핑/선택 기능 없이 플랫폼/상품명/판매가/실판매가(수수료차감)/셀러만 조회.
+    '*키워드*' 형태 와일드카드 검색 지원."""
+    _require_login(request)
+    keyword = (keyword or "").strip()
+    if not keyword:
+        return JSONResponse({"items": [], "error": None})
+    try:
+        like_clause = _build_like_clause(keyword, "p.product_name")
+        rows = _q(f"""
+            SELECT p.platform, p.platform_seller_name, p.product_name, p.spec,
+                   p.price_sale, p.delivery_type
+            FROM {T_SILVER} p
+            INNER JOIN (
+                SELECT platform, MAX(crawl_date) AS max_date
+                FROM {T_SILVER}
+                GROUP BY platform
+            ) latest ON p.platform = latest.platform AND p.crawl_date = latest.max_date
+            WHERE {like_clause}
+            ORDER BY p.platform, p.platform_seller_name, p.price_sale
+            LIMIT 300
+        """) or []
+    except Exception as e:
+        logger.warning(f"[gp-lookup] 외부상품 단순조회 실패: {e}")
+        return JSONResponse({"items": [], "error": str(e)})
+
+    rows = _serialize_rows(rows)
+    items = []
+    for r in rows:
+        price = r.get("price_sale")
+        fee = _get_fee(r.get("delivery_type") or "직배송", r.get("platform") or "", r.get("platform_seller_name") or "")
+        net_price = round(price * (1 - fee), 0) if price else None
+        items.append({
+            "platform":     r.get("platform"),
+            "product_name": r.get("product_name"),
+            "spec":         r.get("spec"),
+            "price_sale":   price,
+            "net_price":    net_price,
+            "seller_name":  r.get("platform_seller_name"),
+        })
+    return JSONResponse({"items": items[:300], "total": len(items)})
 
 
 # ── 화면 5: 매핑 수정요청 (DELETE/REPLACE) ────────────────────────────────
