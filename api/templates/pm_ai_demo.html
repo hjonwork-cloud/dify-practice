@@ -28,6 +28,10 @@
 .sug-code{font-size:.72rem;color:#94a3b8;font-family:monospace;}
 .sug-name{font-size:.95rem;font-weight:700;color:#0f172a;margin:.15rem 0;}
 .sug-meta{font-size:.78rem;color:#64748b;}
+.sug-plant-badges{display:inline-flex;gap:4px;margin-left:6px;flex-wrap:wrap;vertical-align:middle;}
+.plant-status-badge{font-size:10px;padding:1px 6px;border-radius:8px;font-weight:600;white-space:nowrap;display:inline-block;}
+.plant-status-badge.active{background:#d1fae5;color:#065f46;}
+.plant-status-badge.stopped{background:#fee2e2;color:#b91c1c;}
 .sug-conf{text-align:right;min-width:90px;}
 .conf-score{font-size:1.5rem;font-weight:900;}
 .conf-score.high{color:#059669;} .conf-score.mid{color:#d97706;} .conf-score.low{color:#9ca3af;}
@@ -84,6 +88,16 @@ let aidRating = '';
 
 function confClass(score){ if(score>=70) return 'high'; if(score>=40) return 'mid'; return 'low'; }
 
+function plantBadgesHtml(statusList){
+  if(!statusList || !statusList.length) return '';
+  return '<span class="sug-plant-badges">' + statusList.map(function(s){
+    const stopped = s.use_hold === 'X';
+    const cls = stopped ? 'stopped' : 'active';
+    const label = (s.plant||'') + '/' + (s.batch||'') + ' ' + (stopped ? '\u26a0\uc6b4\uc601\uc911\ub2e8' : '\uc6b4\uc601\uc911');
+    return '<span class="plant-status-badge ' + cls + '">' + label + '</span>';
+  }).join('') + '</span>';
+}
+
 async function aidRun(){
   const name = document.getElementById('aidName').value.trim();
   if(!name){ alert('상품명을 입력해주세요.'); return; }
@@ -119,7 +133,7 @@ async function aidRun(){
       <div class="sug-card">
         <div class="sug-rank">${i+1}</div>
         <div class="sug-body">
-          <div class="sug-code">${s.product_code}</div>
+          <div class="sug-code">${s.product_code}${plantBadgesHtml(s.plant_batch_status)}</div>
           <div class="sug-name">${s.product_name || ''}</div>
           <div class="sug-meta">${s.category || '-'} · ${s.brand || '-'} · ${s.unit || ''}</div>
         </div>

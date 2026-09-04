@@ -3443,6 +3443,19 @@ async def api_ai_demo_suggest(request: Request):
     our_products = _get_our_products(plant)
     base_prices  = {r["product_code"]: r for r in _get_base_prices(plant)}
 
+    # 상품코드 → [{plant, batch, use_hold}, ...] 매핑 (운영여부 배지 표시용)
+    _products_wb = _get_our_products_with_batch(plant)
+    _plant_status_map: dict = {}
+    for _pw in _products_wb:
+        _pw_code = _pw.get("product_code")
+        if not _pw_code:
+            continue
+        _plant_status_map.setdefault(_pw_code, []).append({
+            "plant":    _pw.get("plant", ""),
+            "batch":    _pw.get("batch", ""),
+            "use_hold": _pw.get("use_hold", ""),
+        })
+
     # 대분류가 입력되면 우선 해당 카테고리 내에서만 채점 (결과 없으면 전체로 폴백)
     candidates = our_products
     if category:
@@ -3472,6 +3485,7 @@ async def api_ai_demo_suggest(request: Request):
                 "unit":         p.get("unit"),
                 "score":        s,
                 "confidence":   _confidence_label(s),
+                "plant_batch_status": _plant_status_map.get(code, []),
             })
     scored.sort(key=lambda x: -x["score"])
     top3 = scored[:3]

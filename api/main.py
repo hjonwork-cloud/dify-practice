@@ -2841,24 +2841,38 @@ def _fetch_inventory_by_code(product_code: str) -> list[dict]:
     """, raw=True)
 
 
-def _format_inv_date(value) -> str:
-    """YYYYMMDD → 'N월 N일' 형식 변환."""
+def _parse_inv_date(value) -> tuple[int, int, int] | None:
+    """'YYYYMMDD' / 'YYYY-MM-DD' (Databricks DATE 컬럼은 str()시 후자로 나옴) → (년,월,일)."""
     text = _clean_customer_master_value(value)
-    if re.fullmatch(r'\d{8}', text):
-        return f"{int(text[4:6])}월 {int(text[6:8])}일"
-    return text or "-"
+    m = re.fullmatch(r'(\d{4})-(\d{2})-(\d{2})', text)
+    if m:
+        return int(m.group(1)), int(m.group(2)), int(m.group(3))
+    m = re.fullmatch(r'(\d{4})(\d{2})(\d{2})', text)
+    if m:
+        return int(m.group(1)), int(m.group(2)), int(m.group(3))
+    return None
+
+
+def _format_inv_date(value) -> str:
+    """'N월 N일' 형식 변환 (입고일자 표시용)."""
+    parsed = _parse_inv_date(value)
+    if parsed:
+        _, mo, d = parsed
+        return f"{mo}월 {d}일"
+    return _clean_customer_master_value(value) or "-"
 
 
 def _format_inv_exp_date(value) -> str:
-    """YYYYMMDD → 'YY년 N월 N일' 형식 변환 (소비기한 표시용)."""
-    text = _clean_customer_master_value(value)
-    if re.fullmatch(r'\d{8}', text):
-        return f"{text[2:4]}년 {int(text[4:6])}월 {int(text[6:8])}일"
-    return text or "-"
+    """'YY년 N월 N일' 형식 변환 (소비기한 표시용)."""
+    parsed = _parse_inv_date(value)
+    if parsed:
+        y, mo, d = parsed
+        return f"{y % 100:02d}년 {mo}월 {d}일"
+    return _clean_customer_master_value(value) or "-"
 
 
 def _build_inventory_markdown(rows: list[dict], product_code: str) -> str:
-    """재고조회 결과 카드형 텍스트 생성 (입고일자별 그룹 + 소비기한 표시)."""
+    """재고조회 결과 카드형 텍스트 생성 (물류센터별 → 입고일자별 그룹 + 소비기한 표시)."""
     if not rows:
         return f"⚠️ {product_code} 상품의 재고 데이터를 찾을 수 없습니다."
 
@@ -2866,31 +2880,34 @@ def _build_inventory_markdown(rows: list[dict], product_code: str) -> str:
     product_name = _clean_customer_master_value(first.get("상품명")) or product_code
     temp_cond = _clean_customer_master_value(first.get("상품온도구분"))
     manager = _clean_customer_master_value(first.get("재고담당자"))
-    centers = list(dict.fromkeys(
-        _clean_customer_master_value(r.get("물류센터명")) for r in rows if _clean_customer_master_value(r.get("물류센터명"))
-    ))
 
-    # (입고일자, 소비기한) 기준 그룹핑 후 수량 합산
-    groups: dict[tuple[str, str], int] = {}
+    # 물류센터별로 그룹핑 → 센터 내에서 (입고일자, 소비기한) 기준 그룹핑 후 수량 합산
+    center_groups: dict[str, dict[tuple[str, str], int]] = {}
+    center_order: list[str] = []
     for r in rows:
+        center = _clean_customer_master_value(r.get("물류센터명")) or "미지정센터"
+        if center not in center_groups:
+            center_groups[center] = {}
+            center_order.append(center)
         key = (str(r.get("재고입고일자") or ""), str(r.get("소비기한") or ""))
-        groups[key] = groups.get(key, 0) + int(r.get("재고_수량") or 0)
-    total_qty = sum(groups.values())
+        center_groups[center][key] = center_groups[center].get(key, 0) + int(r.get("재고_수량") or 0)
+
+    total_qty = sum(sum(g.values()) for g in center_groups.values())
 
     lines = [f"📦 [{product_code}] {product_name}"]
-    meta = []
     if temp_cond:
-        meta.append(f"온도구분 {temp_cond}")
-    if centers:
-        meta.append(f"물류센터 {', '.join(centers)}")
-    if meta:
-        lines.append(" / ".join(meta))
-    lines.append(f"• 총 재고: {total_qty:,}EA")
-    lines.append("")
+        lines.append(f"온도구분 {temp_cond}")
+    center_suffix = f" ({len(center_order)}개 물류센터)" if len(center_order) > 1 else ""
+    lines.append(f"• 총 재고: {total_qty:,}EA{center_suffix}")
 
-    # 소비기한 임박순(오름차순) 정렬
-    for (in_date, exp_date), qty in sorted(groups.items(), key=lambda kv: kv[0][1]):
-        lines.append(f"• {qty:,}EA / {_format_inv_date(in_date)} 입고 / 소비기한 {_format_inv_exp_date(exp_date)}까지")
+    for center in center_order:
+        groups = center_groups[center]
+        center_total = sum(groups.values())
+        lines.append("")
+        lines.append(f"[{center}] {center_total:,}EA")
+        # 소비기한 임박순(오름차순) 정렬
+        for (in_date, exp_date), qty in sorted(groups.items(), key=lambda kv: kv[0][1]):
+            lines.append(f"• {qty:,}EA / {_format_inv_date(in_date)} 입고 / 소비기한 {_format_inv_exp_date(exp_date)}까지")
 
     if manager:
         lines.append("")
