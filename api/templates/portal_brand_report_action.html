@@ -115,9 +115,11 @@
     </button>
   </form>
   <script>
-    if (window.initBrandPickerFor) {
-      window.initBrandPickerFor('brandActionSelect', 'brandActionSelectBtn', 'brandActionSelectBtnLabel', {title: '브랜드 선택'});
-    }
+    document.addEventListener('DOMContentLoaded', function () {
+      if (window.initBrandPickerFor) {
+        window.initBrandPickerFor('brandActionSelect', 'brandActionSelectBtn', 'brandActionSelectBtnLabel', {title: '브랜드 선택'});
+      }
+    });
   </script>
 </div>
 

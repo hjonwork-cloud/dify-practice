@@ -246,9 +246,11 @@
 
 <script>
 (function(){
-  if (window.initBrandPickerFor) {
-    window.initBrandPickerFor('brandResultsSelect', 'brandResultsSelectBtn', 'brandResultsSelectBtnLabel', {title: '브랜드 선택'});
-  }
+  document.addEventListener('DOMContentLoaded', function () {
+    if (window.initBrandPickerFor) {
+      window.initBrandPickerFor('brandResultsSelect', 'brandResultsSelectBtn', 'brandResultsSelectBtnLabel', {title: '브랜드 선택'});
+    }
+  });
   var sortDir = {};
   window.sortTable = function(colIdx) {
     var table = document.getElementById('resultsTable');

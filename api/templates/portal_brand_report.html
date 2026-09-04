@@ -119,9 +119,11 @@
       loadBrandData(selectedBrand, null);
     });
   }
-  if (window.initBrandPickerFor) {
-    window.initBrandPickerFor('brandSelect', 'brandSelectBtn', 'brandSelectBtnLabel', {title: '브랜드 선택'});
-  }
+  document.addEventListener('DOMContentLoaded', function () {
+    if (window.initBrandPickerFor) {
+      window.initBrandPickerFor('brandSelect', 'brandSelectBtn', 'brandSelectBtnLabel', {title: '브랜드 선택'});
+    }
+  });
 
   // 당월/전월 토글
   var ymBtnPrev = document.getElementById('ymBtnPrev');
