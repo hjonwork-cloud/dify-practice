@@ -18,6 +18,17 @@
 .result-item .item-meta{font-size:.77rem;color:#6b7280;margin-top:.2rem;}
 .mapping-preview{margin-top:1rem;padding:.9rem;background:#f8fafc;border-radius:10px;border:1px dashed #cbd5e1;}
 .mapping-preview .map-line{display:flex;align-items:center;gap:.5rem;margin:.3rem 0;font-size:.83rem;}
+.result-item.already-mapped{opacity:.55;cursor:not-allowed;}
+.result-item .sim-badge{font-weight:700;}
+.tag-btn{padding:.35rem .85rem;border-radius:20px;border:1.5px solid #d1d5db;background:#fff;font-size:.8rem;cursor:pointer;font-weight:500;}
+.tag-btn:hover{border-color:var(--pm-blue);}
+.tag-btn.active{border-color:var(--pm-blue);background:#eff6ff;color:var(--pm-blue);font-weight:700;}
+.tag-btn.active.substitute{border-color:#d97706;background:#fffbeb;color:#d97706;}
+.tag-btn.active.multiple{border-color:#7c3aed;background:#f5f3ff;color:#7c3aed;}
+.multiplier-row{display:flex;align-items:center;gap:.6rem;font-size:.83rem;margin-top:.6rem;}
+.multiplier-row label{color:#374151;font-weight:600;white-space:nowrap;}
+.multiplier-row input{width:80px;padding:.35rem .6rem;border:1.5px solid #cbd5e1;border-radius:8px;font-size:.85rem;font-weight:700;text-align:center;}
+.multiplier-hint{font-size:.75rem;color:#94a3b8;}
 </style>
 {% endblock %}
 
@@ -55,12 +66,26 @@
         </select>
       </div>
     </div>
-    <input type="text" id="platKeyword" class="pm-input" placeholder="플랫폼 상품명 검색"
+    <input type="text" id="platKeyword" class="pm-input" placeholder="플랫폼 상품명 검색 (*와일드카드 가능)"
            oninput="searchPlat(this.value)">
     <div class="search-results" id="platResults">
       <div style="text-align:center;padding:2rem;color:#94a3b8;font-size:.84rem;">상품명을 입력하세요</div>
     </div>
     <div id="selectedPlatList" style="margin-top:.75rem;display:flex;flex-direction:column;gap:.3rem;"></div>
+
+    <hr style="border:none;border-top:1px solid #e2e8f0;margin:.9rem 0">
+    <div style="font-size:.83rem;font-weight:700;color:#374151;margin-bottom:.4rem;">태그</div>
+    <div style="display:flex;gap:.4rem;">
+      <button type="button" class="tag-btn active" id="tagNormal" onclick="setTag('normal')">📌 일반</button>
+      <button type="button" class="tag-btn" id="tagSubstitute" onclick="setTag('substitute')">🔄 대체자재</button>
+      <button type="button" class="tag-btn" id="tagMultiple" onclick="setTag('multiple')">✖️ 배수</button>
+    </div>
+    <div class="multiplier-row" id="multiplierRow" style="display:none">
+      <label>배수</label>
+      <input type="number" id="inputMultiplier" value="1" step="0.01" min="0.01" placeholder="1.0" oninput="updateMultiplierPreview()">
+      <span class="multiplier-hint">플랫폼 단가 ÷ 배수 = 우리 단가 기준</span>
+    </div>
+    <div id="multiplierPreview" style="font-size:.78rem;color:#6b7280;margin-top:.4rem;display:none"></div>
   </div>
 </div>
 
@@ -81,6 +106,7 @@ const PLANT = "{{ plant }}";
 let selectedOur = null;
 let selectedPlats = [];
 let ourTimer = null, platTimer = null;
+let selectedTag = 'normal';
 
 function debounce(fn, t){ return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a),t=350); }; }
 
@@ -133,7 +159,7 @@ async function searchPlat(kw){
   platTimer=setTimeout(async()=>{
     try{
       const pf=document.getElementById('platformFilter').value;
-      const res=await fetch(`/portal/price-monitor/api/platform-products?keyword=${encodeURIComponent(kw)}&platform=${pf}`);
+      const res=await fetch(`/portal/price-monitor/api/pm-ai/similar?product_name=${encodeURIComponent(kw)}&platform=${pf}`);
       const json=await res.json();
       if(json.error){
         document.getElementById('platResults').innerHTML=`<div style="padding:1rem;color:#ef4444;font-size:.8rem;">⚠ 조회 오류: ${json.error}<br><small>크롤링이 아직 실행되지 않았을 수 있습니다.</small></div>`;
@@ -157,19 +183,27 @@ const PLAT_COLOR={'baemin':'badge-baemin','foodspring':'badge-foodspring'};
 function renderPlatResults(data){
   const el=document.getElementById('platResults');
   if(!data.length){el.innerHTML='<div style="text-align:center;padding:2rem;color:#94a3b8;font-size:.84rem;">검색 결과 없음</div>';return;}
+  // 유사도 높은 순은 API가 이미 정렬해서 내려줌
   el.innerHTML=data.slice(0,100).map(p=>{
     const sel=selectedPlats.some(s=>s.product_key===p.product_key);
-    return `<div class="result-item${sel?' selected-plat':''}" onclick='togglePlat(${JSON.stringify(p)})'>
+    const sim=p.similarity_score ?? 0;
+    const simColor = sim>=70 ? '#059669' : sim>=40 ? '#d97706' : '#9ca3af';
+    const mappedTxt = p.is_mapped ? '<span style="color:#059669;font-weight:600;">✅ 이미 매핑됨</span>' : '';
+    const netTxt = p.net_price ? `순단가 ${p.net_price.toLocaleString()}원` : '';
+    const clickable = p.is_mapped ? '' : `onclick='togglePlat(${JSON.stringify(p)})'`;
+    return `<div class="result-item${sel?' selected-plat':''}${p.is_mapped?' already-mapped':''}" ${clickable}>
       <div class="item-name">
         <span class="badge ${PLAT_COLOR[p.platform]||'badge-gray'}" style="margin-right:.3rem;">${PLAT_LABEL[p.platform]||p.platform}</span>
-        ${p.product_name||''}
+        ${p.display_name || p.product_name || ''}
+        <span class="sim-badge" style="color:${simColor};font-size:.75rem;margin-left:.3rem;">${sim.toFixed(0)}%</span>
       </div>
-      <div class="item-meta">${p.platform_seller_name||''} · ${p.spec||''} · <b>${p.price_sale?p.price_sale.toLocaleString()+'원':'-'}</b> · ${p.delivery_type||''}</div>
+      <div class="item-meta">${p.platform_seller_name||''} · ${p.spec||''} · <b>${p.price_sale?p.price_sale.toLocaleString()+'원':'-'}</b>${netTxt?' · '+netTxt:''} · ${p.delivery_type||''} ${mappedTxt}</div>
     </div>`;
   }).join('');
 }
 
 function togglePlat(p){
+  if(p.is_mapped) return; // 이미 매핑된 상품은 선택 불가
   const idx=selectedPlats.findIndex(s=>s.product_key===p.product_key);
   if(idx>=0) selectedPlats.splice(idx,1);
   else selectedPlats.push(p);
@@ -194,17 +228,21 @@ function updateSelectedPlatList(){
 
 function removePlat(i){selectedPlats.splice(i,1);updateSelectedPlatList();updatePreview();}
 
+const TAG_LABEL={normal:'📌 일반', substitute:'🔄 대체자재', multiple:'✖️ 배수'};
+
 function updatePreview(){
   const preview=document.getElementById('mappingPreview');
   const lines=document.getElementById('previewLines');
   if(!selectedOur||!selectedPlats.length){preview.style.display='none';return;}
   preview.style.display='block';
-  lines.innerHTML=selectedPlats.map(p=>`
+  const tagTxt = TAG_LABEL[selectedTag] || selectedTag;
+  lines.innerHTML=`<div style="font-size:.76rem;color:#6b7280;margin-bottom:.4rem;">태그: <b>${tagTxt}</b>${selectedTag==='multiple' ? ' · 배수 '+(document.getElementById('inputMultiplier').value||1) : ''}</div>` +
+    selectedPlats.map(p=>`
     <div class="map-line">
       <span class="badge badge-blue">${selectedOur.product_name||selectedOur.product_code}</span>
       <span style="color:#94a3b8;">↔</span>
       <span class="badge ${PLAT_COLOR[p.platform]||'badge-gray'}">${PLAT_LABEL[p.platform]||p.platform}</span>
-      <span>${p.product_name} (${p.platform_seller_name})</span>
+      <span>${p.display_name || p.product_name} (${p.platform_seller_name})</span>
       <span style="color:var(--pm-blue);font-weight:700;margin-left:auto;">${p.price_sale?p.price_sale.toLocaleString()+'원':''}</span>
     </div>`).join('');
 }
@@ -213,27 +251,72 @@ async function submitMapping(){
   if(!selectedOur||!selectedPlats.length){showToast('우리 상품과 플랫폼 상품을 선택해주세요','error');return;}
   const btn=document.getElementById('submitBtn');
   btn.disabled=true; btn.textContent='등록 중...';
-  let ok=0;
-  for(const p of selectedPlats){
-    const r=await pmPost('/portal/price-monitor/api/mapping/add',{
-      our_product_code: selectedOur.product_code,
-      plant: PLANT,
-      product_key: p.product_key,
-      platform: p.platform,
-      platform_seller_id: String(p.platform_seller_id||''),
-      platform_product_id: String(p.platform_product_id||''),
-      product_name: selectedOur.product_name||'',
-      seller_name: p.platform_seller_name||''
+  const multiplier=parseFloat(document.getElementById('inputMultiplier').value)||1.0;
+  try{
+    const res=await fetch('/portal/price-monitor/api/mapping/bulk-add',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        our_product_code: selectedOur.product_code,
+        plant: PLANT,
+        tag: selectedTag,
+        multiplier: multiplier,
+        items: selectedPlats.map(p=>({
+          product_key: p.product_key,
+          platform: p.platform,
+          platform_seller_id: p.platform_seller_id||'',
+          platform_product_id: p.platform_product_id||'',
+          product_name: selectedOur.product_name||'',
+          seller_name: p.platform_seller_name||'',
+        })),
+      }),
     });
-    if(r.ok) ok++;
+    const json=await res.json();
+    if(json.ok){
+      showToast(`${json.added}개 매핑이 등록되었습니다!`,'success');
+      clearAll();
+    } else {
+      showToast('오류: '+(json.error||'알 수 없는 오류'),'error');
+    }
+  }catch(e){
+    showToast('저장 실패: '+e.message,'error');
   }
-  showToast(`${ok}개 매핑이 등록되었습니다!`,'success');
   btn.disabled=false; btn.textContent='✅ 매핑 등록 (즉시 반영)';
-  clearAll();
+}
+
+// 태그 선택
+function setTag(tag){
+  selectedTag=tag;
+  ['tagNormal','tagSubstitute','tagMultiple'].forEach(id=>{
+    const el=document.getElementById(id);
+    el.classList.remove('active','substitute','multiple');
+  });
+  const tagMap={normal:'tagNormal', substitute:'tagSubstitute', multiple:'tagMultiple'};
+  const btn=document.getElementById(tagMap[tag]);
+  btn.classList.add('active');
+  if(tag==='substitute') btn.classList.add('substitute');
+  if(tag==='multiple')   btn.classList.add('multiple');
+
+  const mRow=document.getElementById('multiplierRow');
+  mRow.style.display = tag==='multiple' ? 'flex' : 'none';
+  document.getElementById('multiplierPreview').style.display='none';
+  if(tag==='multiple') updateMultiplierPreview();
+}
+
+function updateMultiplierPreview(){
+  const m=parseFloat(document.getElementById('inputMultiplier').value)||1;
+  if(!selectedOur||!selectedPlats.length) return;
+  const first=selectedPlats[0];
+  const net = first.net_price || first.price_sale;
+  if(!net) return;
+  const adjusted=Math.round(net/m);
+  const div=document.getElementById('multiplierPreview');
+  const ourPriceTxt = selectedOur.avg_sale_price ? selectedOur.avg_sale_price.toLocaleString()+'원' : '-';
+  div.textContent=`배수 적용 단가: ${net.toLocaleString()}원 ÷ ${m} = ${adjusted.toLocaleString()}원 (우리 공급가 ${ourPriceTxt}와(과) 비교, 첫 선택상품 기준)`;
+  div.style.display='block';
 }
 
 function clearAll(){
-  selectedOur=null; selectedPlats=[];
+  selectedOur=null; selectedPlats=[]; selectedTag='normal';
   document.getElementById('ourKeyword').value='';
   document.getElementById('platKeyword').value='';
   document.getElementById('ourResults').innerHTML='<div style="text-align:center;padding:2rem;color:#94a3b8;font-size:.84rem;">상품명을 입력하세요</div>';
@@ -242,6 +325,8 @@ function clearAll(){
   document.getElementById('ourSelectedBadge').style.display='none';
   document.getElementById('selectedPlatList').innerHTML='';
   document.getElementById('mappingPreview').style.display='none';
+  document.getElementById('inputMultiplier').value='1';
+  setTag('normal');
 }
 
 // URL 파라미터로 상품 자동 선택

@@ -6,6 +6,21 @@
 {% block title %}운영상품 목록{% endblock %}
 {% block page_title %}운영상품 목록 &amp; 매핑 현황{% endblock %}
 
+{% block head %}
+<style>
+.tag-btn{padding:.35rem .85rem;border-radius:20px;border:1.5px solid #d1d5db;background:#fff;font-size:.8rem;cursor:pointer;font-weight:500;}
+.tag-btn:hover{border-color:var(--pm-blue);}
+.tag-btn.active{border-color:var(--pm-blue);background:#eff6ff;color:var(--pm-blue);font-weight:700;}
+.tag-btn.active.substitute{border-color:#d97706;background:#fffbeb;color:#d97706;}
+.tag-btn.active.multiple{border-color:#7c3aed;background:#f5f3ff;color:#7c3aed;}
+.multiplier-row{display:flex;align-items:center;gap:.6rem;font-size:.83rem;}
+.multiplier-row label{color:#374151;font-weight:600;white-space:nowrap;}
+.multiplier-row input{width:80px;padding:.35rem .6rem;border:1.5px solid #cbd5e1;border-radius:8px;font-size:.85rem;font-weight:700;text-align:center;}
+.multiplier-hint{font-size:.72rem;color:#94a3b8;}
+.sm-already-mapped{opacity:.55;}
+</style>
+{% endblock %}
+
 {% block content %}
 <!-- 필터 -->
 <form method="get" class="pm-filterbar">
@@ -178,6 +193,17 @@
     <div id="sm-results" style="overflow-y:auto;flex:1;border:1px solid #e2e8f0;border-radius:8px;min-height:220px;max-height:380px;">
       <div style="padding:2rem;text-align:center;color:#94a3b8;font-size:.88rem;">검색어를 입력하거나 위 버튼을 누르세요</div>
     </div>
+    <div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;">
+      <span style="font-size:.8rem;font-weight:700;color:#374151;">태그:</span>
+      <button type="button" class="tag-btn active" id="sm-tag-normal" onclick="setSmTag('normal')">📌 일반</button>
+      <button type="button" class="tag-btn" id="sm-tag-substitute" onclick="setSmTag('substitute')">🔄 대체자재</button>
+      <button type="button" class="tag-btn" id="sm-tag-multiple" onclick="setSmTag('multiple')">✖️ 배수</button>
+      <div class="multiplier-row" id="sm-multiplier-row" style="display:none">
+        <label>배수</label>
+        <input type="number" id="sm-multiplier" value="1" step="0.01" min="0.01" placeholder="1.0">
+        <span class="multiplier-hint">플랫폼 단가 ÷ 배수 = 우리 단가 기준</span>
+      </div>
+    </div>
     <div style="display:flex;align-items:center;gap:.75rem;font-size:.85rem;flex-wrap:wrap;">
       <label style="font-weight:600;">적용 플랜트:</label>
       <select id="sm-plant" class="pm-input" style="width:140px;">
@@ -197,7 +223,21 @@ let _smCode = '', _smDefaultPlant = '';
 const _smChecked = new Set();
 const _smSelectedTokens = new Set();
 let _kwManuallyEdited = false;  // 사용자가 검색랙을 직접 수정한 경우 토큰이 덮어쓰지 않도록
+let _smTag = 'normal';
 
+// 태그 선택
+function setSmTag(tag) {
+  _smTag = tag;
+  ['normal','substitute','multiple'].forEach(t => {
+    const el = document.getElementById('sm-tag-'+t);
+    el.classList.remove('active','substitute','multiple');
+  });
+  const btn = document.getElementById('sm-tag-'+tag);
+  btn.classList.add('active');
+  if (tag === 'substitute') btn.classList.add('substitute');
+  if (tag === 'multiple')   btn.classList.add('multiple');
+  document.getElementById('sm-multiplier-row').style.display = tag === 'multiple' ? 'flex' : 'none';
+}
 // 상품명 → 토큰 분리
 function _tokenize(name) {
   return name
@@ -280,6 +320,8 @@ function openSuggest(btn) {
   _smChecked.clear();
   _kwManuallyEdited = false;  // 모달 열릴 때 리셋
   _smSelectedTokens.clear();
+  setSmTag('normal');
+  document.getElementById('sm-multiplier').value = '1';
   document.getElementById('sm-title').textContent = name;
   document.getElementById('sm-code').textContent = code;
   document.getElementById('sm-plant').value = 'ALL';  // 기본값 항상 ALL
@@ -319,9 +361,9 @@ async function searchSuggest() {
   const el = document.getElementById('sm-results');
   el.innerHTML = '<div style="padding:2rem;text-align:center;color:#94a3b8;">검색 중...</div>';
   _smChecked.clear(); updateMapBtn();
-  const qs = new URLSearchParams({keyword: kw});
+  const qs = new URLSearchParams({product_name: kw});
   if (pf) qs.set('platform', pf);
-  const resp = await fetch(`/portal/price-monitor/api/platform-products?${qs}`);
+  const resp = await fetch(`/portal/price-monitor/api/pm-ai/similar?${qs}`);
   const json = await resp.json();
   const rows = json.data || [];
   if (!rows.length) {
@@ -333,7 +375,9 @@ async function searchSuggest() {
       <th style="padding:.4rem .5rem;width:32px;"><input type="checkbox" id="sm-chk-all" onchange="toggleAllSm(this)" style="cursor:pointer;"></th>
       <th style="padding:.4rem .5rem;">플랫폼</th>
       <th style="padding:.4rem .5rem;text-align:left;">상품명</th>
+      <th style="padding:.4rem .5rem;text-align:right;">유사도</th>
       <th style="padding:.4rem .5rem;text-align:right;">판매가</th>
+      <th style="padding:.4rem .5rem;text-align:right;">순단가</th>
       <th style="padding:.4rem .5rem;text-align:left;">셀러</th>
     </tr></thead><tbody>`;
   rows.forEach(r => {
@@ -342,8 +386,13 @@ async function searchSuggest() {
       ? '<span class="badge badge-baemin" style="font-size:.72rem;">배민</span>'
       : '<span class="badge badge-foodspring" style="font-size:.72rem;">식봄</span>';
     const price = r.price_sale ? Number(r.price_sale).toLocaleString() + '원' : '-';
+    const netPrice = r.net_price ? Number(r.net_price).toLocaleString() + '원' : '-';
+    const sim = r.similarity_score ?? 0;
+    const simColor = sim >= 70 ? '#059669' : sim >= 40 ? '#d97706' : '#9ca3af';
+    const mappedTxt = r.is_mapped ? '<div style="color:#059669;font-size:.7rem;font-weight:600;">✅ 이미 매핑됨</div>' : '';
     const esc = v => (v||'').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
-    html += `<tr style="border-bottom:1px solid #f1f5f9;">
+    const rowCls = r.is_mapped ? ' class="sm-already-mapped"' : '';
+    html += `<tr${rowCls} style="border-bottom:1px solid #f1f5f9;">
       <td style="padding:.3rem .5rem;text-align:center;">
         <input type="checkbox" class="sm-item-chk"
                data-key="${esc(key)}"
@@ -352,13 +401,16 @@ async function searchSuggest() {
                data-delivery="${r.delivery_type||''}"
                data-seller-id="${esc(r.platform_seller_id||r.seller_id||'')}"
                data-product-id="${esc(r.platform_product_id||r.platform_product_code||'')}"
-               data-product-name="${esc(r.product_name||'')}"
+               data-product-name="${esc(r.display_name || r.product_name||'')}"
                data-seller-name="${esc(r.platform_seller_name||r.seller_name||'')}"
+               ${r.is_mapped ? 'disabled' : ''}
                onchange="toggleSm(this)" style="width:15px;height:15px;cursor:pointer;">
       </td>
       <td style="padding:.3rem .5rem;">${pfl}</td>
-      <td style="padding:.3rem .5rem;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${esc(r.product_name)}">${r.product_name||'-'}</td>
+      <td style="padding:.3rem .5rem;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${esc(r.product_name)}">${r.display_name || r.product_name||'-'}${mappedTxt}</td>
+      <td style="padding:.3rem .5rem;text-align:right;color:${simColor};font-weight:700;">${sim.toFixed(0)}%</td>
       <td style="padding:.3rem .5rem;text-align:right;font-weight:600;">${price}</td>
+      <td style="padding:.3rem .5rem;text-align:right;color:#64748b;">${netPrice}</td>
       <td style="padding:.3rem .5rem;color:#64748b;max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${r.platform_seller_name||'-'}</td>
     </tr>`;
   });
@@ -380,7 +432,7 @@ function _cbPayload(cb) {
 }
 
 function toggleAllSm(master) {
-  document.querySelectorAll('.sm-item-chk').forEach(cb => {
+  document.querySelectorAll('.sm-item-chk:not(:disabled)').forEach(cb => {
     cb.checked = master.checked;
     const p = _cbPayload(cb);
     if (master.checked) _smChecked.add(p); else _smChecked.delete(p);
@@ -398,28 +450,37 @@ function toggleSm(cb) {
 async function bulkMap() {
   if (!_smChecked.size) return;
   const plant = document.getElementById('sm-plant').value;
+  const multiplier = parseFloat(document.getElementById('sm-multiplier').value) || 1.0;
   const items = [..._smChecked].map(s => JSON.parse(s));
-  let ok = 0, fail = 0;
-  for (const item of items) {
-    try {
-      const resp = await fetch('/portal/price-monitor/api/mapping/add', {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({
-          our_product_code:      _smCode,
-          plant:                 plant,
-          product_key:           item.key,
-          platform:              item.platform,
-          platform_seller_id:    item.sellerId  || '',
-          platform_product_id:   item.productId || item.code || '',
-          product_name:          item.productName || '',
-          seller_name:           item.sellerName  || '',
-        })
-      });
-      if (resp.ok) { const j = await resp.json(); if (j.ok) ok++; else fail++; }
-      else fail++;
-    } catch { fail++; }
+  const btn = document.getElementById('sm-map-btn');
+  btn.disabled = true; btn.textContent = '저장 중...';
+  try {
+    const resp = await fetch('/portal/price-monitor/api/mapping/bulk-add', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        our_product_code: _smCode,
+        plant:             plant,
+        tag:               _smTag,
+        multiplier:        multiplier,
+        items: items.map(item => ({
+          product_key:         item.key,
+          platform:            item.platform,
+          platform_seller_id:  item.sellerId  || '',
+          platform_product_id: item.productId || item.code || '',
+          product_name:        item.productName || '',
+          seller_name:         item.sellerName  || '',
+        })),
+      })
+    });
+    const json = await resp.json();
+    if (json.ok) {
+      alert(`매핑 완료: ${json.added}건 성공`);
+    } else {
+      alert('오류: ' + (json.error || '알 수 없는 오류'));
+    }
+  } catch (e) {
+    alert('저장 실패: ' + e.message);
   }
-  alert(`매핑 완료: ${ok}건 성공${fail ? ', ' + fail + '건 실패' : ''}`);
   closeSuggest();
   location.reload();
 }
