@@ -40,10 +40,11 @@
 .chart-abc{display:flex;gap:.3rem;}
 .chart-abc button{font-size:.78rem;padding:.32rem .9rem;border-radius:6px;border:1.5px solid #e2e8f0;background:#fff;cursor:pointer;font-weight:600;color:#64748b;transition:all .12s;}
 .chart-abc button.active{background:#1d4ed8;border-color:#1d4ed8;color:#fff;}
-.chart-wrap{position:relative;height:340px;}
-.chart-wrap-sm{position:relative;height:280px;}
+.chart-wrap{position:relative;height:340px;max-width:100%;overflow:hidden;}
+.chart-wrap-sm{position:relative;height:280px;max-width:100%;overflow:hidden;}
+.chart-wrap canvas,.chart-wrap-sm canvas{max-width:100%!important;}
 /* A: 좌우 분할 */
-.chart-split{display:grid;grid-template-columns:1fr 1fr;gap:.75rem;}
+.chart-split{display:grid;grid-template-columns:1fr 1fr;gap:.75rem;max-width:100%;}
 @media(max-width:760px){.chart-split{grid-template-columns:1fr;}}
 .split-panel h4{font-size:.81rem;font-weight:700;margin:0 0 .4rem;color:#475569;}
 /* B: 셀러 칩 */
@@ -199,10 +200,16 @@
 <!-- ③ 가격 추이 차트 (A/B/C 옵션) -->
 <div class="chart-card">
   <div class="chart-card-title">
-    <span>📈 가격 추이 (최근 30일)</span>
-    <div class="chart-abc">
-      <button id="tabA" class="active" onclick="setChartMode('A')">A 플랫폼 분할</button>
-      <button id="tabB" onclick="setChartMode('B')">B 셀러 선택</button>
+    <span>📈 가격 추이 (<span id="chartPeriodLabel">최근 30일</span>)</span>
+    <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;">
+      <div class="chart-abc">
+        <button id="period7" onclick="setPeriod(7)">최근 1주일</button>
+        <button id="period30" class="active" onclick="setPeriod(30)">최근 30일</button>
+      </div>
+      <div class="chart-abc">
+        <button id="tabA" class="active" onclick="setChartMode('A')">A 플랫폼 분할</button>
+        <button id="tabB" onclick="setChartMode('B')">B 셀러 선택</button>
+      </div>
     </div>
   </div>
 
@@ -329,23 +336,69 @@ const MKT = {
   net:   { min:{{ market_min_net or 'null' }}, avg:{{ market_avg_net or 'null' }}, minGp:null },
 };
 
-/* GP 마지노선 */
-const gpLine = (OUR_BUY && DATES.length) ? {
-  label:`GP ${GP_ALERT}% 마지노선`,
-  data:Array(DATES.length).fill(Math.round(OUR_BUY/((1-0.066/1.1)*(1-GP_ALERT/100)))),
-  borderColor:'#b91c1c', borderDash:[4,4], backgroundColor:'transparent', pointRadius:0, tension:0
-} : null;
+/* GP 마지노선 / 당사가 라인 — 기간 슬라이스된 길이에 맞춰 매번 새로 생성 */
+function makeGpLine(len){
+  if(!(OUR_BUY && len)) return null;
+  return {
+    label:`GP ${GP_ALERT}% 마지노선`,
+    data:Array(len).fill(Math.round(OUR_BUY/((1-0.066/1.1)*(1-GP_ALERT/100)))),
+    borderColor:'#b91c1c', borderDash:[4,4], backgroundColor:'transparent', pointRadius:0, tension:0
+  };
+}
+function makeOurLine(len){
+  return {
+    label: TAX==='과세' ? '당사 판매단가(VAT포함)' : '당사 판매단가',
+    data: Array(len).fill(TAX==='과세' && OUR_VAT ? OUR_VAT : OUR_SALE),
+    borderColor:'#0f172a', borderDash:[6,3], backgroundColor:'transparent', pointRadius:0, tension:0
+  };
+}
 
-/* 당사가 수평선 */
-const ourLine = {
-  label: TAX==='과세' ? '당사 판매단가(VAT포함)' : '당사 판매단가',
-  data: Array(DATES.length).fill(TAX==='과세' && OUR_VAT ? OUR_VAT : OUR_SALE),
-  borderColor:'#0f172a', borderDash:[6,3], backgroundColor:'transparent', pointRadius:0, tension:0
+/* ══════════ 기간(최근 1주일/30일) 슬라이스 ══════════ */
+let PERIOD_DAYS = 30;
+function sliceArr(arr, n){ return n>=arr.length ? arr : arr.slice(arr.length-n); }
+function curDates(){ return sliceArr(DATES, PERIOD_DAYS); }
+function curDatasets(src){
+  return src.map(ds => Object.assign({}, ds, { data: sliceArr(ds.data, PERIOD_DAYS) }));
+}
+
+/* ══════════ 로고 오버레이 플러그인 (당사 판매단가 / GP 마지노선 점선 시작점) ══════════ */
+const logoImg = new Image();
+let logoReady = false;
+logoImg.onload = () => { logoReady = true; rerenderActive(); };
+logoImg.src = '/static/dongwon-homefood-logo-line.png';
+
+const logoStartPlugin = {
+  id: 'logoStart',
+  afterDatasetsDraw(chart){
+    if(!logoReady) return;
+    const {ctx, chartArea} = chart;
+    if(!chartArea) return;
+    chart.data.datasets.forEach((ds, i) => {
+      if(!ds.label) return;
+      const isTarget = ds.label.includes('당사 판매단가') || ds.label.includes('마지노선');
+      if(!isTarget) return;
+      const idx = ds.data.findIndex(v => v!=null);
+      if(idx<0) return;
+      const meta = chart.getDatasetMeta(i);
+      const pt = meta.data[idx];
+      if(!pt) return;
+      const targetH = 14;
+      const ratio = (logoImg.naturalWidth && logoImg.naturalHeight) ? (logoImg.naturalWidth/logoImg.naturalHeight) : 4;
+      const targetW = targetH * ratio;
+      const x = Math.max(chartArea.left - targetW, 2);
+      const y = pt.y - targetH/2;
+      ctx.save();
+      ctx.globalAlpha = 0.92;
+      ctx.drawImage(logoImg, x, y, targetW, targetH);
+      ctx.restore();
+    });
+  }
 };
 
 /* ══════════ 공통 차트 옵션 ══════════ */
 const BASE_OPTS = {
   responsive:true, maintainAspectRatio:false,
+  layout:{padding:{left:16}},
   interaction:{mode:'index', intersect:false},
   plugins:{
     legend:{position:'bottom', labels:{boxWidth:10, font:{size:10}}},
@@ -358,11 +411,11 @@ const BASE_OPTS = {
 };
 
 const charts = {};
-function mkLine(id, datasets, extra){
+function mkLine(id, labels, datasets, extra){
   if(charts[id]) charts[id].destroy();
   const c = document.getElementById(id); if(!c) return;
-  charts[id] = new Chart(c, {type:'line', data:{labels:DATES, datasets},
-    options:Object.assign({}, BASE_OPTS, extra||{})});
+  charts[id] = new Chart(c, {type:'line', data:{labels, datasets},
+    options:Object.assign({}, BASE_OPTS, extra||{}), plugins:[logoStartPlugin]});
 }
 function mkBar(id, labels, datasets){
   if(charts[id]) charts[id].destroy();
@@ -373,12 +426,15 @@ function mkBar(id, labels, datasets){
 
 /* ══════════ 옵션 A: 플랫폼 분할 ══════════ */
 function buildA(){
+  const dates = curDates();
+  const platCur = curDatasets(DS_PLAT);
   [['baemin','chartA_baemin','배민'],['foodspring','chartA_food','식봄']].forEach(([pf,id,label])=>{
-    const pfDs = DS_PLAT.filter(d=>d.label.startsWith(label));
+    const pfDs = platCur.filter(d=>d.label.startsWith(label));
     const ds = [...pfDs];
-    if(OUR_SALE||OUR_VAT) ds.push(ourLine);
-    if(gpLine) ds.push(gpLine);
-    mkLine(id, ds);
+    if(OUR_SALE||OUR_VAT) ds.push(makeOurLine(dates.length));
+    const gp = makeGpLine(dates.length);
+    if(gp) ds.push(gp);
+    mkLine(id, dates, ds);
   });
 }
 
@@ -397,11 +453,29 @@ function buildBChips(){
   });
 }
 function rebuildB(){
-  const ds = DS_SEL.filter((_,i)=>selOn.has(i)||DS_SEL[i].label.includes('당사'));
-  const full = gpLine ? [...ds, gpLine] : ds;
-  mkLine('chartB', full);
+  const dates = curDates();
+  const selCur = curDatasets(DS_SEL);
+  const ds = selCur.filter((_,i)=>selOn.has(i)||DS_SEL[i].label.includes('당사'));
+  const gp = makeGpLine(dates.length);
+  const full = gp ? [...ds, gp] : ds;
+  mkLine('chartB', dates, full);
 }
 function buildB(){ buildBChips(); rebuildB(); }
+
+function rerenderActive(){
+  const mode = document.getElementById('tabA').classList.contains('active') ? 'A' : 'B';
+  if(mode==='A') buildA(); else buildB();
+}
+
+/* ══════════ 기간 전환 ══════════ */
+window.setPeriod=function(days){
+  PERIOD_DAYS = days;
+  document.getElementById('period7').classList.toggle('active', days===7);
+  document.getElementById('period30').classList.toggle('active', days===30);
+  const lbl = document.getElementById('chartPeriodLabel');
+  if(lbl) lbl.textContent = days===7 ? '최근 1주일' : '최근 30일';
+  rerenderActive();
+};
 
 /* ══════════ 탭 전환 ══════════ */
 window.setChartMode=function(m){
