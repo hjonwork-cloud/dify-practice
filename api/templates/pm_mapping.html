@@ -29,6 +29,13 @@
 .multiplier-row label{color:#374151;font-weight:600;white-space:nowrap;}
 .multiplier-row input{width:80px;padding:.35rem .6rem;border:1.5px solid #cbd5e1;border-radius:8px;font-size:.85rem;font-weight:700;text-align:center;}
 .multiplier-hint{font-size:.75rem;color:#94a3b8;}
+.our-item-name{font-weight:700;font-size:.88rem;color:#111827;margin-bottom:.35rem;}
+.our-item-prices{display:flex;gap:14px;font-size:.78rem;flex-wrap:wrap;}
+.our-item-prices .lbl{color:#6b7280;}
+.our-item-prices .val{font-weight:700;}
+.our-item-prices .val.sale{color:var(--pm-blue);}
+.our-item-prices .val.buy{color:#374151;}
+.our-item-prices .val.sales-amt{color:#059669;}
 </style>
 {% endblock %}
 
@@ -131,24 +138,36 @@ async function searchOur(kw){
 function renderOurResults(data){
   const el=document.getElementById('ourResults');
   if(!data.length){el.innerHTML='<div style="text-align:center;padding:2rem;color:#94a3b8;font-size:.84rem;">검색 결과 없음</div>';return;}
-  el.innerHTML=data.slice(0,50).map(p=>`
-    <div class="result-item${selectedOur&&selectedOur.product_code===p.product_code?' selected-our':''}"
+  el.innerHTML=data.slice(0,50).map(p=>{
+    const saleV  = p.avg_sale_price ? Math.round(p.avg_sale_price).toLocaleString()+'원' : '-';
+    const buyV   = p.avg_buy_price  ? Math.round(p.avg_buy_price).toLocaleString()+'원'  : '-';
+    const salesV = p.prev_sales_amt > 0 ? Math.round(p.prev_sales_amt/10000).toLocaleString()+'만원' : '-';
+    return `<div class="result-item${selectedOur&&selectedOur.product_code===p.product_code?' selected-our':''}"
+         data-code="${p.product_code}"
          onclick='selectOur(${JSON.stringify(p)})'>
-      <div class="item-name">${p.product_name||p.product_code}</div>
-      <div class="item-meta">${p.product_code} · ${p.brand||''} · ${p.unit||''}</div>
-    </div>`).join('');
+      <div class="our-item-name">📦 ${p.product_code} ${p.product_name||''}</div>
+      <div class="our-item-prices">
+        <span><span class="lbl">평균판매가(공급가)</span> <span class="val sale">${saleV}</span></span>
+        <span><span class="lbl">구매가</span> <span class="val buy">${buyV}</span></span>
+        <span><span class="lbl">전월매출</span> <span class="val sales-amt">${salesV}</span></span>
+      </div>
+    </div>`;
+  }).join('');
 }
 
 function selectOur(p){
   selectedOur=p;
   document.getElementById('ourSelectedInfo').style.display='block';
-  document.getElementById('ourSelectedName').textContent=p.product_name||p.product_code;
-  document.getElementById('ourSelectedMeta').textContent=`${p.product_code} · ${p.brand||''} · ${PLANT} 플랜트`;
+  document.getElementById('ourSelectedName').textContent=`📦 ${p.product_code} ${p.product_name||''}`;
+  const saleV  = p.avg_sale_price ? Math.round(p.avg_sale_price).toLocaleString()+'원' : '-';
+  const buyV   = p.avg_buy_price  ? Math.round(p.avg_buy_price).toLocaleString()+'원'  : '-';
+  const salesV = p.prev_sales_amt > 0 ? Math.round(p.prev_sales_amt/10000).toLocaleString()+'만원' : '-';
+  document.getElementById('ourSelectedMeta').innerHTML=`평균판매가(공급가) <b>${saleV}</b> · 구매가 <b>${buyV}</b> · 전월매출 <b>${salesV}</b> · ${PLANT} 플랜트`;
   document.getElementById('ourSelectedBadge').textContent=p.product_code;
   document.getElementById('ourSelectedBadge').style.display='inline-block';
   // 리스트 재렌더 (선택 표시)
   document.querySelectorAll('#ourResults .result-item').forEach(el=>{
-    el.classList.toggle('selected-our', el.querySelector('.item-meta')?.textContent?.includes(p.product_code));
+    el.classList.toggle('selected-our', el.dataset.code===p.product_code);
   });
   updatePreview();
 }
