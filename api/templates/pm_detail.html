@@ -71,13 +71,25 @@
 /* 배송 뱃지 */
 .badge-direct{background:#fff3e0;color:#e65100;border:1px solid #ffcc80;font-size:.7rem;padding:.12rem .42rem;border-radius:4px;font-weight:600;}
 .badge-singsing{background:#e0f7fa;color:#00695c;border:1px solid #80deea;font-size:.7rem;padding:.12rem .42rem;border-radius:4px;font-weight:600;}
+
+/* ── 헤더 우측 요약 KPI (2행 x 3열) ── */
+.header-kpi-compact{display:grid;grid-template-columns:repeat(3,auto);grid-auto-flow:row;column-gap:1.5rem;row-gap:.5rem;justify-content:end;align-self:flex-start;}
+.hkc-cell{text-align:right;min-width:104px;}
+.hkc-cell .kpi-label{font-size:.66rem;color:#94a3b8;font-weight:700;text-transform:uppercase;letter-spacing:.03em;white-space:nowrap;}
+.hkc-cell .kpi-val{font-size:1.12rem;font-weight:800;margin-top:.1rem;white-space:nowrap;}
+@media(max-width:760px){.header-kpi-compact{justify-content:start;grid-template-columns:repeat(3,auto);}.hkc-cell{text-align:left;}}
+
+/* ── 비교 테이블 안내 문구 ── */
+.compare-note{padding:.55rem 1.25rem;background:#f0f9ff;border-bottom:1px solid #e0f2fe;font-size:.76rem;color:#0369a1;display:flex;align-items:center;gap:.4rem;}
 </style>
 {% endblock %}
 
 {% block content %}
-{% set our_sale  = price_info.avg_sale_price %}
-{% set our_buy   = price_info.avg_buy_price  %}
-{% set cnt_today = today_rows | length %}
+{% set our_sale   = price_info.avg_sale_price %}
+{% set our_buy    = price_info.avg_buy_price  %}
+{% set cnt_today  = today_rows | length %}
+{% set vat_mult   = 1.1 if tax_status == '과세' else 1.0 %}
+{% set our_buy_vat = (our_buy * vat_mult) if our_buy else none %}
 
 <!-- 뒤로 가기 -->
 <div class="detail-back">
@@ -88,50 +100,48 @@
 
 <!-- ① 상품 헤더 카드 -->
 <div class="detail-header">
-  <div style="display:flex;align-items:flex-start;gap:1rem;flex-wrap:wrap;">
+  <div style="display:flex;align-items:flex-start;gap:1.5rem;flex-wrap:wrap;justify-content:space-between;">
     <div class="detail-header-meta" style="flex:1;min-width:200px;">
       <h2>{{ product_info.product_name or product_code }}</h2>
       <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-top:.3rem;">
         <span class="code-badge">{{ product_code }}</span>
         {% if product_info.brand %}<span style="font-size:.8rem;color:#64748b;">{{ product_info.brand }}</span>{% endif %}
         {% if product_info.unit  %}<span style="font-size:.8rem;color:#94a3b8;">{{ product_info.unit }}</span>{% endif %}
+        {% if cnt_today > 0 %}<span class="badge badge-blue">{{ cnt_today }}개 셀러</span>{% endif %}
       </div>
     </div>
-    {% if cnt_today > 0 %}<span class="badge badge-blue">{{ cnt_today }}개 셀러</span>{% endif %}
-  </div>
-  <div class="detail-kpi-row">
-    <!-- 과세여부 -->
-    <div class="detail-kpi" style="border-color:{% if tax_status=='과세' %}#fbbf24{% else %}#34d399{% endif %};">
-      <div class="kpi-label">과세여부</div>
-      <div class="kpi-val" style="font-size:1rem;color:{% if tax_status=='과세' %}#92400e{% else %}#065f46{% endif %};">{{ tax_status }}</div>
+    <!-- 우측 요약 KPI: 2행 x 3열 -->
+    <div class="header-kpi-compact">
+      <!-- 1행 -->
+      <div class="hkc-cell">
+        <div class="kpi-label">과세여부</div>
+        <div class="kpi-val" style="font-size:1rem;color:{% if tax_status=='과세' %}#92400e{% else %}#065f46{% endif %};">{{ tax_status }}</div>
+      </div>
+      <div class="hkc-cell">
+        <div class="kpi-label">평균 판매단가 (VAT제외)</div>
+        <div class="kpi-val" style="color:#1d4ed8;">{% if our_sale %}{{ '{:,.0f}'.format(our_sale) }}원{% else %}—{% endif %}</div>
+      </div>
+      <div class="hkc-cell">
+        <div class="kpi-label">구매단가 (추정/VAT제외)</div>
+        <div class="kpi-val" style="color:#1e293b;">{% if our_buy %}{{ '{:,.0f}'.format(our_buy) }}원{% else %}—{% endif %}</div>
+      </div>
+      <!-- 2행 -->
+      <div class="hkc-cell">
+        <div class="kpi-label">당사 GP</div>
+        {% if our_sale and our_buy %}
+          {% set our_gp = (our_sale - our_buy) / our_sale * 100 %}
+          <div class="kpi-val" style="color:{% if our_gp < gp_alert_pct %}#b91c1c{% elif our_gp < gp_warn_pct %}#d97706{% else %}#059669{% endif %};">{{ '{:.1f}'.format(our_gp) }}%</div>
+        {% else %}<div class="kpi-val">—</div>{% endif %}
+      </div>
+      <div class="hkc-cell">
+        <div class="kpi-label">평균 판매단가 (VAT포함)</div>
+        <div class="kpi-val" style="color:#93c5fd;">{% if our_sale_vat %}{{ '{:,.0f}'.format(our_sale_vat) }}원{% else %}—{% endif %}</div>
+      </div>
+      <div class="hkc-cell">
+        <div class="kpi-label">구매단가 (추정/VAT포함)</div>
+        <div class="kpi-val" style="color:#94a3b8;">{% if our_buy_vat %}{{ '{:,.0f}'.format(our_buy_vat) }}원{% else %}—{% endif %}</div>
+      </div>
     </div>
-    <!-- 당사 판매단가 VAT제외 -->
-    <div class="detail-kpi">
-      <div class="kpi-label">당사 판매단가 (VAT제외)</div>
-      <div class="kpi-val" style="color:#1e40af;">{% if our_sale %}{{ '{:,.0f}'.format(our_sale) }}원{% else %}—{% endif %}</div>
-    </div>
-    {% if tax_status == '과세' and our_sale_vat %}
-    <!-- 당사 판매단가 VAT포함 -->
-    <div class="detail-kpi" style="border-color:#bfdbfe;">
-      <div class="kpi-label">당사 판매단가 (VAT포함)</div>
-      <div class="kpi-val" style="color:#2563eb;">{{ '{:,.0f}'.format(our_sale_vat) }}원</div>
-    </div>
-    {% endif %}
-    <!-- 구매단가 -->
-    <div class="detail-kpi">
-      <div class="kpi-label">구매단가 (추정)</div>
-      <div class="kpi-val" style="color:#475569;">{% if our_buy %}{{ '{:,.0f}'.format(our_buy) }}원{% else %}—{% endif %}</div>
-    </div>
-    <!-- 당사 GP율 -->
-    <div class="detail-kpi">
-      <div class="kpi-label">당사 GP율</div>
-      {% if our_sale and our_buy %}
-        {% set our_gp = (our_sale - our_buy) / our_sale * 100 %}
-        <div class="kpi-val" style="color:{% if our_gp < gp_alert_pct %}#b91c1c{% elif our_gp < gp_warn_pct %}#d97706{% else %}#059669{% endif %};">{{ '{:.1f}'.format(our_gp) }}%</div>
-      {% else %}<div class="kpi-val">—</div>{% endif %}
-    </div>
-    <div class="detail-kpi"><div class="kpi-label">GP 경보</div><div class="kpi-val" style="color:#b91c1c;">{{ gp_alert_pct }}%</div></div>
-    <div class="detail-kpi"><div class="kpi-label">GP 주의</div><div class="kpi-val" style="color:#d97706;">{{ gp_warn_pct }}%</div></div>
   </div>
 </div>
 
@@ -225,6 +235,7 @@
     <span>🛒 플랫폼 셀러 현황 (최신 수집일 기준)</span>
     {% if today_rows %}<span style="color:#94a3b8;font-size:.8rem;">수집일: {{ today_rows[0].crawl_date }}</span>{% endif %}
   </div>
+  <div class="compare-note">ℹ️ 과세 상품은 외부 판매가가 VAT 포함가이며, 당사 구매단가(공급가) 기준으로 비교해야 합니다.</div>
   {% if today_rows %}
   <div style="overflow-x:auto;">
     <table class="compare-table">
@@ -416,14 +427,8 @@ window.setFeeMode=function(mode){
   const m=MKT[mode];
   document.getElementById('mv-min').textContent=m.min!=null?m.min.toLocaleString()+'원':'—';
   document.getElementById('mv-avg').textContent=m.avg!=null?m.avg.toLocaleString()+'원':'—';
-  // GP 재계산
-  const gpEl=document.getElementById('mv-gp');
-  if(m.min!=null && OUR_BUY){
-    const netMin=mode==='net'?m.min:m.min*(1-0.066);
-    const netVat=netMin/1.1;
-    const gp=Math.round((netVat-OUR_BUY)/netVat*1000)/10;
-    gpEl.textContent=gp+'%'; gpEl.style.color=gpColor(gp);
-  } else { gpEl.textContent='—'; }
+  // 시장최저매칭GP는 서버에서 이미 정확히 계산된 값(수수료/배수/세금 반영)이므로
+  // 외부가격 기준(토글) 변경과 무관하게 항상 동일하게 유지한다. (재계산 하지 않음)
   // 경쟁등급
   const ref=TAX==='과세'&&OUR_VAT?OUR_VAT:OUR_SALE;
   const grade=calcGrade(ref,m.min);
