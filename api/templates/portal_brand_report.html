@@ -259,7 +259,7 @@
     document.getElementById('brandContent').removeAttribute('hidden');
 
     renderChart(data.customers || [], data.brand_avg || 0, data.threshold || 0);
-    loadDemographics(bname, ymMode);
+    loadDemographics(bname, ymMode, data.brand_avg || 0);
   }
 
   function renderChart(customers, brandAvg, threshold) {
@@ -346,7 +346,7 @@
   // 나이대별/지역별/매출액별 분포 막대그래프 (별도 AJAX — 사전계산 캐시 미사용, 미만에 실패해도 본 화면은 영향 없음)
   var demoCharts = { age: null, region: null, revenue: null };
 
-  function loadDemographics(brand, ym) {
+  function loadDemographics(brand, ym, brandAvg) {
     var params = new URLSearchParams();
     if (brand) params.set('brand', brand);
     params.set('ym', ym);
@@ -354,9 +354,9 @@
       .then(function(r){ return r.json(); })
       .then(function(data){
         if (data.error) { console.warn('[demographics] error', data.error); return; }
-        renderDemoChart('demoAgeChart', 'demoAgeEmpty', 'age', data.age || [], '#2563eb');
-        renderDemoChart('demoRegionChart', 'demoRegionEmpty', 'region', data.region || [], '#16a34a');
-        renderDemoChart('demoRevenueChart', 'demoRevenueEmpty', 'revenue', data.revenue || [], '#d97706');
+        renderDemoChart('demoAgeChart', 'demoAgeEmpty', 'age', data.age || [], '#2563eb', brandAvg);
+        renderDemoChart('demoRegionChart', 'demoRegionEmpty', 'region', data.region || [], '#16a34a', brandAvg);
+        renderDemoChart('demoRevenueChart', 'demoRevenueEmpty', 'revenue', data.revenue || [], '#d97706', brandAvg);
         var ageSubEl = document.getElementById('demoAgeSub');
         if (ageSubEl) {
           var excluded = data.age_excluded_count || 0;
@@ -366,7 +366,7 @@
       .catch(function(e){ console.warn('[demographics] fetch failed', e); });
   }
 
-  function renderDemoChart(canvasId, emptyId, key, rows, color) {
+  function renderDemoChart(canvasId, emptyId, key, rows, color, brandAvg) {
     var canvas = document.getElementById(canvasId);
     var emptyEl = document.getElementById(emptyId);
     if (demoCharts[key]) { demoCharts[key].destroy(); demoCharts[key] = null; }
@@ -377,6 +377,11 @@
     }
     if (emptyEl) emptyEl.style.display = 'none';
     canvas.style.display = '';
+
+    // 동적 Y축 최대값: 데이터/브랜드평균 중 최고값의 약 1.3배를 5 단위로 올림, 최소 20%, 최대 100% 보장
+    var maxVal = Math.max.apply(null, rows.map(function(r){ return r.generic_ratio; }).concat([brandAvg || 0]));
+    var yMax = Math.min(100, Math.max(20, Math.ceil(maxVal * 1.3 / 5) * 5));
+
     demoCharts[key] = new Chart(canvas, {
       type: 'bar',
       data: {
@@ -392,6 +397,7 @@
       },
       options: {
         responsive: true, maintainAspectRatio: false,
+        layout: { padding: { top: 18 } },
         plugins: {
           legend: { display: false },
           tooltip: { callbacks: { label: function(ctx){
@@ -401,9 +407,41 @@
         },
         scales: {
           x: { ticks: { font:{size:10}, maxRotation:40, minRotation:0 } },
-          y: { beginAtZero:true, max:100, title:{display:true,text:'%'} }
+          y: { beginAtZero:true, max:yMax, title:{display:true,text:'%'} }
         }
-      }
+      },
+      plugins: [{
+        id: 'demoDecor',
+        afterDatasetsDraw: function(chart){
+          var ctx2 = chart.ctx, ca = chart.chartArea, yS = chart.scales.y;
+          var meta = chart.getDatasetMeta(0);
+          // 막대 위 정확값 라벨
+          ctx2.save();
+          ctx2.fillStyle = '#374151';
+          ctx2.font = 'bold 11px sans-serif';
+          ctx2.textAlign = 'center';
+          meta.data.forEach(function(bar, i){
+            var v = rows[i].generic_ratio;
+            ctx2.fillText(v + '%', bar.x, bar.y - 6);
+          });
+          ctx2.restore();
+          // 브랜드 평균 기준선 (수평 점선)
+          if (brandAvg && brandAvg > 0 && brandAvg <= yMax) {
+            var yPx = yS.getPixelForValue(brandAvg);
+            ctx2.save();
+            ctx2.strokeStyle = '#6b7280';
+            ctx2.lineWidth = 1.5;
+            ctx2.setLineDash([5,3]);
+            ctx2.beginPath(); ctx2.moveTo(ca.left, yPx); ctx2.lineTo(ca.right, yPx); ctx2.stroke();
+            ctx2.setLineDash([]);
+            ctx2.fillStyle = '#6b7280';
+            ctx2.font = '10px sans-serif';
+            ctx2.textAlign = 'left';
+            ctx2.fillText('브랜드평균 ' + brandAvg + '%', ca.left + 4, yPx - 4);
+            ctx2.restore();
+          }
+        }
+      }]
     });
   }
 
