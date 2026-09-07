@@ -118,6 +118,14 @@
              onkeydown="if(event.key==='Enter') searchExt()">
       <button onclick="searchExt()" style="background:#1677ff;color:#fff;border:none;border-radius:8px;padding:.55rem 1.3rem;font-weight:700;font-size:.86rem;cursor:pointer;">검색</button>
     </div>
+    <div id="ext-toolbar" style="display:none;align-items:center;gap:.5rem;">
+      <label style="font-size:.8rem;color:#64748b;font-weight:600;">셀러</label>
+      <select id="ext-seller-filter" onchange="renderExtTable()"
+              style="border:1.5px solid #cbd5e1;border-radius:8px;padding:.4rem .6rem;font-size:.82rem;background:#fff;min-width:140px;">
+        <option value="">전체 셀러</option>
+      </select>
+      <span style="margin-left:auto;font-size:.76rem;color:#94a3b8;">실판매가 헤더를 클릭하면 정렬됩니다</span>
+    </div>
     <div id="ext-results" style="overflow-y:auto;flex:1;border:1px solid #e2e8f0;border-radius:8px;min-height:260px;max-height:420px;">
       <div style="padding:2rem;text-align:center;color:#94a3b8;font-size:.88rem;">검색어를 입력하세요 (예: *김치*)</div>
     </div>
@@ -219,8 +227,14 @@ async function gplShowDetail(code, plant){
 }
 
 // ── 외부상품 조회 팝업 (단순 조회 전용) ──────────────────────────────────
+let extRows = [];
+let extSortDir = null; // null(기본) | 'asc' | 'desc' — 실판매가 기준
+
 function openExtSearch(){
   document.getElementById('ext-keyword').value = '';
+  extRows = [];
+  extSortDir = null;
+  document.getElementById('ext-toolbar').style.display = 'none';
   document.getElementById('ext-results').innerHTML = '<div style="padding:2rem;text-align:center;color:#94a3b8;font-size:.88rem;">검색어를 입력하세요 (예: *김치*)</div>';
   document.getElementById('ext-search-modal').style.display = 'flex';
   setTimeout(() => document.getElementById('ext-keyword').focus(), 30);
@@ -228,9 +242,75 @@ function openExtSearch(){
 function closeExtSearch(){
   document.getElementById('ext-search-modal').style.display = 'none';
 }
+
+function populateExtSellerFilter(rows){
+  const sel = document.getElementById('ext-seller-filter');
+  const prev = sel.value;
+  const sellers = Array.from(new Set(rows.map(r => r.seller_name).filter(Boolean))).sort((a,b)=>a.localeCompare(b,'ko'));
+  sel.innerHTML = '<option value="">전체 셀러</option>' + sellers.map(s => `<option value="${s}">${s}</option>`).join('');
+  if(sellers.includes(prev)) sel.value = prev;
+}
+
+function toggleExtSort(){
+  if(extSortDir === 'desc') extSortDir = 'asc';
+  else if(extSortDir === 'asc') extSortDir = null;
+  else extSortDir = 'desc';
+  renderExtTable();
+}
+
+function renderExtTable(){
+  const el = document.getElementById('ext-results');
+  if(!extRows.length){
+    el.innerHTML = '<div style="padding:2rem;text-align:center;color:#94a3b8;">결과 없음 — 다른 키워드를 시도해보세요</div>';
+    return;
+  }
+  const sellerFilter = document.getElementById('ext-seller-filter').value;
+  let rows = sellerFilter ? extRows.filter(r => r.seller_name === sellerFilter) : extRows.slice();
+
+  if(extSortDir){
+    rows.sort((a,b) => {
+      const av = a.net_price ?? -Infinity, bv = b.net_price ?? -Infinity;
+      return extSortDir === 'asc' ? av - bv : bv - av;
+    });
+  }
+
+  if(!rows.length){
+    el.innerHTML = '<div style="padding:2rem;text-align:center;color:#94a3b8;">선택한 셀러의 결과가 없습니다.</div>';
+    return;
+  }
+
+  const arrow = extSortDir === 'asc' ? ' ▲' : (extSortDir === 'desc' ? ' ▼' : '');
+  const esc = v => (v||'').replace(/"/g,'&quot;');
+  let html = `<table style="width:100%;border-collapse:collapse;font-size:.82rem;">
+    <thead><tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0;position:sticky;top:0;">
+      <th style="padding:.4rem .5rem;">플랫폼</th>
+      <th style="padding:.4rem .5rem;text-align:left;">상품명</th>
+      <th style="padding:.4rem .5rem;text-align:right;">판매가</th>
+      <th style="padding:.4rem .5rem;text-align:right;cursor:pointer;user-select:none;color:${extSortDir?'#1677ff':'inherit'};" onclick="toggleExtSort()" title="클릭하여 실판매가 정렬">실판매가${arrow}</th>
+      <th style="padding:.4rem .5rem;text-align:left;">셀러</th>
+    </tr></thead><tbody>`;
+  rows.forEach(r => {
+    const pfl = r.platform === 'baemin'
+      ? '<span class="badge badge-baemin" style="font-size:.72rem;">배민상회</span>'
+      : '<span class="badge badge-foodspring" style="font-size:.72rem;">식봄</span>';
+    const price = r.price_sale ? Math.round(r.price_sale).toLocaleString()+'원' : '-';
+    const net   = r.net_price ? Math.round(r.net_price).toLocaleString()+'원' : '-';
+    html += `<tr style="border-bottom:1px solid #f1f5f9;">
+      <td style="padding:.3rem .5rem;">${pfl}</td>
+      <td style="padding:.3rem .5rem;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${esc(r.product_name)}">${r.product_name||'-'}</td>
+      <td style="padding:.3rem .5rem;text-align:right;font-weight:600;">${price}</td>
+      <td style="padding:.3rem .5rem;text-align:right;">${net}</td>
+      <td style="padding:.3rem .5rem;color:#64748b;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${r.seller_name||'-'}</td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  el.innerHTML = html;
+}
+
 async function searchExt(){
   const kw = document.getElementById('ext-keyword').value.trim();
   const el = document.getElementById('ext-results');
+  document.getElementById('ext-toolbar').style.display = 'none';
   if(!kw){
     el.innerHTML = '<div style="padding:2rem;text-align:center;color:#94a3b8;font-size:.88rem;">검색어를 입력하세요 (예: *김치*)</div>';
     return;
@@ -239,36 +319,15 @@ async function searchExt(){
   try{
     const resp = await fetch(`/portal/price-monitor/api/gp-lookup/platform-search?keyword=${encodeURIComponent(kw)}`);
     const json = await resp.json();
-    const rows = json.items || [];
-    if(!rows.length){
+    extRows = json.items || [];
+    extSortDir = null;
+    if(!extRows.length){
       el.innerHTML = '<div style="padding:2rem;text-align:center;color:#94a3b8;">결과 없음 — 다른 키워드를 시도해보세요</div>';
       return;
     }
-    const esc = v => (v||'').replace(/"/g,'&quot;');
-    let html = `<table style="width:100%;border-collapse:collapse;font-size:.82rem;">
-      <thead><tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0;position:sticky;top:0;">
-        <th style="padding:.4rem .5rem;">플랫폼</th>
-        <th style="padding:.4rem .5rem;text-align:left;">상품명</th>
-        <th style="padding:.4rem .5rem;text-align:right;">판매가</th>
-        <th style="padding:.4rem .5rem;text-align:right;">실판매가</th>
-        <th style="padding:.4rem .5rem;text-align:left;">셀러</th>
-      </tr></thead><tbody>`;
-    rows.forEach(r => {
-      const pfl = r.platform === 'baemin'
-        ? '<span class="badge badge-baemin" style="font-size:.72rem;">배민상회</span>'
-        : '<span class="badge badge-foodspring" style="font-size:.72rem;">식봄</span>';
-      const price = r.price_sale ? Math.round(r.price_sale).toLocaleString()+'원' : '-';
-      const net   = r.net_price ? Math.round(r.net_price).toLocaleString()+'원' : '-';
-      html += `<tr style="border-bottom:1px solid #f1f5f9;">
-        <td style="padding:.3rem .5rem;">${pfl}</td>
-        <td style="padding:.3rem .5rem;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${esc(r.product_name)}">${r.product_name||'-'}</td>
-        <td style="padding:.3rem .5rem;text-align:right;font-weight:600;">${price}</td>
-        <td style="padding:.3rem .5rem;text-align:right;">${net}</td>
-        <td style="padding:.3rem .5rem;color:#64748b;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${r.seller_name||'-'}</td>
-      </tr>`;
-    });
-    html += '</tbody></table>';
-    el.innerHTML = html;
+    populateExtSellerFilter(extRows);
+    document.getElementById('ext-toolbar').style.display = 'flex';
+    renderExtTable();
   }catch(e){
     el.innerHTML = '<div style="padding:2rem;text-align:center;color:#ef4444;">조회 중 오류가 발생했습니다.</div>';
   }
