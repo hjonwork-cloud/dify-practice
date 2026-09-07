@@ -234,8 +234,8 @@
           <th class="s" onclick="sortTable('seller')">셀러 <span class="si" id="si_seller"></span></th>
           <th>외부 상품명</th>
           <th class="s" onclick="sortTable('spec')">규격 <span class="si" id="si_spec"></span></th>
-          <th class="s" style="text-align:right;" onclick="sortTable('price')">외부판매가 <span class="si" id="si_price"></span></th>
-          <th class="s" style="text-align:right;" onclick="sortTable('net')">실판매가<br><span style="font-weight:400;font-size:.65rem;color:#94a3b8;">수수료제외 추정</span> <span class="si" id="si_net"></span></th>
+          <th class="s" style="text-align:right;" onclick="sortTable('price')">외부판매가<br><span style="font-weight:400;font-size:.65rem;color:#94a3b8;">배수 적용 시 환산가 병기</span> <span class="si" id="si_price"></span></th>
+          <th class="s" style="text-align:right;" onclick="sortTable('net')">실판매가<br><span style="font-weight:400;font-size:.65rem;color:#94a3b8;">수수료·배수 반영 추정</span> <span class="si" id="si_net"></span></th>
           <th style="text-align:right;">우리 대비</th>
           <th class="s" style="text-align:right;" onclick="sortTable('fee')">수수료 <span class="si" id="si_fee"></span></th>
           <th class="s" style="text-align:center;" onclick="sortTable('gp')">시장매칭GP <span class="si" id="si_gp"></span></th>
@@ -245,21 +245,27 @@
       <tbody id="sellerTbody">
         {% set cmp_sale = our_sale_vat if (tax_status=='과세' and our_sale_vat) else our_sale %}
         {% for r in today_rows %}
-        {% set vs_diff = (r.price_sale - cmp_sale) if (r.price_sale and cmp_sale) else none %}
+        {% set vs_diff = (r.price_sale_adj - cmp_sale) if (r.price_sale_adj and cmp_sale) else none %}
         <tr class="{% if r.gp_status=='alert' %}row-alert{% elif r.gp_status=='warn' %}row-warn{% endif %}"
             data-platform="{{ r.platform }}"
             data-seller="{{ r.platform_seller_name or '' }}"
             data-spec="{{ r.spec or '' }}"
-            data-price="{{ r.price_sale or '' }}"
+            data-price="{{ r.price_sale_adj or r.price_sale or '' }}"
             data-net="{{ r.net_price or '' }}"
             data-fee="{{ r.fee_pct or '' }}"
             data-gp="{{ r.gp_pct or '' }}"
             data-delivery="{{ r.delivery_type or '' }}">
           <td>{% if r.platform=='baemin' %}<span class="badge badge-baemin">배민상회</span>{% else %}<span class="badge badge-foodspring">식봄</span>{% endif %}</td>
           <td style="font-weight:600;font-size:.83rem;">{{ r.platform_seller_name or '—' }}</td>
-          <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.79rem;" title="{{ r.product_name }}">{{ r.product_name or '—' }}</td>
+          <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.79rem;" title="{{ r.product_name }}">{{ r.product_name or '—' }}
+            {% if r.tag == 'substitute' %}<span class="badge" style="background:#fffbeb;color:#d97706;font-size:.65rem;margin-left:.2rem;">🔄 대체</span>
+            {% elif r.multiplier and r.multiplier != 1 %}<span class="badge" style="background:#f5f3ff;color:#7c3aed;font-size:.65rem;margin-left:.2rem;">✖️ 배수 {{ r.multiplier }}</span>{% endif %}
+          </td>
           <td style="font-size:.76rem;color:#64748b;">{{ r.spec or '—' }}</td>
-          <td style="text-align:right;font-weight:700;font-size:.9rem;">{% if r.price_sale %}{{ '{:,.0f}'.format(r.price_sale) }}원{% else %}—{% endif %}</td>
+          <td style="text-align:right;font-weight:700;font-size:.9rem;">
+            {% if r.price_sale %}{{ '{:,.0f}'.format(r.price_sale) }}원{% else %}—{% endif %}
+            {% if r.multiplier and r.multiplier != 1 and r.price_sale_adj %}<div style="font-size:.68rem;color:#7c3aed;font-weight:600;">→ 환산 {{ '{:,.0f}'.format(r.price_sale_adj) }}원</div>{% endif %}
+          </td>
           <td style="text-align:right;font-size:.88rem;color:#059669;font-weight:600;">{% if r.net_price %}{{ '{:,.0f}'.format(r.net_price) }}원{% else %}—{% endif %}</td>
           <td style="text-align:right;">
             {% if vs_diff is not none %}

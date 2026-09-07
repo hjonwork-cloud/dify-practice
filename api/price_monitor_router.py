@@ -637,13 +637,16 @@ def _get_fee(delivery_type: str = "직배송", platform: str = "", seller_name: 
 def _calc_gp(platform_price: float | None, buy_price: float | None,
              delivery_type: str = "직배송",
              platform: str = "", seller_name: str = "",
-             tax_status: str = "과세") -> float | None:
+             tax_status: str = "과세",
+             multiplier: float = 1.0) -> float | None:
     """
     수수료 차감 후 GP율 계산.
     - 직배송: 외부판매가 × (1 - 0.066) / VAT제수 = 수취액 A
     - 싱싱배송: 외부판매가 × (1 - 0.171) / VAT제수 = 수취액 A
     - CJ프레시웨이(식봄): 외부판매가 × (1 - 0.048) / VAT제수 = 수취액 A
     - VAT제수: 과세 상품은 1.1(부가세 10% 제외), 면세 상품은 1.0(제외 없음)
+    - multiplier(배수): 외부 상품 규격이 우리 상품과 다를 때(예: 5kg BOX ↔ 낱개)
+      매핑 시 설정한 배수로 나눠 우리 단위 기준 가격으로 환산 후 GP 계산.
     - GP% = (A - 구매단가) / A × 100
     """
     if not platform_price or not buy_price:
@@ -651,7 +654,8 @@ def _calc_gp(platform_price: float | None, buy_price: float | None,
     try:
         fee = _get_fee(delivery_type, platform, seller_name)
         vat_mult = 1.1 if tax_status == "과세" else 1.0
-        a = platform_price * (1.0 - fee) / vat_mult   # 수수료 차감 후 (과세 상품만) 부가세 10% 제외
+        mult = multiplier if multiplier and multiplier > 0 else 1.0
+        a = platform_price * (1.0 - fee) / vat_mult / mult   # 수수료·부가세·배수 반영 후 우리 단위 기준 수취액
         return round((a - buy_price) / a * 100, 1)
     except Exception:
         return None
@@ -1318,9 +1322,11 @@ async def pm_detail(
     product_info_meta = next((p for p in our_products if p["product_code"] == product_code), {})
     tax_status = product_info_meta.get("tax_class", "과세") or "과세"
 
-    # 매핑된 product_keys
+    # 매핑된 product_keys (+ 배수/태그 메타)
     mappings     = portal_db.pm_list_mappings(product_code, plant)
     product_keys = [m["product_key"] for m in mappings]
+    mult_map = {m["product_key"]: float(m.get("multiplier") or 1.0) for m in mappings}
+    tag_map  = {m["product_key"]: (m.get("tag") or "normal") for m in mappings}
 
     # 오늘(최신) 플랫폼 가격 – 셀러별
     today_rows = []
@@ -1344,7 +1350,7 @@ async def pm_detail(
                 ORDER BY p.platform, p.platform_seller_name
             """)
             history_rows = _q(f"""
-                SELECT crawl_date, platform, platform_seller_name,
+                SELECT crawl_date, platform, platform_seller_name, product_key,
                        MIN(price_sale) AS min_price,
                        AVG(price_sale) AS avg_price,
                        COUNT(*) AS cnt
@@ -1352,26 +1358,43 @@ async def pm_detail(
                 WHERE product_key IN ({keys_str})
                   AND crawl_date >= DATE_SUB(CURRENT_DATE(), 30)
                   AND price_sale IS NOT NULL
-                GROUP BY crawl_date, platform, platform_seller_name
+                GROUP BY crawl_date, platform, platform_seller_name, product_key
                 ORDER BY crawl_date, platform, platform_seller_name
             """)
         except Exception as e:
             logger.exception(f"[detail] 조회 실패: {e}")
+
+    # 배수(multiplier) 반영: 외부 상품 규격이 다른 경우(예: 5kg BOX ↔ 낱개) 매핑 시
+    # 설정한 배수로 나눠 우리 단위 기준 가격으로 환산한다.
+    for row in history_rows:
+        _mult = mult_map.get(row.get("product_key"), 1.0)
+        if _mult and _mult != 1.0:
+            if row.get("min_price") is not None:
+                row["min_price"] = float(row["min_price"]) / _mult
+            if row.get("avg_price") is not None:
+                row["avg_price"] = float(row["avg_price"]) / _mult
 
     # GP 계산
     for row in today_rows:
         _pf  = row.get("platform", "")
         _sn  = row.get("platform_seller_name", "")
         _dt  = row.get("delivery_type", "직배송")
-        gp = _calc_gp(row.get("price_sale"), buy_price, _dt, _pf, _sn, tax_status)
+        _pk  = row.get("product_key")
+        _mult = mult_map.get(_pk, 1.0)
+        _tag  = tag_map.get(_pk, "normal")
+        gp = _calc_gp(row.get("price_sale"), buy_price, _dt, _pf, _sn, tax_status, multiplier=_mult)
         row["gp_pct"]    = gp
         row["gp_status"] = _gp_status(gp)
         row["crawl_date"] = str(row.get("crawl_date", ""))
         fee = _get_fee(_dt, _pf, _sn)
         row["fee_pct"] = round(fee * 100, 1)
-        # 실판매가 (수수료 제외 쫐정)
+        row["multiplier"] = _mult
+        row["tag"] = _tag
         ps = row.get("price_sale")
-        row["net_price"] = round(ps * (1 - fee), 0) if ps else None
+        # 배수 적용된 우리 단위 기준 환산 판매가 (배수 1이면 원본과 동일)
+        row["price_sale_adj"] = round(ps / _mult, 0) if ps and _mult else ps
+        # 실판매가 (수수료 및 배수 반영 추정)
+        row["net_price"] = round(ps * (1 - fee) / _mult, 0) if ps and _mult else None
 
     # 중복 제거: (platform, seller_name, spec, price_sale) 동일 행 하나만 표시
     _seen = set()
@@ -1384,9 +1407,9 @@ async def pm_detail(
             _deduped.append(row)
     today_rows = _deduped
 
-    # 시장 통계
+    # 시장 통계 (배수 적용된 환산가 기준 — 우리 단위와 동일 기준으로 비교)
     our_sale = price_info.get("avg_sale_price")
-    prices = [r["price_sale"] for r in today_rows if r.get("price_sale")]
+    prices = [r["price_sale_adj"] for r in today_rows if r.get("price_sale_adj")]
     net_prices = [r["net_price"] for r in today_rows if r.get("net_price")]
     market_min  = min(prices) if prices else None
     market_avg  = round(sum(prices)/len(prices)) if prices else None
@@ -1417,8 +1440,18 @@ async def pm_detail(
     COLORS = ["#3b82f6","#10b981","#f59e0b","#ef4444","#8b5cf6","#06b6d4","#f97316","#84cc16"]
     for i, sk in enumerate(seller_keys):
         pf, sn = sk.split("|", 1)
-        date_price = {str(r["crawl_date"]): r["min_price"] for r in history_rows
-                      if f"{r['platform']}|{r['platform_seller_name']}" == sk}
+        # 동일 셀러에 여러 product_key(배수 상이한 규격 등)가 매핑된 경우를 대비해
+        # 날짜별로 배수 적용된 min_price 중 최솟값을 채택한다.
+        date_price: dict[str, float] = {}
+        for r in history_rows:
+            if f"{r['platform']}|{r['platform_seller_name']}" != sk:
+                continue
+            d = str(r["crawl_date"])
+            mp = r.get("min_price")
+            if mp is None:
+                continue
+            if d not in date_price or mp < date_price[d]:
+                date_price[d] = mp
         data = [date_price.get(d) for d in chart_dates]
         label = f"{'배민' if pf=='baemin' else '식봄'} {sn}"
         chart_datasets.append({"label": label, "data": data,
@@ -1562,6 +1595,8 @@ async def api_gp_lookup_detail(request: Request, product_code: str, plant: str =
 
     mappings     = portal_db.pm_list_mappings(product_code, plant)
     product_keys = [m["product_key"] for m in mappings]
+    mult_map = {m["product_key"]: float(m.get("multiplier") or 1.0) for m in mappings}
+    tag_map  = {m["product_key"]: (m.get("tag") or "normal") for m in mappings}
 
     today_rows = []
     history_rows = []
@@ -1584,7 +1619,7 @@ async def api_gp_lookup_detail(request: Request, product_code: str, plant: str =
                 ORDER BY p.platform, p.platform_seller_name
             """)
             history_rows = _q(f"""
-                SELECT crawl_date, platform, platform_seller_name,
+                SELECT crawl_date, platform, platform_seller_name, product_key,
                        MIN(price_sale) AS min_price,
                        AVG(price_sale) AS avg_price,
                        COUNT(*) AS cnt
@@ -1592,22 +1627,37 @@ async def api_gp_lookup_detail(request: Request, product_code: str, plant: str =
                 WHERE product_key IN ({keys_str})
                   AND crawl_date >= DATE_SUB(CURRENT_DATE(), 30)
                   AND price_sale IS NOT NULL
-                GROUP BY crawl_date, platform, platform_seller_name
+                GROUP BY crawl_date, platform, platform_seller_name, product_key
                 ORDER BY crawl_date, platform, platform_seller_name
             """)
         except Exception as e:
             logger.exception(f"[gp-lookup] 조회 실패: {e}")
 
+    # 배수(multiplier) 반영: 외부 상품 규격이 다른 경우(예: 5kg BOX ↔ 낱개) 매핑 시
+    # 설정한 배수로 나눠 우리 단위 기준 가격으로 환산한다.
+    for row in history_rows:
+        _mult = mult_map.get(row.get("product_key"), 1.0)
+        if _mult and _mult != 1.0:
+            if row.get("min_price") is not None:
+                row["min_price"] = float(row["min_price"]) / _mult
+            if row.get("avg_price") is not None:
+                row["avg_price"] = float(row["avg_price"]) / _mult
+
     for row in today_rows:
         _pf, _sn, _dt = row.get("platform", ""), row.get("platform_seller_name", ""), row.get("delivery_type", "직배송")
-        gp = _calc_gp(row.get("price_sale"), buy_price, _dt, _pf, _sn, tax_status)
+        _pk = row.get("product_key")
+        _mult = mult_map.get(_pk, 1.0)
+        row["multiplier"] = _mult
+        row["tag"] = tag_map.get(_pk, "normal")
+        gp = _calc_gp(row.get("price_sale"), buy_price, _dt, _pf, _sn, tax_status, multiplier=_mult)
         row["gp_pct"]    = gp
         row["gp_status"] = _gp_status(gp)
         row["crawl_date"] = str(row.get("crawl_date", ""))
         fee = _get_fee(_dt, _pf, _sn)
         row["fee_pct"] = round(fee * 100, 1)
         ps = row.get("price_sale")
-        row["net_price"] = round(ps * (1 - fee), 0) if ps else None
+        row["price_sale_adj"] = round(ps / _mult, 0) if ps and _mult else ps
+        row["net_price"] = round(ps * (1 - fee) / _mult, 0) if ps and _mult else None
 
     _seen, _deduped = set(), []
     for row in today_rows:
@@ -1617,7 +1667,7 @@ async def api_gp_lookup_detail(request: Request, product_code: str, plant: str =
             _deduped.append(row)
     today_rows = _deduped
 
-    prices = [r["price_sale"] for r in today_rows if r.get("price_sale")]
+    prices = [r["price_sale_adj"] for r in today_rows if r.get("price_sale_adj")]
     market_min = min(prices) if prices else None
     market_max = max(prices) if prices else None
     market_avg = round(sum(prices) / len(prices)) if prices else None
@@ -1632,11 +1682,11 @@ async def api_gp_lookup_detail(request: Request, product_code: str, plant: str =
         except Exception:
             our_gp_pct = None
 
-    # 최저/최고가 셀러 식별
+    # 최저/최고가 셀러 식별 (배수 적용된 환산가 기준으로 비교)
     min_seller = next((f"{'배민' if r['platform']=='baemin' else '식봄'} {r['platform_seller_name']}"
-                        for r in today_rows if r.get("price_sale") == market_min), None) if market_min else None
+                        for r in today_rows if r.get("price_sale_adj") == market_min), None) if market_min else None
     max_seller = next((f"{'배민' if r['platform']=='baemin' else '식봄'} {r['platform_seller_name']}"
-                        for r in today_rows if r.get("price_sale") == market_max), None) if market_max else None
+                        for r in today_rows if r.get("price_sale_adj") == market_max), None) if market_max else None
 
     import json as _json
     chart_dates = sorted({str(r["crawl_date"]) for r in history_rows})
