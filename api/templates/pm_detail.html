@@ -373,6 +373,10 @@ const logoStartPlugin = {
     if(!logoReady) return;
     const {ctx, chartArea} = chart;
     if(!chartArea) return;
+    // y축 눈금 라벨이 그려지는 영역(scale.left ~ scale.right=chartArea.left)과 겹치지 않도록
+    // scale.left(축 라벨 시작점, 곧 layout padding 끝)를 기준으로 로고를 배치한다.
+    const yScale = chart.scales && (chart.scales.y || Object.values(chart.scales).find(s=>s.axis==='y'));
+    const leftBound = yScale ? yScale.left : chartArea.left;
     chart.data.datasets.forEach((ds, i) => {
       if(!ds.label) return;
       const isTarget = ds.label.includes('당사 판매단가') || ds.label.includes('마지노선');
@@ -382,13 +386,13 @@ const logoStartPlugin = {
       const meta = chart.getDatasetMeta(i);
       const pt = meta.data[idx];
       if(!pt) return;
-      const targetH = 14;
-      const ratio = (logoImg.naturalWidth && logoImg.naturalHeight) ? (logoImg.naturalWidth/logoImg.naturalHeight) : 4;
+      const targetH = 42;
+      const ratio = (logoImg.naturalWidth && logoImg.naturalHeight) ? (logoImg.naturalWidth/logoImg.naturalHeight) : 1.66;
       const targetW = targetH * ratio;
-      const x = Math.max(chartArea.left - targetW, 2);
+      const x = Math.max(leftBound - targetW - 4, 2);
       const y = pt.y - targetH/2;
       ctx.save();
-      ctx.globalAlpha = 0.92;
+      ctx.globalAlpha = 0.96;
       ctx.drawImage(logoImg, x, y, targetW, targetH);
       ctx.restore();
     });
@@ -398,7 +402,7 @@ const logoStartPlugin = {
 /* ══════════ 공통 차트 옵션 ══════════ */
 const BASE_OPTS = {
   responsive:true, maintainAspectRatio:false,
-  layout:{padding:{left:16}},
+  layout:{padding:{left:90}},
   interaction:{mode:'index', intersect:false},
   plugins:{
     legend:{position:'bottom', labels:{boxWidth:10, font:{size:10}}},
