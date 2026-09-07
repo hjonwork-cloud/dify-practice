@@ -118,7 +118,14 @@
              onkeydown="if(event.key==='Enter') searchExt()">
       <button onclick="searchExt()" style="background:#1677ff;color:#fff;border:none;border-radius:8px;padding:.55rem 1.3rem;font-weight:700;font-size:.86rem;cursor:pointer;">검색</button>
     </div>
-    <div id="ext-toolbar" style="display:none;align-items:center;gap:.5rem;">
+    <div id="ext-toolbar" style="display:none;align-items:center;gap:.5rem;flex-wrap:wrap;">
+      <label style="font-size:.8rem;color:#64748b;font-weight:600;">플랫폼</label>
+      <select id="ext-platform-filter" onchange="onExtPlatformChange()"
+              style="border:1.5px solid #cbd5e1;border-radius:8px;padding:.4rem .6rem;font-size:.82rem;background:#fff;min-width:120px;">
+        <option value="">전체 플랫폼</option>
+        <option value="baemin">배민상회</option>
+        <option value="foodspring">식봄</option>
+      </select>
       <label style="font-size:.8rem;color:#64748b;font-weight:600;">셀러</label>
       <select id="ext-seller-filter" onchange="renderExtTable()"
               style="border:1.5px solid #cbd5e1;border-radius:8px;padding:.4rem .6rem;font-size:.82rem;background:#fff;min-width:140px;">
@@ -243,12 +250,19 @@ function closeExtSearch(){
   document.getElementById('ext-search-modal').style.display = 'none';
 }
 
-function populateExtSellerFilter(rows){
+function populateExtSellerFilter(){
   const sel = document.getElementById('ext-seller-filter');
   const prev = sel.value;
-  const sellers = Array.from(new Set(rows.map(r => r.seller_name).filter(Boolean))).sort((a,b)=>a.localeCompare(b,'ko'));
+  const platformFilter = document.getElementById('ext-platform-filter').value;
+  const base = platformFilter ? extRows.filter(r => r.platform === platformFilter) : extRows;
+  const sellers = Array.from(new Set(base.map(r => r.seller_name).filter(Boolean))).sort((a,b)=>a.localeCompare(b,'ko'));
   sel.innerHTML = '<option value="">전체 셀러</option>' + sellers.map(s => `<option value="${s}">${s}</option>`).join('');
-  if(sellers.includes(prev)) sel.value = prev;
+  if(sellers.includes(prev)) sel.value = prev; else sel.value = '';
+}
+
+function onExtPlatformChange(){
+  populateExtSellerFilter();
+  renderExtTable();
 }
 
 function toggleExtSort(){
@@ -264,8 +278,11 @@ function renderExtTable(){
     el.innerHTML = '<div style="padding:2rem;text-align:center;color:#94a3b8;">결과 없음 — 다른 키워드를 시도해보세요</div>';
     return;
   }
+  const platformFilter = document.getElementById('ext-platform-filter').value;
   const sellerFilter = document.getElementById('ext-seller-filter').value;
-  let rows = sellerFilter ? extRows.filter(r => r.seller_name === sellerFilter) : extRows.slice();
+  let rows = extRows.slice();
+  if(platformFilter) rows = rows.filter(r => r.platform === platformFilter);
+  if(sellerFilter) rows = rows.filter(r => r.seller_name === sellerFilter);
 
   if(extSortDir){
     rows.sort((a,b) => {
@@ -275,7 +292,7 @@ function renderExtTable(){
   }
 
   if(!rows.length){
-    el.innerHTML = '<div style="padding:2rem;text-align:center;color:#94a3b8;">선택한 셀러의 결과가 없습니다.</div>';
+    el.innerHTML = '<div style="padding:2rem;text-align:center;color:#94a3b8;">선택한 조건의 결과가 없습니다.</div>';
     return;
   }
 
@@ -321,11 +338,12 @@ async function searchExt(){
     const json = await resp.json();
     extRows = json.items || [];
     extSortDir = null;
+    document.getElementById('ext-platform-filter').value = '';
     if(!extRows.length){
       el.innerHTML = '<div style="padding:2rem;text-align:center;color:#94a3b8;">결과 없음 — 다른 키워드를 시도해보세요</div>';
       return;
     }
-    populateExtSellerFilter(extRows);
+    populateExtSellerFilter();
     document.getElementById('ext-toolbar').style.display = 'flex';
     renderExtTable();
   }catch(e){
