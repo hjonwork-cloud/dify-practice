@@ -1108,6 +1108,170 @@ def brand_report(
     }
 
 
+# ── 분포분석: 나이대별 / 지역별 / 매출액별 범용상품 비중 분포 (막대그래프) ──
+# 사전계산 캐시(portal_refresh.read_brand_report_from_table)와 분리된 별도
+# 실시간 집계 — brand_report() 의 customers 쿼리를 재사용하되, 여기에
+# 고객마스터(사업자번호/주민_법인번호)를 조인해 개인사업자(가맹점주)의
+# 생년월일을 추출, 나이대를 산출한다. 법인/조인실패 건은 나이대 분포에서 제외.
+_AGE_BUCKET_ORDER = ["20대 미만", "20대", "30대", "40대", "50대", "60대", "70대 이상"]
+_REVENUE_BUCKET_ORDER = ["1분위 (상위 20%)", "2분위 (21~40%)", "3분위 (41~60%)", "4분위 (61~80%)", "5분위 (하위 20%)"]
+
+
+def _derive_age_bucket(biz_no, rrn) -> str | None:
+    """사업자번호 4번째 자리 == '8' 이면 법인 → 제외.
+    개인사업자는 주민_법인번호 앞 6자리(YYMMDD) + 7번째 자리(성별/세기코드)로 생년 산출.
+    7번째 자리가 1/2 → 1900년대, 3/4 → 2000년대, 그 외(5~9,0, 외국인/특수)는 나이 산출 불가로 제외."""
+    biz_no = str(biz_no or "").strip()
+    rrn = str(rrn or "").strip()
+    if len(biz_no) < 4 or biz_no[3] == "8":
+        return None
+    if len(rrn) < 7 or not rrn[:6].isdigit():
+        return None
+    yy, mm, dd = int(rrn[0:2]), int(rrn[2:4]), int(rrn[4:6])
+    if not (1 <= mm <= 12 and 1 <= dd <= 31):
+        return None
+    century_digit = rrn[6]
+    if century_digit in ("1", "2"):
+        birth_year = 1900 + yy
+    elif century_digit in ("3", "4"):
+        birth_year = 2000 + yy
+    else:
+        return None  # 외국인(5~8)/특수(9,0) 코드 → 나이 산출 제외
+    import datetime as _dt
+    age = _dt.date.today().year - birth_year
+    if age < 20:
+        return "20대 미만"
+    if age >= 70:
+        return "70대 이상"
+    return f"{(age // 10) * 10}대"
+
+
+def _derive_region_bucket(region_name) -> str:
+    r = str(region_name or "").strip()
+    if not r:
+        return "미상"
+    return r.split()[0]
+
+
+def brand_demographics(
+    brand_name: str | None = None,
+    emp_code: str = _DEFAULT_EMP_CODE,
+    ym_mode: str = "prev",
+) -> dict:
+    """분포분석 화면 하단 3분할 막대그래프 데이터: 나이대별/지역별/매출액별
+    범용상품 비중(가중평균, %) 분포. 항상 실시간 쿼리 (사전계산 캐시 미사용)."""
+    empty = {"selected_ym": "", "age": [], "age_excluded_count": 0, "region": [], "revenue": []}
+    picked = _pick_brand(brand_name, emp_code)
+    if not picked:
+        return empty
+    import main
+    latest = _latest_ym(emp_code)
+    prev_ym = _month_shift(latest, -1) if latest else ""
+    _ym_mode = (ym_mode or "prev").lower()
+    selected_ym = latest if _ym_mode == "current" else (prev_ym or latest)
+    if not selected_ym:
+        return empty
+    bname = str(picked.get("brand_name") or "")
+    bcode = str(picked.get("brand_code") or "")
+    _is_generic = (bcode == "일반외식")
+    _brand_where = (
+        "(`ZC본부` IS NULL OR LEFT(TRIM(LEADING '0' FROM TRIM(CAST(`ZC본부` AS STRING))), 1) <> '8')"
+        if _is_generic
+        else f"`ZC본부명` = {_sql(bname)}"
+    )
+    _div_where = " AND `사업부명` = '외식식재사업부'" if _is_generic else ""
+    scope = _scope_cond(emp_code)
+
+    base_rows = _q(f"""
+        SELECT COALESCE(`거래처`, '') AS customer_code,
+               MAX(`판매구역명`) AS region_name,
+               SUM(`매출액`) AS sales,
+               SUM(CASE WHEN COALESCE(`자재그룹명`, '') = 'FC전용상품' THEN `매출액` ELSE 0 END) AS dedicated_sales,
+               SUM(CASE WHEN `자재그룹명` IS NOT NULL AND COALESCE(`자재그룹명`, '') <> 'FC전용상품' THEN `매출액` ELSE 0 END) AS generic_sales
+        FROM {main.T_MAIN}
+        WHERE {scope}
+          AND {_brand_where}
+          AND `년월` = {_sql(selected_ym)}{_div_where}
+        GROUP BY `거래처`
+        HAVING SUM(`매출액`) > 0
+    """)
+    if not base_rows:
+        return {**empty, "selected_ym": selected_ym}
+
+    # 고객마스터 조인 (나이대 산출용) — 실패해도 지역/매출액 분포는 그대로 반환
+    age_map: dict[str, tuple] = {}
+    try:
+        codes_in = ", ".join(
+            _sql(str(r.get("customer_code") or "").lstrip("0") or "0") for r in base_rows
+        )
+        cm_rows = _q(f"""
+            SELECT TRIM(LEADING '0' FROM `고객코드`) AS ccode, `사업자번호` AS biz_no, `주민_법인번호` AS rrn
+            FROM {main.T_CUSTOMER_MASTER}
+            WHERE TRIM(LEADING '0' FROM `고객코드`) IN ({codes_in})
+        """) if base_rows else []
+        for r in cm_rows:
+            age_map[str(r.get("ccode") or "")] = (r.get("biz_no"), r.get("rrn"))
+    except Exception as e:
+        logger.warning(f"[brand_demographics] 고객마스터 조인 실패 (나이대 분포 생략): {e}")
+
+    def _new_group():
+        return {"generic": 0.0, "dedicated": 0.0, "sales": 0.0, "count": 0}
+
+    age_groups: dict[str, dict] = {}
+    region_groups: dict[str, dict] = {}
+    age_excluded = 0
+    ranked = sorted(base_rows, key=lambda r: float(r.get("sales") or 0), reverse=True)
+    n_total = len(ranked)
+
+    def _accumulate(groups: dict, key: str, r: dict):
+        g = groups.setdefault(key, _new_group())
+        g["generic"] += float(r.get("generic_sales") or 0)
+        g["dedicated"] += float(r.get("dedicated_sales") or 0)
+        g["sales"] += float(r.get("sales") or 0)
+        g["count"] += 1
+
+    revenue_groups: dict[str, dict] = {}
+    for idx, r in enumerate(ranked):
+        code_stripped = str(r.get("customer_code") or "").lstrip("0") or "0"
+        biz_no, rrn = age_map.get(code_stripped, (None, None))
+        age_bucket = _derive_age_bucket(biz_no, rrn)
+        if age_bucket:
+            _accumulate(age_groups, age_bucket, r)
+        else:
+            age_excluded += 1
+
+        region_bucket = _derive_region_bucket(r.get("region_name"))
+        _accumulate(region_groups, region_bucket, r)
+
+        rank_pct = (idx / n_total) * 100 if n_total else 0
+        rev_idx = min(4, int(rank_pct // 20))
+        _accumulate(revenue_groups, _REVENUE_BUCKET_ORDER[rev_idx], r)
+
+    def _finalize(groups: dict, order: list[str] | None) -> list[dict]:
+        keys = [k for k in order if k in groups] if order else \
+               sorted(groups.keys(), key=lambda k: groups[k]["count"], reverse=True)
+        result = []
+        for k in keys:
+            g = groups[k]
+            denom = g["generic"] + g["dedicated"]
+            ratio = round(g["generic"] / denom * 100, 1) if denom > 0 else 0.0
+            result.append({
+                "label": k,
+                "generic_ratio": ratio,
+                "customer_count": g["count"],
+                "sales_m": _money_m(g["sales"]),
+            })
+        return result
+
+    return {
+        "selected_ym": selected_ym,
+        "age": _finalize(age_groups, _AGE_BUCKET_ORDER),
+        "age_excluded_count": age_excluded,
+        "region": _finalize(region_groups, None),
+        "revenue": _finalize(revenue_groups, _REVENUE_BUCKET_ORDER),
+    }
+
+
 def _division_latest_ym() -> str:
     cached = _cache_get("division_latest")
     if cached:
@@ -1882,6 +2046,30 @@ async def brand_report_data_api(
         return JSONResponse(content=_json_safe(data))
     except Exception as _e:
         logger.error(f"[brand-report-data] {emp_code} error={_e} elapsed={time.time()-t0:.2f}s", exc_info=True)
+        return JSONResponse(content={"error": str(_e)}, status_code=500)
+
+
+@router.get("/brand-report/demographics-data")
+async def brand_report_demographics_api(
+    request: Request,
+    brand: str = "",
+    ym: str = "prev",
+):
+    """분포분석 화면 하단 3분할 막대그래프(나이대별/지역별/매출액별 범용상품 비중) 데이터.
+    사전계산 캐시를 쓰지 않는 경량 실시간 집계 (AJAX 전용)."""
+    user = _require_user(request)
+    emp_code = user["emp_code"]
+    _brand_emp = emp_code
+    if _is_readonly_all(emp_code) and not access_control.is_admin_emp(emp_code):
+        _brand_emp = access_control.ADMIN_EMP_CODE
+    ym_mode = (ym or "prev").lower()
+    if ym_mode not in ("prev", "current"):
+        ym_mode = "prev"
+    try:
+        data = brand_demographics(brand or None, emp_code=_brand_emp, ym_mode=ym_mode)
+        return JSONResponse(content=_json_safe(data))
+    except Exception as _e:
+        logger.error(f"[brand-demographics] {emp_code} error={_e}", exc_info=True)
         return JSONResponse(content={"error": str(_e)}, status_code=500)
 
 
