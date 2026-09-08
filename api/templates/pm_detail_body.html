@@ -320,12 +320,14 @@ const MKT = {
   net:   { min:{{ market_min_net or 'null' }}, avg:{{ market_avg_net or 'null' }}, minGp:null },
 };
 
-/* GP 마지노선 / 당사가 라인 — 기간 슬라이스된 길이에 맞춰 매번 새로 생성 */
+/* GP 마지노선 / 당사가 라인 — 기간 슬라이스된 길이에 맞춰 매번 새로 생성
+   당사 GP는 (판매단가-구매단가)/판매단가 로 계산하므로(플랫폼 수수료 미반영),
+   마지노선도 동일한 기준(구매단가 / (1-GP%))으로 계산해야 판매단가와 정합된다. */
 function makeGpLine(len){
   if(!(OUR_BUY && len)) return null;
   return {
     label:`GP ${GP_ALERT}% 마지노선`,
-    data:Array(len).fill(Math.round(OUR_BUY/((1-0.066/1.1)*(1-GP_ALERT/100)))),
+    data:Array(len).fill(Math.round(OUR_BUY/(1-GP_ALERT/100))),
     borderColor:'#b91c1c', borderDash:[4,4], backgroundColor:'transparent', pointRadius:0, tension:0
   };
 }
@@ -344,42 +346,6 @@ function curDates(){ return sliceArr(DATES, PERIOD_DAYS); }
 function curDatasets(src){
   return src.map(ds => Object.assign({}, ds, { data: sliceArr(ds.data, PERIOD_DAYS) }));
 }
-
-/* ══════════ 로고 오버레이 플러그인 (당사 판매단가 / GP 마지노선 점선 시작점) ══════════ */
-const logoImg = new Image();
-let logoReady = false;
-logoImg.onload = () => { logoReady = true; rerenderActive(); };
-logoImg.src = '/static/dongwon-homefood-logo-line.png';
-
-const logoStartPlugin = {
-  id: 'logoStart',
-  afterDatasetsDraw(chart){
-    if(!logoReady) return;
-    const {ctx, chartArea} = chart;
-    if(!chartArea) return;
-    chart.data.datasets.forEach((ds, i) => {
-      if(!ds.label) return;
-      const isTarget = ds.label.includes('당사 판매단가') || ds.label.includes('마지노선');
-      if(!isTarget) return;
-      const idx = ds.data.findIndex(v => v!=null);
-      if(idx<0) return;
-      const meta = chart.getDatasetMeta(i);
-      const pt = meta.data[idx];
-      if(!pt) return;
-      const targetH = 30;
-      const ratio = (logoImg.naturalWidth && logoImg.naturalHeight) ? (logoImg.naturalWidth/logoImg.naturalHeight) : 1.66;
-      const targetW = targetH * ratio;
-      // 그래프 안쪽, Y축 바로 옆(점선이 시작되는 지점)에 로고를 배치한다.
-      const x = chartArea.left + 6;
-      let y = pt.y - targetH/2;
-      y = Math.min(Math.max(y, chartArea.top + 2), chartArea.bottom - targetH - 2);
-      ctx.save();
-      ctx.globalAlpha = 0.96;
-      ctx.drawImage(logoImg, x, y, targetW, targetH);
-      ctx.restore();
-    });
-  }
-};
 
 /* ══════════ 공통 차트 옵션 ══════════ */
 const BASE_OPTS = {
@@ -401,7 +367,7 @@ function mkLine(id, labels, datasets, extra){
   if(charts[id]) charts[id].destroy();
   const c = document.getElementById(id); if(!c) return;
   charts[id] = new Chart(c, {type:'line', data:{labels, datasets},
-    options:Object.assign({}, BASE_OPTS, extra||{}), plugins:[logoStartPlugin]});
+    options:Object.assign({}, BASE_OPTS, extra||{})});
 }
 function mkBar(id, labels, datasets){
   if(charts[id]) charts[id].destroy();
