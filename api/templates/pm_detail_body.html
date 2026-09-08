@@ -1,0 +1,526 @@
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+/* ── 레이아웃 ── */
+.detail-back{display:flex;align-items:center;gap:.6rem;margin-bottom:1.25rem;flex-wrap:wrap;}
+.detail-header{background:#fff;border-radius:12px;padding:1.25rem 1.5rem;box-shadow:0 1px 4px rgba(0,0,0,.07);margin-bottom:1rem;}
+.detail-header-meta h2{font-size:1.2rem;font-weight:800;color:#0f172a;margin:0 0 .2rem;}
+.code-badge{font-family:monospace;font-size:.8rem;background:#f1f5f9;color:#475569;padding:.2rem .5rem;border-radius:6px;}
+.detail-kpi-row{display:flex;gap:.7rem;flex-wrap:wrap;margin-top:1rem;}
+.detail-kpi{background:#f8fafc;border-radius:10px;padding:.7rem 1rem;min-width:125px;border:1px solid #e2e8f0;}
+.detail-kpi .kpi-label{font-size:.68rem;color:#94a3b8;font-weight:700;text-transform:uppercase;letter-spacing:.04em;}
+.detail-kpi .kpi-val{font-size:1.25rem;font-weight:800;margin-top:.12rem;}
+
+/* ── 시장 포지션 카드 ── */
+.market-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:.75rem;margin-bottom:1rem;}
+@media(max-width:900px){.market-grid{grid-template-columns:repeat(2,1fr);}}
+@media(max-width:480px){.market-grid{grid-template-columns:1fr;}}
+.market-card{background:#fff;border-radius:12px;padding:1rem 1.2rem;box-shadow:0 1px 4px rgba(0,0,0,.07);border-top:3px solid transparent;}
+.market-card.c-min{border-color:#3b82f6;} .market-card.c-avg{border-color:#10b981;}
+.market-card.c-gp{border-color:#f59e0b;} .market-card.c-grade{border-color:#8b5cf6;}
+.mc-label{font-size:.7rem;color:#94a3b8;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:.25rem;}
+.mc-val{font-size:1.5rem;font-weight:900;line-height:1.1;}
+.mc-sub{font-size:.75rem;color:#64748b;margin-top:.25rem;}
+.grade-A{color:#15803d;} .grade-B{color:#2563eb;} .grade-C{color:#d97706;} .grade-D{color:#b91c1c;}
+
+/* ── 수수료 토글 ── */
+.fee-tog{display:inline-flex;border:1px solid #e2e8f0;border-radius:6px;overflow:hidden;}
+.fee-tog button{font-size:.72rem;padding:.2rem .6rem;border:none;background:#fff;cursor:pointer;font-weight:600;color:#64748b;transition:all .1s;}
+.fee-tog button.on{background:#1d4ed8;color:#fff;}
+
+/* ── 차트 카드 ── */
+.chart-card{background:#fff;border-radius:12px;padding:1.25rem 1.5rem;box-shadow:0 1px 4px rgba(0,0,0,.07);margin-bottom:1rem;}
+.chart-card-title{font-weight:700;font-size:.92rem;color:#1e293b;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem;margin-bottom:.75rem;}
+.chart-abc{display:flex;gap:.3rem;}
+.chart-abc button{font-size:.78rem;padding:.32rem .9rem;border-radius:6px;border:1.5px solid #e2e8f0;background:#fff;cursor:pointer;font-weight:600;color:#64748b;transition:all .12s;}
+.chart-abc button.active{background:#1d4ed8;border-color:#1d4ed8;color:#fff;}
+.chart-wrap{position:relative;height:340px;max-width:100%;overflow:hidden;}
+.chart-wrap-sm{position:relative;height:280px;max-width:100%;overflow:hidden;}
+.chart-wrap canvas,.chart-wrap-sm canvas{max-width:100%!important;}
+/* A: 좌우 분할 */
+.chart-split{display:grid;grid-template-columns:1fr 1fr;gap:.75rem;max-width:100%;}
+@media(max-width:760px){.chart-split{grid-template-columns:1fr;}}
+.split-panel h4{font-size:.81rem;font-weight:700;margin:0 0 .4rem;color:#475569;}
+/* B: 셀러 칩 */
+.seller-chips{display:flex;flex-wrap:wrap;gap:.35rem;margin-bottom:.75rem;}
+.s-chip{display:inline-flex;align-items:center;gap:.25rem;padding:.22rem .55rem;
+  border-radius:20px;border:1.5px solid #e2e8f0;font-size:.75rem;cursor:pointer;
+  background:#fff;font-weight:600;color:#64748b;transition:all .12s;}
+.s-chip.on{background:#eff6ff;border-color:#93c5fd;color:#1d4ed8;}
+
+/* ── 비교 테이블 ── */
+.compare-card{background:#fff;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,.07);margin-bottom:1rem;overflow:hidden;}
+.compare-card .card-head{padding:.9rem 1.25rem;border-bottom:1px solid #f1f5f9;font-weight:700;font-size:.92rem;display:flex;align-items:center;justify-content:space-between;}
+.compare-table{width:100%;border-collapse:collapse;font-size:.82rem;}
+.compare-table th{background:#f8fafc;font-size:.7rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.04em;padding:.55rem .85rem;text-align:left;white-space:nowrap;}
+.compare-table th.s{cursor:pointer;user-select:none;}
+.compare-table th.s:hover{background:#f1f5f9;color:#1e293b;}
+.si{margin-left:.2rem;font-size:.67rem;color:#cbd5e1;}
+.si.asc::after{content:'↑';color:#3b82f6;} .si.desc::after{content:'↓';color:#3b82f6;} .si:not(.asc):not(.desc)::after{content:'⇅';}
+.compare-table td{padding:.6rem .85rem;border-bottom:1px solid #f8fafc;vertical-align:middle;}
+.compare-table tr:last-child td{border-bottom:none;}
+.compare-table tr:hover td{background:#f8fafc;}
+.vs-badge{font-size:.7rem;padding:.13rem .42rem;border-radius:5px;font-weight:700;}
+.vs-cheaper{background:#fef2f2;color:#b91c1c;} .vs-similar{background:#fefce8;color:#92400e;} .vs-pricier{background:#f0fdf4;color:#15803d;}
+.row-alert td{background:#fef2f2 !important;} .row-warn td{background:#fffbeb !important;}
+/* 배송 뱃지 */
+.badge-direct{background:#fff3e0;color:#e65100;border:1px solid #ffcc80;font-size:.7rem;padding:.12rem .42rem;border-radius:4px;font-weight:600;}
+.badge-singsing{background:#e0f7fa;color:#00695c;border:1px solid #80deea;font-size:.7rem;padding:.12rem .42rem;border-radius:4px;font-weight:600;}
+
+/* ── 헤더 우측 요약 KPI (2행 x 3열) ── */
+.header-kpi-compact{display:grid;grid-template-columns:repeat(3,auto);grid-auto-flow:row;column-gap:1.5rem;row-gap:.5rem;justify-content:end;align-self:flex-start;}
+.hkc-cell{text-align:right;min-width:104px;}
+.hkc-cell .kpi-label{font-size:.66rem;color:#94a3b8;font-weight:700;text-transform:uppercase;letter-spacing:.03em;white-space:nowrap;}
+.hkc-cell .kpi-val{font-size:1.12rem;font-weight:800;margin-top:.1rem;white-space:nowrap;}
+@media(max-width:760px){.header-kpi-compact{justify-content:start;grid-template-columns:repeat(3,auto);}.hkc-cell{text-align:left;}}
+
+/* ── 비교 테이블 안내 문구 ── */
+.compare-note{padding:.55rem 1.25rem;background:#f0f9ff;border-bottom:1px solid #e0f2fe;font-size:.76rem;color:#0369a1;display:flex;align-items:center;gap:.4rem;}
+</style>
+
+{% set our_sale   = price_info.avg_sale_price %}
+{% set our_buy    = price_info.avg_buy_price  %}
+{% set cnt_today  = today_rows | length %}
+{% set vat_mult   = 1.1 if tax_status == '과세' else 1.0 %}
+{% set our_buy_vat = (our_buy * vat_mult) if our_buy else none %}
+
+<!-- ① 상품 헤더 카드 -->
+<div class="detail-header">
+  <div style="display:flex;align-items:flex-start;gap:1.5rem;flex-wrap:wrap;justify-content:space-between;">
+    <div class="detail-header-meta" style="flex:1;min-width:200px;">
+      <h2>{{ product_info.product_name or product_code }}</h2>
+      <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-top:.3rem;">
+        <span class="code-badge">{{ product_code }}</span>
+        {% if product_info.brand %}<span style="font-size:.8rem;color:#64748b;">{{ product_info.brand }}</span>{% endif %}
+        {% if product_info.unit  %}<span style="font-size:.8rem;color:#94a3b8;">{{ product_info.unit }}</span>{% endif %}
+        {% if cnt_today > 0 %}<span class="badge badge-blue">{{ cnt_today }}개 셀러</span>{% endif %}
+      </div>
+    </div>
+    <!-- 우측 요약 KPI: 2행 x 3열 -->
+    <div class="header-kpi-compact">
+      <!-- 1행 -->
+      <div class="hkc-cell">
+        <div class="kpi-label">과세여부</div>
+        <div class="kpi-val" style="font-size:1rem;color:{% if tax_status=='과세' %}#92400e{% else %}#065f46{% endif %};">{{ tax_status }}</div>
+      </div>
+      <div class="hkc-cell">
+        <div class="kpi-label">평균 판매단가 (VAT제외)</div>
+        <div class="kpi-val" style="color:#1d4ed8;">{% if our_sale %}{{ '{:,.0f}'.format(our_sale) }}원{% else %}—{% endif %}</div>
+      </div>
+      <div class="hkc-cell">
+        <div class="kpi-label">구매단가 (추정/VAT제외)</div>
+        <div class="kpi-val" style="color:#1e293b;">{% if our_buy %}{{ '{:,.0f}'.format(our_buy) }}원{% else %}—{% endif %}</div>
+      </div>
+      <!-- 2행 -->
+      <div class="hkc-cell">
+        <div class="kpi-label">당사 GP</div>
+        {% if our_sale and our_buy %}
+          {% set our_gp = (our_sale - our_buy) / our_sale * 100 %}
+          <div class="kpi-val" style="color:{% if our_gp < gp_alert_pct %}#b91c1c{% elif our_gp < gp_warn_pct %}#d97706{% else %}#059669{% endif %};">{{ '{:.1f}'.format(our_gp) }}%</div>
+        {% else %}<div class="kpi-val">—</div>{% endif %}
+      </div>
+      <div class="hkc-cell">
+        <div class="kpi-label">평균 판매단가 (VAT포함)</div>
+        <div class="kpi-val" style="color:#93c5fd;">{% if our_sale_vat %}{{ '{:,.0f}'.format(our_sale_vat) }}원{% else %}—{% endif %}</div>
+      </div>
+      <div class="hkc-cell">
+        <div class="kpi-label">구매단가 (추정/VAT포함)</div>
+        <div class="kpi-val" style="color:#94a3b8;">{% if our_buy_vat %}{{ '{:,.0f}'.format(our_buy_vat) }}원{% else %}—{% endif %}</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ② 시장 포지션 (수수료 포함/제외 토글) -->
+<div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.55rem;flex-wrap:wrap;">
+  <span style="font-size:.8rem;font-weight:700;color:#475569;">외부 가격 기준:</span>
+  <div class="fee-tog">
+    <button id="feeBtn1" class="on" onclick="setFeeMode('gross')">수수료 포함 (표시가)</button>
+    <button id="feeBtn2" onclick="setFeeMode('net')">수수료 제외 (실판매가)</button>
+  </div>
+  {% if tax_status == '과세' and our_sale_vat %}
+  <span style="font-size:.75rem;color:#64748b;">비교 기준: 당사 VAT포함 <strong>{{ '{:,.0f}'.format(our_sale_vat) }}원</strong></span>
+  {% endif %}
+</div>
+
+<div class="market-grid">
+  <div class="market-card c-min">
+    <div class="mc-label">🏷️ 시장 최저가</div>
+    <div class="mc-val" style="color:#1d4ed8;" id="mv-min">
+      {% if market_min %}{{ '{:,.0f}'.format(market_min) }}원{% else %}—{% endif %}
+    </div>
+    <div class="mc-sub" id="mv-min-sub">
+      {% set cmp = our_sale_vat if (tax_status=='과세' and our_sale_vat) else our_sale %}
+      {% if cmp and market_min %}
+        {% set d = ((cmp - market_min) | round | int) %}
+        당사 대비 {% if d > 0 %}▲{{ '{:,.0f}'.format(d) }}원 비쌈{% elif d < 0 %}▼{{ '{:,.0f}'.format(-d) }}원 더 쌈{% else %}동일{% endif %}
+      {% else %}비교불가{% endif %}
+    </div>
+  </div>
+  <div class="market-card c-avg">
+    <div class="mc-label">📊 시장 평균가</div>
+    <div class="mc-val" style="color:#059669;" id="mv-avg">
+      {% if market_avg %}{{ '{:,.0f}'.format(market_avg) }}원{% else %}—{% endif %}
+    </div>
+    <div class="mc-sub">{{ cnt_today }}개 셀러 기준</div>
+  </div>
+  <div class="market-card c-gp">
+    <div class="mc-label">💰 시장최저 매칭GP</div>
+    <div class="mc-val" id="mv-gp"
+      style="color:{% if market_min_gp is not none and market_min_gp < gp_alert_pct %}#b91c1c{% elif market_min_gp is not none and market_min_gp < gp_warn_pct %}#d97706{% else %}#059669{% endif %};">
+      {% if market_min_gp is not none %}{{ market_min_gp }}%{% else %}—{% endif %}
+    </div>
+    <div class="mc-sub" id="mv-gp-sub">최저가 기준 우리 GP</div>
+  </div>
+  <div class="market-card c-grade">
+    <div class="mc-label">🏆 경쟁 등급</div>
+    <div class="mc-val grade-{{ grade }}" id="mv-grade">{{ grade }}</div>
+    <div class="mc-sub" id="mv-grade-sub">
+      {% if grade=='A' %}최저가 이하{% elif grade=='B' %}최저+5% 이내
+      {% elif grade=='C' %}최저+10% 이내{% elif grade=='D' %}10% 이상 비쌈{% else %}비교불가{% endif %}
+    </div>
+  </div>
+</div>
+
+<!-- ③ 가격 추이 차트 (A/B/C 옵션) -->
+<div class="chart-card">
+  <div class="chart-card-title">
+    <span>📈 가격 추이 (<span id="chartPeriodLabel">최근 30일</span>)</span>
+    <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;">
+      <div class="chart-abc">
+        <button id="period7" onclick="setPeriod(7)">최근 1주일</button>
+        <button id="period30" class="active" onclick="setPeriod(30)">최근 30일</button>
+      </div>
+      <div class="chart-abc">
+        <button id="tabA" class="active" onclick="setChartMode('A')">A 플랫폼 분할</button>
+        <button id="tabB" onclick="setChartMode('B')">B 셀러 선택</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- A: 좌우 분할 패널 -->
+  <div id="panelA">
+    <div class="chart-split">
+      <div class="split-panel">
+        <h4>🟦 배민상회</h4>
+        <div class="chart-wrap-sm"><canvas id="chartA_baemin"></canvas></div>
+      </div>
+      <div class="split-panel">
+        <h4>🟩 식봄</h4>
+        <div class="chart-wrap-sm"><canvas id="chartA_food"></canvas></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- B: 셀러 체크박스 + 단일 차트 -->
+  <div id="panelB" style="display:none;">
+    <div class="seller-chips" id="sellerChips"></div>
+    <div class="chart-wrap"><canvas id="chartB"></canvas></div>
+  </div>
+
+
+</div>
+
+<!-- ④ 플랫폼 셀러 현황 테이블 -->
+<div class="compare-card">
+  <div class="card-head">
+    <span>🛒 플랫폼 셀러 현황 (최신 수집일 기준)</span>
+    {% if today_rows %}<span style="color:#94a3b8;font-size:.8rem;">수집일: {{ today_rows[0].crawl_date }}</span>{% endif %}
+  </div>
+  <div class="compare-note">ℹ️ 과세 상품은 외부 판매가가 VAT 포함가이며, 당사 구매단가(공급가) 기준으로 비교해야 합니다.</div>
+  {% if today_rows %}
+  <div style="overflow-x:auto;">
+    <table class="compare-table">
+      <thead>
+        <tr>
+          <th class="s" onclick="sortTable('platform')">플랫폼 <span class="si" id="si_platform"></span></th>
+          <th class="s" onclick="sortTable('seller')">셀러 <span class="si" id="si_seller"></span></th>
+          <th>외부 상품명</th>
+          <th class="s" onclick="sortTable('spec')">규격 <span class="si" id="si_spec"></span></th>
+          <th class="s" style="text-align:right;" onclick="sortTable('price')">외부판매가<br><span style="font-weight:400;font-size:.65rem;color:#94a3b8;">배수 적용 시 환산가 병기</span> <span class="si" id="si_price"></span></th>
+          <th class="s" style="text-align:right;" onclick="sortTable('net')">실판매가<br><span style="font-weight:400;font-size:.65rem;color:#94a3b8;">수수료·배수 반영 추정</span> <span class="si" id="si_net"></span></th>
+          <th style="text-align:right;">우리 대비</th>
+          <th class="s" style="text-align:right;" onclick="sortTable('fee')">수수료 <span class="si" id="si_fee"></span></th>
+          <th class="s" style="text-align:center;" onclick="sortTable('gp')">시장매칭GP <span class="si" id="si_gp"></span></th>
+          <th class="s" onclick="sortTable('delivery')">배송 <span class="si" id="si_delivery"></span></th>
+        </tr>
+      </thead>
+      <tbody id="sellerTbody">
+        {% set cmp_sale = our_sale_vat if (tax_status=='과세' and our_sale_vat) else our_sale %}
+        {% for r in today_rows %}
+        {% set vs_diff = (r.price_sale_adj - cmp_sale) if (r.price_sale_adj and cmp_sale) else none %}
+        <tr class="{% if r.gp_status=='alert' %}row-alert{% elif r.gp_status=='warn' %}row-warn{% endif %}"
+            data-platform="{{ r.platform }}"
+            data-seller="{{ r.platform_seller_name or '' }}"
+            data-spec="{{ r.spec or '' }}"
+            data-price="{{ r.price_sale_adj or r.price_sale or '' }}"
+            data-net="{{ r.net_price or '' }}"
+            data-fee="{{ r.fee_pct or '' }}"
+            data-gp="{{ r.gp_pct or '' }}"
+            data-delivery="{{ r.delivery_type or '' }}">
+          <td>{% if r.platform=='baemin' %}<span class="badge badge-baemin">배민상회</span>{% else %}<span class="badge badge-foodspring">식봄</span>{% endif %}</td>
+          <td style="font-weight:600;font-size:.83rem;">{{ r.platform_seller_name or '—' }}</td>
+          <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.79rem;" title="{{ r.product_name }}">{{ r.product_name or '—' }}
+            {% if r.tag == 'substitute' %}<span class="badge" style="background:#fffbeb;color:#d97706;font-size:.65rem;margin-left:.2rem;">🔄 대체</span>
+            {% elif r.multiplier and r.multiplier != 1 %}<span class="badge" style="background:#f5f3ff;color:#7c3aed;font-size:.65rem;margin-left:.2rem;">✖️ 배수 {{ r.multiplier }}</span>{% endif %}
+          </td>
+          <td style="font-size:.76rem;color:#64748b;">{{ r.spec or '—' }}</td>
+          <td style="text-align:right;font-weight:700;font-size:.9rem;">
+            {% if r.price_sale %}{{ '{:,.0f}'.format(r.price_sale) }}원{% else %}—{% endif %}
+            {% if r.multiplier and r.multiplier != 1 and r.price_sale_adj %}<div style="font-size:.68rem;color:#7c3aed;font-weight:600;">→ 환산 {{ '{:,.0f}'.format(r.price_sale_adj) }}원</div>{% endif %}
+          </td>
+          <td style="text-align:right;font-size:.88rem;color:#059669;font-weight:600;">{% if r.net_price %}{{ '{:,.0f}'.format(r.net_price) }}원{% else %}—{% endif %}</td>
+          <td style="text-align:right;">
+            {% if vs_diff is not none %}
+              {% if vs_diff < -500   %}<span class="vs-badge vs-cheaper">▼{{ '{:,.0f}'.format(vs_diff|abs) }}원</span>
+              {% elif vs_diff > 500  %}<span class="vs-badge vs-pricier">▲{{ '{:,.0f}'.format(vs_diff) }}원</span>
+              {% else %}<span class="vs-badge vs-similar">≈ 유사</span>{% endif %}
+            {% else %}—{% endif %}
+          </td>
+          <td style="text-align:right;font-size:.78rem;color:#64748b;">{{ r.fee_pct }}%</td>
+          <td style="text-align:center;">
+            {% if r.gp_pct is not none %}
+              <span class="gp-{{ r.gp_status }}" style="font-weight:800;">{% if r.gp_status=='alert' %}🔴{% elif r.gp_status=='warn' %}🟡{% else %}🟢{% endif %} {{ r.gp_pct }}%</span>
+            {% else %}—{% endif %}
+          </td>
+          <td>
+            {% if r.delivery_type == '직배송' %}<span class="badge-direct">직배송</span>
+            {% elif r.delivery_type == '싱싱배송' %}<span class="badge-singsing">싱싱배송</span>
+            {% else %}<span class="badge badge-gray" style="font-size:.7rem;">{{ r.delivery_type or '—' }}</span>{% endif %}
+            {% if r.is_free_delivery %}<span class="badge badge-ok" style="font-size:.67rem;margin-left:.2rem;">무료</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div style="padding:2.5rem;text-align:center;color:#94a3b8;">
+    <div style="font-size:1.5rem;margin-bottom:.5rem;">📭</div>
+    <div style="font-weight:600;">매핑된 외부 상품이 없습니다.</div>
+    <div style="font-size:.82rem;margin-top:.3rem;"><a href="/portal/price-monitor/mapping?plant={{ plant }}" style="color:var(--pm-blue);">매핑 등록</a>을 해주세요.</div>
+  </div>
+  {% endif %}
+</div>
+
+<script>
+(function(){
+/* ══════════ 데이터 ══════════ */
+const DATES    = {{ chart_dates | safe }};
+const DS_SEL   = {{ chart_datasets | safe }};
+const DS_PLAT  = {{ chart_datasets_platform | safe }};
+const TODAY    = {{ today_rows | tojson }};
+const OUR_SALE = {{ our_sale or 'null' }};
+const OUR_VAT  = {{ our_sale_vat or 'null' }};
+const OUR_BUY  = {{ our_buy or 'null' }};
+const GP_ALERT = {{ gp_alert_pct }};
+const GP_WARN  = {{ gp_warn_pct }};
+const TAX      = "{{ tax_status }}";
+const MKT = {
+  gross: { min:{{ market_min or 'null' }}, avg:{{ market_avg or 'null' }}, minGp:{{ market_min_gp or 'null' }} },
+  net:   { min:{{ market_min_net or 'null' }}, avg:{{ market_avg_net or 'null' }}, minGp:null },
+};
+
+/* GP 마지노선 / 당사가 라인 — 기간 슬라이스된 길이에 맞춰 매번 새로 생성 */
+function makeGpLine(len){
+  if(!(OUR_BUY && len)) return null;
+  return {
+    label:`GP ${GP_ALERT}% 마지노선`,
+    data:Array(len).fill(Math.round(OUR_BUY/((1-0.066/1.1)*(1-GP_ALERT/100)))),
+    borderColor:'#b91c1c', borderDash:[4,4], backgroundColor:'transparent', pointRadius:0, tension:0
+  };
+}
+function makeOurLine(len){
+  return {
+    label: TAX==='과세' ? '당사 판매단가(VAT포함)' : '당사 판매단가',
+    data: Array(len).fill(TAX==='과세' && OUR_VAT ? OUR_VAT : OUR_SALE),
+    borderColor:'#0f172a', borderDash:[6,3], backgroundColor:'transparent', pointRadius:0, tension:0
+  };
+}
+
+/* ══════════ 기간(최근 1주일/30일) 슬라이스 ══════════ */
+let PERIOD_DAYS = 30;
+function sliceArr(arr, n){ return n>=arr.length ? arr : arr.slice(arr.length-n); }
+function curDates(){ return sliceArr(DATES, PERIOD_DAYS); }
+function curDatasets(src){
+  return src.map(ds => Object.assign({}, ds, { data: sliceArr(ds.data, PERIOD_DAYS) }));
+}
+
+/* ══════════ 로고 오버레이 플러그인 (당사 판매단가 / GP 마지노선 점선 시작점) ══════════ */
+const logoImg = new Image();
+let logoReady = false;
+logoImg.onload = () => { logoReady = true; rerenderActive(); };
+logoImg.src = '/static/dongwon-homefood-logo-line.png';
+
+const logoStartPlugin = {
+  id: 'logoStart',
+  afterDatasetsDraw(chart){
+    if(!logoReady) return;
+    const {ctx, chartArea} = chart;
+    if(!chartArea) return;
+    // y축 눈금 라벨이 그려지는 영역(scale.left ~ scale.right=chartArea.left)과 겹치지 않도록
+    // scale.left(축 라벨 시작점, 곧 layout padding 끝)를 기준으로 로고를 배치한다.
+    const yScale = chart.scales && (chart.scales.y || Object.values(chart.scales).find(s=>s.axis==='y'));
+    const leftBound = yScale ? yScale.left : chartArea.left;
+    chart.data.datasets.forEach((ds, i) => {
+      if(!ds.label) return;
+      const isTarget = ds.label.includes('당사 판매단가') || ds.label.includes('마지노선');
+      if(!isTarget) return;
+      const idx = ds.data.findIndex(v => v!=null);
+      if(idx<0) return;
+      const meta = chart.getDatasetMeta(i);
+      const pt = meta.data[idx];
+      if(!pt) return;
+      const targetH = 42;
+      const ratio = (logoImg.naturalWidth && logoImg.naturalHeight) ? (logoImg.naturalWidth/logoImg.naturalHeight) : 1.66;
+      const targetW = targetH * ratio;
+      const x = Math.max(leftBound - targetW - 4, 2);
+      const y = pt.y - targetH/2;
+      ctx.save();
+      ctx.globalAlpha = 0.96;
+      ctx.drawImage(logoImg, x, y, targetW, targetH);
+      ctx.restore();
+    });
+  }
+};
+
+/* ══════════ 공통 차트 옵션 ══════════ */
+const BASE_OPTS = {
+  responsive:true, maintainAspectRatio:false,
+  layout:{padding:{left:90}},
+  interaction:{mode:'index', intersect:false},
+  plugins:{
+    legend:{position:'bottom', labels:{boxWidth:10, font:{size:10}}},
+    tooltip:{callbacks:{label:c => c.parsed.y!=null ? `${c.dataset.label}: ${c.parsed.y.toLocaleString()}원` : null}}
+  },
+  scales:{
+    x:{grid:{color:'#f1f5f9'}, ticks:{font:{size:10}, maxTicksLimit:12}},
+    y:{grid:{color:'#f1f5f9'}, ticks:{font:{size:10}, callback:v => v.toLocaleString()+'원'}}
+  }
+};
+
+const charts = {};
+function mkLine(id, labels, datasets, extra){
+  if(charts[id]) charts[id].destroy();
+  const c = document.getElementById(id); if(!c) return;
+  charts[id] = new Chart(c, {type:'line', data:{labels, datasets},
+    options:Object.assign({}, BASE_OPTS, extra||{}), plugins:[logoStartPlugin]});
+}
+function mkBar(id, labels, datasets){
+  if(charts[id]) charts[id].destroy();
+  const c = document.getElementById(id); if(!c) return;
+  charts[id] = new Chart(c, {type:'bar', data:{labels, datasets},
+    options:Object.assign({}, BASE_OPTS, {scales:Object.assign({}, BASE_OPTS.scales)})});
+}
+
+/* ══════════ 옵션 A: 플랫폼 분할 ══════════ */
+function buildA(){
+  const dates = curDates();
+  const platCur = curDatasets(DS_PLAT);
+  [['baemin','chartA_baemin','배민'],['foodspring','chartA_food','식봄']].forEach(([pf,id,label])=>{
+    const pfDs = platCur.filter(d=>d.label.startsWith(label));
+    const ds = [...pfDs];
+    if(OUR_SALE||OUR_VAT) ds.push(makeOurLine(dates.length));
+    const gp = makeGpLine(dates.length);
+    if(gp) ds.push(gp);
+    mkLine(id, dates, ds);
+  });
+}
+
+/* ══════════ 옵션 B: 셀러 선택 ══════════ */
+const selOn = new Set([0]);
+function buildBChips(){
+  const el = document.getElementById('sellerChips'); if(!el) return;
+  el.innerHTML='';
+  DS_SEL.forEach((ds,i)=>{
+    if(ds.label.includes('당사')) return;
+    const ch = document.createElement('span');
+    ch.className='s-chip'+(selOn.has(i)?' on':'');
+    ch.innerHTML=`<span style="width:8px;height:8px;border-radius:50%;background:${ds.borderColor};display:inline-block;flex-shrink:0;"></span>${ds.label}`;
+    ch.onclick=()=>{selOn.has(i)?selOn.delete(i):selOn.add(i); ch.classList.toggle('on',selOn.has(i)); rebuildB();};
+    el.appendChild(ch);
+  });
+}
+function rebuildB(){
+  const dates = curDates();
+  const selCur = curDatasets(DS_SEL);
+  const ds = selCur.filter((_,i)=>selOn.has(i)||DS_SEL[i].label.includes('당사'));
+  const gp = makeGpLine(dates.length);
+  const full = gp ? [...ds, gp] : ds;
+  mkLine('chartB', dates, full);
+}
+function buildB(){ buildBChips(); rebuildB(); }
+
+function rerenderActive(){
+  const mode = document.getElementById('tabA').classList.contains('active') ? 'A' : 'B';
+  if(mode==='A') buildA(); else buildB();
+}
+
+/* ══════════ 기간 전환 ══════════ */
+window.setPeriod=function(days){
+  PERIOD_DAYS = days;
+  document.getElementById('period7').classList.toggle('active', days===7);
+  document.getElementById('period30').classList.toggle('active', days===30);
+  const lbl = document.getElementById('chartPeriodLabel');
+  if(lbl) lbl.textContent = days===7 ? '최근 1주일' : '최근 30일';
+  rerenderActive();
+};
+
+/* ══════════ 탭 전환 ══════════ */
+window.setChartMode=function(m){
+  ['A','B'].forEach(x=>{
+    document.getElementById('panel'+x).style.display=x===m?'':'none';
+    document.getElementById('tab'+x).classList.toggle('active',x===m);
+  });
+  if(m==='A') buildA(); else buildB();
+};
+if(DATES.length) buildA();
+
+/* ══════════ 수수료 토글 (시장 카드) ══════════ */
+function gpColor(v){return v==null?'#059669':v<GP_ALERT?'#b91c1c':v<GP_WARN?'#d97706':'#059669';}
+function calcGrade(ref,min){
+  if(!ref||!min) return '-';
+  const r=ref/min; return r<=1?'A':r<=1.05?'B':r<=1.10?'C':'D';
+}
+const gradeDesc={'A':'최저가 이하','B':'최저+5% 이내','C':'최저+10% 이내','D':'10% 이상 비쌈','-':'비교불가'};
+
+window.setFeeMode=function(mode){
+  document.getElementById('feeBtn1').classList.toggle('on',mode==='gross');
+  document.getElementById('feeBtn2').classList.toggle('on',mode==='net');
+  const m=MKT[mode];
+  document.getElementById('mv-min').textContent=m.min!=null?m.min.toLocaleString()+'원':'—';
+  document.getElementById('mv-avg').textContent=m.avg!=null?m.avg.toLocaleString()+'원':'—';
+  // 시장최저매칭GP는 서버에서 이미 정확히 계산된 값(수수료/배수/세금 반영)이므로
+  // 외부가격 기준(토글) 변경과 무관하게 항상 동일하게 유지한다. (재계산 하지 않음)
+  // 경쟁등급
+  const ref=TAX==='과세'&&OUR_VAT?OUR_VAT:OUR_SALE;
+  const grade=calcGrade(ref,m.min);
+  const grEl=document.getElementById('mv-grade');
+  grEl.textContent=grade; grEl.className='mc-val grade-'+grade;
+  document.getElementById('mv-grade-sub').textContent=gradeDesc[grade]||'';
+  // 최저가 비교 서브
+  const sub=document.getElementById('mv-min-sub');
+  if(ref&&m.min){ const d=Math.round(ref-m.min); sub.textContent=d>0?`당사 대비 ▲${d.toLocaleString()}원 비쌈`:d<0?`당사 대비 ▼${(-d).toLocaleString()}원 더 쌈`:'동일'; }
+};
+
+/* ══════════ 테이블 정렬 ══════════ */
+let sCol=null, sDir=1;
+const ATTR={'platform':'data-platform','seller':'data-seller','spec':'data-spec',
+  'price':'data-price','net':'data-net','fee':'data-fee','gp':'data-gp','delivery':'data-delivery'};
+window.sortTable=function(col){
+  if(sCol===col){sDir*=-1;}else{sCol=col;sDir=-1;}
+  Object.keys(ATTR).forEach(c=>{
+    const el=document.getElementById('si_'+c); if(!el) return;
+    el.className='si'+(c===sCol?(sDir===1?' asc':' desc'):'');
+  });
+  const tb=document.getElementById('sellerTbody'); if(!tb) return;
+  const rows=[...tb.querySelectorAll('tr')];
+  rows.sort((a,b)=>{
+    let av=a.getAttribute(ATTR[col])||'', bv=b.getAttribute(ATTR[col])||'';
+    const an=parseFloat(av), bn=parseFloat(bv);
+    if(!isNaN(an)&&!isNaN(bn)) return (an-bn)*sDir;
+    return av.localeCompare(bv,'ko')*sDir;
+  });
+  rows.forEach(r=>tb.appendChild(r));
+};
+})();
+</script>

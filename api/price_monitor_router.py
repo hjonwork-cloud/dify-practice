@@ -1308,6 +1308,14 @@ async def pm_detail(
     plant: str = "ALL",
 ):
     _require_pm_access(request)
+    ctx = _build_pm_detail_ctx(product_code, plant)
+    return _render(request, "pm_detail.html", **ctx)
+
+
+def _build_pm_detail_ctx(product_code: str, plant: str) -> dict:
+    """상품 상세분석 화면(/detail)에 필요한 전체 컨텍스트를 계산한다.
+    가격모니터링 관리자 화면(pm_detail)과 전 직원 공용 인라인 임베드(pm_detail_embed)
+    양쪽에서 동일한 데이터/계산 로직을 재사용하기 위해 분리했다."""
     if plant not in PLANTS:
         plant = "ALL"
 
@@ -1499,7 +1507,7 @@ async def pm_detail(
         chart_datasets.append(_our_line)
         chart_datasets_platform.append(_our_line)
 
-    return _render(request, "pm_detail.html",
+    return dict(
                    product_code=product_code,
                    product_info=product_info_meta,
                    price_info=price_info,
@@ -1518,6 +1526,20 @@ async def pm_detail(
                    gp_alert_pct=GP_ALERT_PCT,
                    gp_warn_pct=GP_WARN_PCT,
                    plant=plant, plants=PLANTS)
+
+
+@router.get("/gp-lookup/detail-embed/{product_code}", response_class=HTMLResponse)
+async def pm_gp_lookup_detail_embed(
+    request: Request,
+    product_code: str,
+    plant: str = "ALL",
+):
+    """가격/GP 조회 화면(전 직원 공용)에서 매핑된 상품 클릭 시 iframe으로 인라인
+    삽입되는 상품 상세분석 리포트. 가격모니터링 관리자 화면(/detail)과 동일한
+    데이터·디자인을 사용하되, 접근 권한은 로그인 여부만 확인한다(_require_login)."""
+    _require_login(request)
+    ctx = _build_pm_detail_ctx(product_code, plant)
+    return _render(request, "pm_detail_embed.html", **ctx)
 
 
 # ── 화면: 상품 가격/GP 요약 조회 (전체 계정 공용) ──────────────────────────

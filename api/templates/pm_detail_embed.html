@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>상품 상세분석 — {{ product_code }}</title>
+<link rel="preconnect" href="https://cdn.jsdelivr.net">
+<link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" rel="stylesheet">
+<style>
+:root{--pm-blue:#1677ff;--pm-red:#f5222d;--pm-orange:#fa8c16;--pm-green:#52c41a;--pm-gray:#6b7280;}
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{font-family:'Pretendard Variable',system-ui,sans-serif;background:#f8fafc;color:#1e293b;padding:1.1rem 1.1rem 1.6rem;}
+.badge{display:inline-block;padding:.15rem .5rem;border-radius:99px;font-size:.72rem;font-weight:600;white-space:nowrap;}
+.badge-blue{background:#dbeafe;color:#1d4ed8;}
+.badge-baemin{background:#fff0e8;color:#d4380d;}
+.badge-foodspring{background:#e6f4ff;color:#0958d9;}
+.badge-gray{background:#f3f4f6;color:#6b7280;}
+.badge-ok{background:#dcfce7;color:#15803d;}
+.gp-alert{color:#b91c1c;font-weight:700;}
+.gp-warn{color:#92400e;font-weight:700;}
+.gp-ok{color:#15803d;font-weight:600;}
+</style>
+</head>
+<body>
+{% include "pm_detail_body.html" %}
+</body>
+</html>
