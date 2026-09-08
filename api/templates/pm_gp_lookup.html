@@ -2,6 +2,7 @@
 {% block title %}외부 가격/GP 조회{% endblock %}
 
 {% block content %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
 .gpl-wrap{max-width:1180px;margin:0 auto;}
 .gpl-head{margin-bottom:1.1rem;}
@@ -77,6 +78,31 @@
   </div>
   <div class="gpl-loading" id="gplLoading" style="display:none;">검색 중...</div>
   <div class="gpl-empty" id="gplEmpty" style="display:none;">검색 결과가 없습니다.</div>
+
+  <div class="gpl-detail" id="gplDetail">
+    <a class="back-link" onclick="gplBackToList()">← 목록으로</a>
+    <div class="gpl-kpi-row">
+      <div class="gpl-kpi"><div class="l">당사 평균 판매가</div><div class="v" id="dOurSale">-</div></div>
+      <div class="gpl-kpi"><div class="l">추정 구매단가</div><div class="v" id="dBuy">-</div></div>
+      <div class="gpl-kpi"><div class="l">당사 GP%</div><div class="v" id="dOurGp">-</div></div>
+    </div>
+    <div class="market-grid">
+      <div class="market-card c-min"><div class="mc-label">플랫폼 최저가</div><div class="mc-val" id="dMin">-</div><div class="mc-sub" id="dMinSub">-</div></div>
+      <div class="market-card c-avg"><div class="mc-label">플랫폼 평균가</div><div class="mc-val" id="dAvg">-</div><div class="mc-sub" id="dAvgSub">-</div></div>
+      <div class="market-card c-max"><div class="mc-label">플랫폼 최고가</div><div class="mc-val" id="dMax">-</div><div class="mc-sub" id="dMaxSub">-</div></div>
+    </div>
+    <div class="chart-card">
+      <h4>최근 30일 가격 추이 (플랫폼별 최저/평균/최고 + 당사 판매단가)</h4>
+      <div class="chart-wrap"><canvas id="gplChart"></canvas></div>
+    </div>
+    <div class="seller-card">
+      <div class="head">플랫폼-셀러별 현재 현황</div>
+      <table class="seller-table">
+        <thead><tr><th>플랫폼</th><th>셀러</th><th>외부 상품명</th><th>외부 판매가</th><th>실판매가(수수료차감)</th><th>당사 매칭 GP</th></tr></thead>
+        <tbody id="dSellerRows"></tbody>
+      </table>
+    </div>
+  </div>
 </div>
 
 <!-- 외부상품 조회 팝업 (단순 조회 전용 — 매핑/선택 기능 없음) -->
@@ -120,9 +146,15 @@
 </div>
 
 <script>
+let gplChartInst = null;
+function fmt(n){ return (n===null||n===undefined) ? '-' : Math.round(n).toLocaleString()+'원'; }
+function fmtPct(n){ return (n===null||n===undefined) ? '-' : n.toFixed(1)+'%'; }
+function gpClass(v, alert, warn){ if(v===null||v===undefined) return ''; if(v<alert) return 'gp-alert'; if(v<warn) return 'gp-warn'; return 'gp-ok'; }
+
 async function gplSearch(){
   const kw = document.getElementById('gplKeyword').value.trim();
   const plant = document.getElementById('gplPlant').value;
+  document.getElementById('gplDetail').style.display='none';
   document.getElementById('gplResults').style.display='none';
   document.getElementById('gplEmpty').style.display='none';
   document.getElementById('gplLoading').style.display='block';
@@ -136,7 +168,7 @@ async function gplSearch(){
     }
     const body = document.getElementById('gplResultsBody');
     body.innerHTML = data.items.map(it => `
-      <tr class="rowbtn" onclick="location.href='/portal/price-monitor/detail/${it.product_code}?plant=${plant}'">
+      <tr class="rowbtn" onclick="gplShowDetail('${it.product_code}','${plant}')">
         <td>${it.product_code}</td>
         <td>${it.product_name||''}</td>
         <td>${it.category||'-'}</td>
@@ -147,6 +179,63 @@ async function gplSearch(){
   }catch(e){
     document.getElementById('gplLoading').style.display='none';
     document.getElementById('gplEmpty').style.display='block';
+  }
+}
+
+function gplBackToList(){
+  document.getElementById('gplDetail').style.display='none';
+  document.getElementById('gplResults').style.display='block';
+}
+
+async function gplShowDetail(code, plant){
+  document.getElementById('gplResults').style.display='none';
+  document.getElementById('gplLoading').style.display='block';
+  try{
+    const res = await fetch(`/portal/price-monitor/api/gp-lookup/detail/${encodeURIComponent(code)}?plant=${plant}`);
+    const d = await res.json();
+    document.getElementById('gplLoading').style.display='none';
+    document.getElementById('gplDetail').style.display='block';
+
+    document.getElementById('dOurSale').textContent = fmt(d.our_sale_price);
+    document.getElementById('dBuy').textContent = fmt(d.buy_price);
+    const gpEl = document.getElementById('dOurGp');
+    gpEl.textContent = fmtPct(d.our_gp_pct);
+    gpEl.className = 'v ' + gpClass(d.our_gp_pct, d.gp_alert_pct, d.gp_warn_pct);
+
+    document.getElementById('dMin').textContent = fmt(d.market_min);
+    document.getElementById('dMinSub').textContent = (d.min_seller||'-') + ' · GP ' + fmtPct(d.market_min_gp);
+    document.getElementById('dAvg').textContent = fmt(d.market_avg);
+    document.getElementById('dAvgSub').textContent = 'GP ' + fmtPct(d.market_avg_gp);
+    document.getElementById('dMax').textContent = fmt(d.market_max);
+    document.getElementById('dMaxSub').textContent = (d.max_seller||'-') + ' · GP ' + fmtPct(d.market_max_gp);
+
+    const rowsBody = document.getElementById('dSellerRows');
+    if(!d.seller_rows || d.seller_rows.length===0){
+      rowsBody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#94a3b8;padding:1.2rem;">매핑된 플랫폼 상품이 없습니다.</td></tr>';
+    }else{
+      rowsBody.innerHTML = d.seller_rows.map(r => `
+        <tr>
+          <td><span class="badge badge-${r.platform}">${r.platform==='baemin'?'배민상회':'식봄'}</span></td>
+          <td>${r.platform_seller_name||''}</td>
+          <td>${r.product_name||''}</td>
+          <td>${r.price_sale ? Math.round(r.price_sale).toLocaleString()+'원' : '-'}</td>
+          <td>${r.net_price ? Math.round(r.net_price).toLocaleString()+'원' : '-'}</td>
+          <td class="${gpClass(r.gp_pct, d.gp_alert_pct, d.gp_warn_pct)}">${fmtPct(r.gp_pct)}</td>
+        </tr>`).join('');
+    }
+
+    if(gplChartInst){ gplChartInst.destroy(); }
+    const ctx = document.getElementById('gplChart').getContext('2d');
+    gplChartInst = new Chart(ctx, {
+      type: 'line',
+      data: { labels: d.chart_dates, datasets: d.chart_datasets },
+      options: { responsive:true, maintainAspectRatio:false,
+        plugins:{ legend:{ position:'bottom', labels:{ boxWidth:12, font:{size:11} } } },
+        scales:{ y:{ ticks:{ callback:(v)=>Math.round(v).toLocaleString() } } } }
+    });
+  }catch(e){
+    document.getElementById('gplLoading').style.display='none';
+    alert('상세 조회 중 오류가 발생했습니다.');
   }
 }
 
