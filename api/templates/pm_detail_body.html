@@ -132,7 +132,7 @@
 
 <!-- ② 시장 포지션 (수수료 포함/제외 토글) -->
 <div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.55rem;flex-wrap:wrap;">
-  <span style="font-size:.8rem;font-weight:700;color:#475569;">외부 가격 기준:</span>
+  <span style="font-size:.8rem;font-weight:700;color:#475569;">가격 기준:</span>
   <div class="fee-tog">
     <button id="feeBtn1" class="on" onclick="setFeeMode('gross')">수수료 포함 (표시가)</button>
     <button id="feeBtn2" onclick="setFeeMode('net')">수수료 제외 (실판매가)</button>
@@ -227,6 +227,14 @@
     {% if today_rows %}<span style="color:#94a3b8;font-size:.8rem;">수집일: {{ today_rows[0].crawl_date }}</span>{% endif %}
   </div>
   <div class="compare-note">ℹ️ 과세 상품은 외부 판매가가 VAT 포함가이며, 당사 구매단가(공급가) 기준으로 비교해야 합니다.</div>
+  {% if tax_status == '과세' %}
+  <div style="padding:.55rem 1.25rem 0;">
+    <label style="display:inline-flex;align-items:center;gap:.4rem;font-size:.78rem;color:#475569;cursor:pointer;font-weight:600;">
+      <input type="checkbox" id="netVatToggle" onchange="toggleNetVat(this.checked)" style="cursor:pointer;">
+      실판매가 VAT 제외하기 <span style="font-weight:400;color:#94a3b8;">(÷1.1)</span>
+    </label>
+  </div>
+  {% endif %}
   {% if today_rows %}
   <div style="overflow-x:auto;">
     <table class="compare-table">
@@ -268,7 +276,7 @@
             {% if r.price_sale %}{{ '{:,.0f}'.format(r.price_sale) }}원{% else %}—{% endif %}
             {% if r.multiplier and r.multiplier != 1 and r.price_sale_adj %}<div style="font-size:.68rem;color:#7c3aed;font-weight:600;">→ 환산 {{ '{:,.0f}'.format(r.price_sale_adj) }}원</div>{% endif %}
           </td>
-          <td style="text-align:right;font-size:.88rem;color:#059669;font-weight:600;">{% if r.net_price %}{{ '{:,.0f}'.format(r.net_price) }}원{% else %}—{% endif %}</td>
+          <td style="text-align:right;font-size:.88rem;color:#059669;font-weight:600;">{% if r.net_price %}<span class="net-price-val" data-raw="{{ r.net_price }}">{{ '{:,.0f}'.format(r.net_price) }}원</span>{% else %}—{% endif %}</td>
           <td style="text-align:right;">
             {% if vs_diff is not none %}
               {% if vs_diff < -500   %}<span class="vs-badge vs-cheaper">▼{{ '{:,.0f}'.format(vs_diff|abs) }}원</span>
@@ -305,9 +313,11 @@
 <script>
 (function(){
 /* ══════════ 데이터 ══════════ */
-const DATES    = {{ chart_dates | safe }};
-const DS_SEL   = {{ chart_datasets | safe }};
-const DS_PLAT  = {{ chart_datasets_platform | safe }};
+const DATES         = {{ chart_dates | safe }};
+const DS_SEL_GROSS   = {{ chart_datasets | safe }};
+const DS_SEL_NET     = {{ chart_datasets_net | safe }};
+const DS_PLAT_GROSS  = {{ chart_datasets_platform | safe }};
+const DS_PLAT_NET    = {{ chart_datasets_platform_net | safe }};
 const TODAY    = {{ today_rows | tojson }};
 const OUR_SALE = {{ our_sale or 'null' }};
 const OUR_VAT  = {{ our_sale_vat or 'null' }};
@@ -320,9 +330,13 @@ const MKT = {
   net:   { min:{{ market_min_net or 'null' }}, avg:{{ market_avg_net or 'null' }}, minGp:null },
 };
 
-/* GP 마지노선 / 당사가 라인 — 기간 슬라이스된 길이에 맞춰 매번 새로 생성
+/* "가격 기준" 토글 상태 — 시장카드와 가격추이 차트가 동일한 기준을 공유한다. */
+let FEE_MODE = 'gross';
+
+/* GP 마지노선 / 당사가 라인 — 기간 슬라이스된 길이에 맞춰 매번 새로 생성.
    당사 GP는 (판매단가-구매단가)/판매단가 로 계산하므로(플랫폼 수수료 미반영),
-   마지노선도 동일한 기준(구매단가 / (1-GP%))으로 계산해야 판매단가와 정합된다. */
+   마지노선도 동일한 기준(구매단가 / (1-GP%))으로 계산해야 판매단가와 정합된다.
+   둘 다 VAT제외 기준이며, 수수료가 이미 반영된 "실판매가" 모드에서만 표시한다. */
 function makeGpLine(len){
   if(!(OUR_BUY && len)) return null;
   return {
@@ -333,8 +347,8 @@ function makeGpLine(len){
 }
 function makeOurLine(len){
   return {
-    label: TAX==='과세' ? '당사 판매단가(VAT포함)' : '당사 판매단가',
-    data: Array(len).fill(TAX==='과세' && OUR_VAT ? OUR_VAT : OUR_SALE),
+    label:'당사 판매단가(VAT제외)',
+    data:Array(len).fill(OUR_SALE),
     borderColor:'#0f172a', borderDash:[6,3], backgroundColor:'transparent', pointRadius:0, tension:0
   };
 }
@@ -379,24 +393,27 @@ function mkBar(id, labels, datasets){
 /* ══════════ 옵션 A: 플랫폼 분할 ══════════ */
 function buildA(){
   const dates = curDates();
-  const platCur = curDatasets(DS_PLAT);
+  const platSrc = FEE_MODE==='net' ? DS_PLAT_NET : DS_PLAT_GROSS;
+  const platCur = curDatasets(platSrc);
   [['baemin','chartA_baemin','배민'],['foodspring','chartA_food','식봄']].forEach(([pf,id,label])=>{
     const pfDs = platCur.filter(d=>d.label.startsWith(label));
     const ds = [...pfDs];
-    if(OUR_SALE||OUR_VAT) ds.push(makeOurLine(dates.length));
-    const gp = makeGpLine(dates.length);
-    if(gp) ds.push(gp);
+    if(FEE_MODE==='net'){
+      if(OUR_SALE) ds.push(makeOurLine(dates.length));
+      const gp = makeGpLine(dates.length);
+      if(gp) ds.push(gp);
+    }
     mkLine(id, dates, ds);
   });
 }
 
 /* ══════════ 옵션 B: 셀러 선택 ══════════ */
 const selOn = new Set([0]);
+function curSelSrc(){ return FEE_MODE==='net' ? DS_SEL_NET : DS_SEL_GROSS; }
 function buildBChips(){
   const el = document.getElementById('sellerChips'); if(!el) return;
   el.innerHTML='';
-  DS_SEL.forEach((ds,i)=>{
-    if(ds.label.includes('당사')) return;
+  DS_SEL_GROSS.forEach((ds,i)=>{
     const ch = document.createElement('span');
     ch.className='s-chip'+(selOn.has(i)?' on':'');
     ch.innerHTML=`<span style="width:8px;height:8px;border-radius:50%;background:${ds.borderColor};display:inline-block;flex-shrink:0;"></span>${ds.label}`;
@@ -406,11 +423,14 @@ function buildBChips(){
 }
 function rebuildB(){
   const dates = curDates();
-  const selCur = curDatasets(DS_SEL);
-  const ds = selCur.filter((_,i)=>selOn.has(i)||DS_SEL[i].label.includes('당사'));
-  const gp = makeGpLine(dates.length);
-  const full = gp ? [...ds, gp] : ds;
-  mkLine('chartB', dates, full);
+  const selCur = curDatasets(curSelSrc());
+  const ds = selCur.filter((_,i)=>selOn.has(i));
+  if(FEE_MODE==='net'){
+    if(OUR_SALE) ds.push(makeOurLine(dates.length));
+    const gp = makeGpLine(dates.length);
+    if(gp) ds.push(gp);
+  }
+  mkLine('chartB', dates, ds);
 }
 function buildB(){ buildBChips(); rebuildB(); }
 
@@ -439,31 +459,34 @@ window.setChartMode=function(m){
 };
 if(DATES.length) buildA();
 
-/* ══════════ 수수료 토글 (시장 카드) ══════════ */
+/* ══════════ 가격 기준 토글 (시장 카드 + 가격추이 차트 공통) ══════════ */
 function gpColor(v){return v==null?'#059669':v<GP_ALERT?'#b91c1c':v<GP_WARN?'#d97706':'#059669';}
-function calcGrade(ref,min){
-  if(!ref||!min) return '-';
-  const r=ref/min; return r<=1?'A':r<=1.05?'B':r<=1.10?'C':'D';
-}
-const gradeDesc={'A':'최저가 이하','B':'최저+5% 이내','C':'최저+10% 이내','D':'10% 이상 비쌈','-':'비교불가'};
 
 window.setFeeMode=function(mode){
+  FEE_MODE = mode;
   document.getElementById('feeBtn1').classList.toggle('on',mode==='gross');
   document.getElementById('feeBtn2').classList.toggle('on',mode==='net');
   const m=MKT[mode];
   document.getElementById('mv-min').textContent=m.min!=null?m.min.toLocaleString()+'원':'—';
   document.getElementById('mv-avg').textContent=m.avg!=null?m.avg.toLocaleString()+'원':'—';
-  // 시장최저매칭GP는 서버에서 이미 정확히 계산된 값(수수료/배수/세금 반영)이므로
-  // 외부가격 기준(토글) 변경과 무관하게 항상 동일하게 유지한다. (재계산 하지 않음)
-  // 경쟁등급
+  // 시장최저매칭GP, 🏆 경쟁등급(mv-grade)은 서버에서 공식 기준(VAT포함 당사가 vs 시장 표시가 최저)으로
+  // 이미 고정 계산되어 있으므로, 이 토글과 무관하게 재계산하지 않고 항상 동일하게 유지한다.
   const ref=TAX==='과세'&&OUR_VAT?OUR_VAT:OUR_SALE;
-  const grade=calcGrade(ref,m.min);
-  const grEl=document.getElementById('mv-grade');
-  grEl.textContent=grade; grEl.className='mc-val grade-'+grade;
-  document.getElementById('mv-grade-sub').textContent=gradeDesc[grade]||'';
-  // 최저가 비교 서브
   const sub=document.getElementById('mv-min-sub');
   if(ref&&m.min){ const d=Math.round(ref-m.min); sub.textContent=d>0?`당사 대비 ▲${d.toLocaleString()}원 비쌈`:d<0?`당사 대비 ▼${(-d).toLocaleString()}원 더 쌈`:'동일'; }
+  else sub.textContent='비교불가';
+  // 가격추이 차트도 동일한 기준으로 다시 그린다(수수료 포함 선택 시 당사판매단가/GP마지노선 숨김).
+  rerenderActive();
+};
+
+/* ══════════ 플랫폼 셀러 현황 테이블 — 실판매가 VAT 제외 토글 ══════════ */
+window.toggleNetVat=function(checked){
+  document.querySelectorAll('.net-price-val').forEach(el=>{
+    const raw=parseFloat(el.getAttribute('data-raw'));
+    if(isNaN(raw)) return;
+    const val = checked ? raw/1.1 : raw;
+    el.textContent = Math.round(val).toLocaleString()+'원';
+  });
 };
 
 /* ══════════ 테이블 정렬 ══════════ */

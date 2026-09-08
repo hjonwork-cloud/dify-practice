@@ -1361,6 +1361,7 @@ def _build_pm_detail_ctx(product_code: str, plant: str) -> dict:
                 SELECT crawl_date, platform, platform_seller_name, product_key,
                        MIN(price_sale) AS min_price,
                        AVG(price_sale) AS avg_price,
+                       MAX(delivery_type) AS delivery_type,
                        COUNT(*) AS cnt
                 FROM {T_SILVER}
                 WHERE product_key IN ({keys_str})
@@ -1381,6 +1382,18 @@ def _build_pm_detail_ctx(product_code: str, plant: str) -> dict:
                 row["min_price"] = float(row["min_price"]) / _mult
             if row.get("avg_price") is not None:
                 row["avg_price"] = float(row["avg_price"]) / _mult
+
+    # 수수료 제외(실판매가) 버전 계산 — "가격 기준" 토글의 실판매가 모드에서 사용.
+    # VAT는 건드리지 않는다(플랫폼 표시가 자체가 VAT 포함 소비자가이므로 수수료만 차감).
+    for row in history_rows:
+        _pf = row.get("platform", "")
+        _sn = row.get("platform_seller_name", "")
+        _dt = row.get("delivery_type") or "직배송"
+        _fee = _get_fee(_dt, _pf, _sn)
+        if row.get("min_price") is not None:
+            row["min_price_net"] = float(row["min_price"]) * (1 - _fee)
+        if row.get("avg_price") is not None:
+            row["avg_price_net"] = float(row["avg_price"]) * (1 - _fee)
 
     # GP 계산
     for row in today_rows:
@@ -1445,12 +1458,14 @@ def _build_pm_detail_ctx(product_code: str, plant: str) -> dict:
     chart_dates = sorted({str(r["crawl_date"]) for r in history_rows})
     seller_keys = sorted({f"{r['platform']}|{r['platform_seller_name']}" for r in history_rows})
     chart_datasets = []
+    chart_datasets_net = []
     COLORS = ["#3b82f6","#10b981","#f59e0b","#ef4444","#8b5cf6","#06b6d4","#f97316","#84cc16"]
     for i, sk in enumerate(seller_keys):
         pf, sn = sk.split("|", 1)
         # 동일 셀러에 여러 product_key(배수 상이한 규격 등)가 매핑된 경우를 대비해
-        # 날짜별로 배수 적용된 min_price 중 최솟값을 채택한다.
+        # 날짜별로 배수 적용된 min_price 중 최솟값을 채택한다(gross 기준 선택 행의 net값을 병행 채택).
         date_price: dict[str, float] = {}
+        date_price_net: dict[str, float] = {}
         for r in history_rows:
             if f"{r['platform']}|{r['platform_seller_name']}" != sk:
                 continue
@@ -1460,10 +1475,17 @@ def _build_pm_detail_ctx(product_code: str, plant: str) -> dict:
                 continue
             if d not in date_price or mp < date_price[d]:
                 date_price[d] = mp
+                date_price_net[d] = r.get("min_price_net")
         data = [date_price.get(d) for d in chart_dates]
+        data_net = [date_price_net.get(d) for d in chart_dates]
         label = f"{'배민' if pf=='baemin' else '식봄'} {sn}"
+        color = COLORS[i % len(COLORS)]
         chart_datasets.append({"label": label, "data": data,
-                                "borderColor": COLORS[i % len(COLORS)],
+                                "borderColor": color,
+                                "backgroundColor": "transparent",
+                                "tension": 0.3, "spanGaps": True})
+        chart_datasets_net.append({"label": label, "data": data_net,
+                                "borderColor": color,
                                 "backgroundColor": "transparent",
                                 "tension": 0.3, "spanGaps": True})
 
@@ -1473,39 +1495,47 @@ def _build_pm_detail_ctx(product_code: str, plant: str) -> dict:
         "foodspring": {"최저": "#065f46", "평균": "#10b981", "최고": "#6ee7b7"},
     }
     chart_datasets_platform = []
+    chart_datasets_platform_net = []
     for pf_key in ["baemin", "foodspring"]:
         pf_label = "배민상회" if pf_key == "baemin" else "식봄"
         pf_rows  = [r for r in history_rows if r["platform"] == pf_key]
         if not pf_rows:
             continue
         _by_date = _defaultdict(list)
+        _by_date_net = _defaultdict(list)
         for r in pf_rows:
             if r["min_price"] is not None:
                 _by_date[str(r["crawl_date"])].append(float(r["min_price"]))
+            if r.get("min_price_net") is not None:
+                _by_date_net[str(r["crawl_date"])].append(float(r["min_price_net"]))
         for stat, fn, dash in [("최저", min, None), ("평균", lambda v: sum(v)/len(v), [5,3]), ("최고", max, [2,2])]:
             data = [round(fn(_by_date[d]), 0) if _by_date.get(d) else None for d in chart_dates]
+            data_net = [round(fn(_by_date_net[d]), 0) if _by_date_net.get(d) else None for d in chart_dates]
+            color = _pf_colors[pf_key][stat]
             ds = {
                 "label": f"{pf_label} {stat}",
                 "data": data,
-                "borderColor": _pf_colors[pf_key][stat],
+                "borderColor": color,
+                "backgroundColor": "transparent",
+                "tension": 0.3,
+                "spanGaps": True,
+            }
+            ds_net = {
+                "label": f"{pf_label} {stat}",
+                "data": data_net,
+                "borderColor": color,
                 "backgroundColor": "transparent",
                 "tension": 0.3,
                 "spanGaps": True,
             }
             if dash:
                 ds["borderDash"] = dash
+                ds_net["borderDash"] = dash
             chart_datasets_platform.append(ds)
+            chart_datasets_platform_net.append(ds_net)
 
-    # 당사 판매단가 수평선 (공통)
-    if our_sale:
-        _our_line = {
-            "label": "당사 판매단가",
-            "data": [our_sale] * len(chart_dates),
-            "borderColor": "#0f172a", "borderDash": [6, 3],
-            "backgroundColor": "transparent", "pointRadius": 0, "tension": 0,
-        }
-        chart_datasets.append(_our_line)
-        chart_datasets_platform.append(_our_line)
+    # 당사 판매단가 / GP 마지노선 수평선은 더 이상 서버에서 굽지 않는다.
+    # "가격 기준"(수수료 포함/제외) 토글에 따라 클라이언트에서 VAT제외 기준으로 직접 생성한다.
 
     return dict(
                    product_code=product_code,
@@ -1522,7 +1552,9 @@ def _build_pm_detail_ctx(product_code: str, plant: str) -> dict:
                    grade=grade,
                    chart_dates=_json.dumps(chart_dates),
                    chart_datasets=_json.dumps(chart_datasets),
+                   chart_datasets_net=_json.dumps(chart_datasets_net),
                    chart_datasets_platform=_json.dumps(chart_datasets_platform),
+                   chart_datasets_platform_net=_json.dumps(chart_datasets_platform_net),
                    gp_alert_pct=GP_ALERT_PCT,
                    gp_warn_pct=GP_WARN_PCT,
                    plant=plant, plants=PLANTS)
