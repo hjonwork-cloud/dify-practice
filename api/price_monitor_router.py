@@ -2759,7 +2759,12 @@ def _score_mapping(platform_name: str, platform_price: float | None,
     #    숫자+단위 토큰(1kg, 836g 등)과 범용 수식어(슬라이스, 냉동 등)는 텍스트 점수에서 제외
     _unit_pat2 = _UNIT_PAT2  # 모듈 레벨 캐시 사용
     _STOP = {
-        # '냉동', '냉장' → 온도조건 하드필터로 처리, STOP에서 제거 (텍스트 점수에 반영)
+        # [v11] '냉동'/'냉장'/'자숙'은 온도조건 하드필터로 별도 처리되므로
+        # 텍스트 점수 계산에서는 제외한다. 실데이터 진단 결과, 이 단어들이
+        # 유일한 공통 토큰인 후보(전혀 다른 상품)가 text_score만으로 15점
+        # 게이트 근처까지 올라가거나 '최고 후보'로 잘못 선택되는 노이즈가
+        # 확인되어 STOP으로 되돌림 (하드필터는 _STOP과 무관하게 그대로 동작).
+        '냉동', '냉장', '자숙',
         '슬라이스', '신선', '건조', '원물', '국산', '수입',
         '일반', '특대', '대용량', '소포장', '개별', '낱개', '원터치', '직배송',
         '무료배송', '당일배송', '묶음', '세트', '팩', '개입', '입점',
@@ -2862,8 +2867,15 @@ def _score_mapping(platform_name: str, platform_price: float | None,
     # [v8 Phase1] _our_core empty 버그 수정:
     # 기존: _our_core and → 자사 상품명이 짧아서(케찹 2자, 라면 2자 등) _our_core가 비면 패널티 스킵됨
     # [v10] _plat_core도 브랜드 파생 토큰 제외 (삼양식품 trigram 등)
-    _plat_core = {t for t in plat_meaningful
-                  if t not in _BRAND_STOP and len(t) >= 3
+    # [v11] 길이 기준을 3자→2자로 완화: '적채'(2자) 같은 실제 핵심 재료명이
+    # plat_meaningful(len>=3) 필터에서 원천 배제되어 _plat_core가 비고,
+    # 결과적으로 이미 text_score에서 정확히 매칭된 2자 토큰인데도
+    # "핵심어 0% 겹침" 패널티(-30)가 잘못 적용되는 사례가 실데이터에서 확인됨.
+    _plat_core_src = [t for t in pt
+                      if len(t) >= 2 and t not in _STOP
+                      and not _re.match(r'^[\d\.]+', t)]
+    _plat_core = {t for t in _plat_core_src
+                  if t not in _BRAND_STOP
                   and not any(_bk in t or t in _bk for _bk in _bs_check if len(_bk) >= 2)}
     _our_all = {t for t in ot if len(t) >= 2}  # 2자 이상 전체 토큰 (케찹, 비엔나 등 포함)
     if _plat_core and not _has_core_overlap(_plat_core, _our_all):
@@ -2880,8 +2892,12 @@ def _score_mapping(platform_name: str, platform_price: float | None,
     _plat_excl = {p for p in _plat_long if not any(p in o or o in p for o in _our_long)}
     _our_excl  = {o for o in _our_long  if not any(o in p or p in o for p in _plat_long)}
     # 양쪽 다 배타적 4자+ 토큰이 존재 → 플레이버/라인이 서로 다른 상품
+    # [v11] 패널티 -15 → -10 완화: 실데이터 진단 결과 '오징어까스'↔'오징어탈피몸통채',
+    # '치킨가라아게'↔'안심가라아게'처럼 핵심 재료/카테고리는 정확히 일치하지만
+    # 조리형태·브랜드 수식어만 다른 "양질의 근접 매칭"이 -15 패널티로 20점
+    # 게이트를 넘지 못해 제안없음 처리되는 사례가 다수 확인되어 완화.
     if _plat_excl and _our_excl:
-        score -= 15.0   # 플레이버 불일치 패널티
+        score -= 10.0   # 플레이버 불일치 패널티
     #      our_prod.total_weight(KG) 제공 시 직접 비교, 없으면 상품명 파싱
     # [v9-1] 텍스트 점수 0이면 volume_bonus 차단:
     # 연근(약500g) → 삼계닭(약500g) 처럼 제품명 토큰 겹침이 전혀 없고 용량만 같은 오매핑 방지
@@ -3462,12 +3478,34 @@ def _do_ai_suggest(request, platform, seller_name, plant, limit, _job_id=None):
             }
 
         plat_toks = _tokenize(clean_pname)
-        candidate_codes: set = set()
+        # ── 후보 생성 (v11): DF(문서빈도) 가중 후보 선정 ────────────────────
+        # 기존 버그: 모든 토큰의 역인덱스 매칭을 무조건 합집합한 뒤
+        # `list(set)[:200]`로 절삭 → set의 해시 순서는 사실상 무작위라서
+        # '냉동'(6,890건)/'1kg'(6,971건)/'국산'(3,947건)/'ea'(28,632건) 같은
+        # 범용 토큰이 후보를 수천~수만 개로 부풀리면, 실제 정답 상품(예:
+        # '청양고추' 등 특정 재료 토큰 매칭 31건)이 200개 캡에서 통째로
+        # 누락되는 문제가 실증됨 (배민상회 다봄푸드 '냉동' 접두 상품
+        # 제안없음 원인의 핵심). 아래는 토큰별 매칭 상품 수(DF)가 적은
+        # ("구체적인") 토큰을 우선 사용해 후보를 구성하고, 200개 초과 시에도
+        # 임의 절삭 대신 "몇 개의 구체적 토큰과 겹치는지" 기준으로 정렬해
+        # 상위 200개를 유지한다.
+        _MAX_DF = 500  # 이 값 초과 상품수를 가진 토큰은 "범용어"로 간주(99.9pct≈338)
+        _tok_hit_sets = {}
         for _t in plat_toks:
-            candidate_codes |= _tok_inv.get(_t, set())
-        # 후보 폭발 방지: 역인덱스 히트 너무 많으면 상위 200개로 제한
+            _s = _tok_inv.get(_t)
+            if _s:
+                _tok_hit_sets[_t] = _s
+        _specific_tok_sets = {t: s for t, s in _tok_hit_sets.items() if len(s) <= _MAX_DF}
+        _use_tok_sets = _specific_tok_sets if _specific_tok_sets else _tok_hit_sets
+        _hit_count: dict = {}
+        for _s in _use_tok_sets.values():
+            for _c in _s:
+                _hit_count[_c] = _hit_count.get(_c, 0) + 1
+        candidate_codes: set = set(_hit_count.keys())
         if len(candidate_codes) > 200:
-            candidate_codes = set(list(candidate_codes)[:200])
+            # 구체적 토큰과 더 많이 겹치는(=더 신뢰도 높은) 후보를 우선 유지
+            _ranked = sorted(candidate_codes, key=lambda c: -_hit_count.get(c, 0))
+            candidate_codes = set(_ranked[:200])
         scored = []
         for code in candidate_codes:
             p = _our_prod_map.get(code)
