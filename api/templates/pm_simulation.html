@@ -462,6 +462,18 @@
 }
 .sim-csv-btn:hover { background: #f1f5f9; }
 
+.sim-unmap-btn {
+  display: inline-flex; align-items: center; gap: .3rem;
+  padding: .3rem .6rem; border: 1.5px solid #fca5a5;
+  border-radius: 7px; background: #fff5f5; font-size: .72rem;
+  font-weight: 600; color: #b91c1c; cursor: pointer;
+  font-family: inherit; transition: all .12s; white-space: nowrap;
+}
+.sim-unmap-btn:hover { background: #fee2e2; }
+.sim-unmap-btn:disabled {
+  border-color: #d1d5db; background: #f8fafc; color: #94a3b8; cursor: default;
+}
+
 /* 로딩 */
 .sim-loading {
   text-align: center; padding: 4rem 2rem; color: #6b7280;
@@ -605,6 +617,7 @@
           <th style="text-align:right;">경쟁사 실수취가</th>
           <th style="text-align:center;">맞출 시 이익률</th>
           <th style="text-align:right;">예상 GP 금액</th>
+          <th style="text-align:center;">관리</th>
         </tr>
       </thead>
       <tbody id="resultBody"></tbody>
@@ -658,6 +671,7 @@ let _products = [];
 let _seller   = {};
 let _filter   = 'all';
 let _simResults = [];
+let _plant    = 'ALL';
 
 const PLAT_LABEL = { baemin: '배민상회', foodspring: '식봄' };
 
@@ -667,6 +681,7 @@ async function loadData() {
   const platform   = p.get('platform')    || '';
   const sellerName = p.get('seller_name') || '';
   const sellerId   = p.get('seller_id')   || '';
+  _plant = plant;
 
   try {
     const qs = new URLSearchParams({ plant, platform, seller_name: sellerName, seller_id: sellerId });
@@ -886,6 +901,7 @@ function runSimulation() {
       product_name:     prod.product_name,
       prev_sales_amt:   sales,
       prev_sales_qty:   prod.prev_sales_qty,
+      product_key:      line.product_key,
       ext_product_name: line.ext_product_name,
       comp_net_price:   line.comp_net_price,
       match_margin:     margin,
@@ -957,7 +973,7 @@ function runSimulation() {
 
   // 상세 테이블
   const tbody = document.getElementById('resultBody');
-  tbody.innerHTML = _simResults.map(r => {
+  tbody.innerHTML = _simResults.map((r, idx) => {
     const gc = r.match_margin == null ? 'gp-warn'
              : r.match_margin < 10  ? 'gp-lose'
              : r.match_margin < 15  ? 'gp-warn' : 'gp-ok';
@@ -973,6 +989,9 @@ function runSimulation() {
       <td style="text-align:right;">${netStr}</td>
       <td style="text-align:center;" class="${gc}">${mStr}</td>
       <td style="text-align:right;" class="${gc}">${gpStr}</td>
+      <td style="text-align:center;">
+        <button class="sim-unmap-btn" id="unmapBtn_${idx}" onclick="requestUnmap(${idx})">🔓 해제요청</button>
+      </td>
     </tr>`;
   }).join('');
 
@@ -984,6 +1003,7 @@ function runSimulation() {
       <td></td><td></td><td></td>
       <td style="text-align:center;" class="${gpClass(parseFloat(simGpRate))}">${simGpRate != null ? simGpRate+'%' : '-'}</td>
       <td style="text-align:right;" class="${gpClass(parseFloat(simGpRate))}">₩${totalGp.toLocaleString()}</td>
+      <td></td>
     </tr>`;
 
   document.getElementById('simResultPanel').classList.add('visible');
@@ -993,6 +1013,47 @@ function runSimulation() {
 function gpClass(v) {
   if (isNaN(v)) return '';
   return v < 10 ? 'gp-lose' : v < 15 ? 'gp-warn' : 'gp-ok';
+}
+
+// ── 매핑 해제요청 (시뮬레이션 결과에서 즉시 제출, 관리자 수정요청 승인 필요) ──
+async function requestUnmap(idx) {
+  const r = _simResults[idx];
+  if (!r || !r.product_key) {
+    showToast('상품 키 정보를 찾을 수 없어 해제요청을 보낼 수 없습니다.', 'error');
+    return;
+  }
+  const ok = confirm(
+    `[${r.product_name}]\n` +
+    `매핑된 경쟁 상품 "${r.ext_product_name || r.product_key}" 을(를) 해제 요청하시겠습니까?\n\n` +
+    `제출 즉시 접수되며, 관리자 승인 후 매핑에서 실제로 제외됩니다.`
+  );
+  if (!ok) return;
+
+  const btn = document.getElementById('unmapBtn_' + idx);
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ 요청 중...'; }
+
+  const body = {
+    our_product_code:    r.our_product_code,
+    plant:                _plant,
+    request_type:         'DELETE',
+    delete_product_keys:  [r.product_key],
+    add_product_keys:     [],
+    reason:               `[시뮬레이션 결과 화면에서 해제요청] 경쟁 상품 "${r.ext_product_name || r.product_key}" 매핑 해제`,
+  };
+
+  try {
+    const res = await pmPost('/portal/price-monitor/api/change-request/submit', body);
+    if (res && res.ok) {
+      showToast('해제요청이 접수되었습니다. 관리자 승인 후 반영됩니다.', 'success');
+      if (btn) { btn.textContent = '✅ 요청됨'; btn.disabled = true; }
+    } else {
+      showToast((res && res.error) || '해제요청 제출에 실패했습니다.', 'error');
+      if (btn) { btn.disabled = false; btn.textContent = '🔓 해제요청'; }
+    }
+  } catch (e) {
+    showToast('해제요청 제출 중 오류가 발생했습니다.', 'error');
+    if (btn) { btn.disabled = false; btn.textContent = '🔓 해제요청'; }
+  }
 }
 
 // ── CSV 다운로드 ──
