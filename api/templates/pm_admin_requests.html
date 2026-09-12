@@ -18,6 +18,12 @@
 .modal-title{font-size:1.05rem;font-weight:800;margin-bottom:1rem;}
 .desc-grid{display:grid;grid-template-columns:120px 1fr;gap:.4rem .75rem;font-size:.84rem;margin-bottom:1rem;}
 .desc-label{color:#64748b;font-weight:600;}
+.bulk-bar{display:none;align-items:center;justify-content:space-between;gap:.75rem;
+  padding:.6rem 1rem;margin-bottom:.75rem;border-radius:10px;
+  background:#eff6ff;border:1.5px solid #bfdbfe;font-size:.84rem;flex-wrap:wrap;}
+.bulk-bar.open{display:flex;}
+.bulk-bar .bulk-count{font-weight:700;color:#1d4ed8;}
+.bulk-bar .bulk-actions{display:flex;gap:.5rem;flex-wrap:wrap;}
 </style>
 {% endblock %}
 
@@ -30,12 +36,23 @@
   <a href="?status="         class="{% if not status_filter %}active{% endif %}">전체</a>
 </div>
 
+<!-- 일괄 선택 툴바 -->
+<div class="bulk-bar" id="bulkBar">
+  <span><span class="bulk-count" id="bulkCount">0</span>건 선택됨</span>
+  <div class="bulk-actions">
+    <button class="pm-btn pm-btn-ghost pm-btn-sm" onclick="clearReqSelection()">선택해제</button>
+    <button class="pm-btn pm-btn-danger pm-btn-sm" onclick="bulkReview('REJECT')">❌ 일괄 반려</button>
+    <button class="pm-btn pm-btn-success pm-btn-sm" onclick="bulkReview('APPROVE')">✅ 일괄 승인</button>
+  </div>
+</div>
+
 <div class="pm-card" style="padding:0;overflow:hidden;">
   {% if rows %}
   <div style="overflow-x:auto;">
     <table class="pm-table">
       <thead>
         <tr>
+          <th style="width:32px;"><input type="checkbox" id="chkAllReq" onclick="toggleAllReq(this)"></th>
           <th>#</th>
           <th>상태</th>
           <th>상품코드</th>
@@ -50,6 +67,11 @@
       <tbody id="reqTbody">
         {% for r in rows %}
         <tr>
+          <td>
+            {% if r.status=='PENDING' %}
+            <input type="checkbox" class="req-chk" value="{{ r.request_id }}" onchange="onReqCheck()">
+            {% endif %}
+          </td>
           <td style="color:#94a3b8;font-size:.78rem;">{{ r.request_id }}</td>
           <td>
             {% if r.status=='PENDING'  %}<span class="badge" style="background:#fef3c7;color:#92400e;">대기</span>
@@ -118,6 +140,63 @@
 <script>
 const PM_REQ_ROWS = {{ rows | tojson }};
 let currentReqId=null;
+
+function getSelectedReqIds(){
+  return Array.from(document.querySelectorAll('.req-chk:checked')).map(c=>parseInt(c.value,10));
+}
+
+function onReqCheck(){
+  const ids=getSelectedReqIds();
+  const bar=document.getElementById('bulkBar');
+  const all=document.querySelectorAll('.req-chk');
+  const chkAll=document.getElementById('chkAllReq');
+  bar.classList.toggle('open', ids.length>0);
+  document.getElementById('bulkCount').textContent=ids.length;
+  if(all.length>0){
+    chkAll.checked = ids.length===all.length;
+    chkAll.indeterminate = ids.length>0 && ids.length<all.length;
+  }
+}
+
+function toggleAllReq(cb){
+  document.querySelectorAll('.req-chk').forEach(c=>c.checked=cb.checked);
+  onReqCheck();
+}
+
+function clearReqSelection(){
+  document.querySelectorAll('.req-chk').forEach(c=>c.checked=false);
+  const chkAll=document.getElementById('chkAllReq');
+  if(chkAll){ chkAll.checked=false; chkAll.indeterminate=false; }
+  onReqCheck();
+}
+
+async function bulkReview(action){
+  const ids=getSelectedReqIds();
+  if(!ids.length){ showToast('선택된 항목이 없습니다','error'); return; }
+
+  let memo='';
+  if(action==='REJECT'){
+    memo=prompt(`반려 사유를 입력해주세요 (선택한 ${ids.length}건에 공통 적용됩니다)`, '');
+    if(memo===null) return;
+    memo=memo.trim();
+    if(!memo){ showToast('반려 시 사유 입력은 필수입니다','error'); return; }
+  } else {
+    if(!confirm(`선택한 ${ids.length}건을 일괄 승인하시겠습니까?\n승인 즉시 매핑에 반영됩니다.`)) return;
+  }
+
+  const r=await pmPost('/portal/price-monitor/api/admin/review-bulk',{
+    request_ids: ids,
+    action,
+    admin_memo: memo
+  });
+  if(r.ok){
+    const extra = r.fail_count ? `, 실패 ${r.fail_count}건` : '';
+    showToast(`일괄 처리 완료: 성공 ${r.success_count}건${extra}`, 'success');
+    setTimeout(()=>location.reload(),1200);
+  } else {
+    showToast(r.error||'일괄 처리 실패','error');
+  }
+}
 
 function openDetailByIdx(idx){
   openDetail(PM_REQ_ROWS[parseInt(idx,10)]);

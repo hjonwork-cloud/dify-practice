@@ -1932,6 +1932,46 @@ async def api_admin_review(request: Request):
     return JSONResponse({"ok": True, "request_id": request_id, "status": action})
 
 
+@router.post("/api/admin/review-bulk")
+async def api_admin_review_bulk(request: Request):
+    """수정요청 일괄 승인/반려. 체크박스로 선택한 여러 건을 한 번에 처리."""
+    _require_pm_access(request)
+    session = _get_session(request)
+    body = await request.json()
+    request_ids = body.get("request_ids", []) or []
+    action      = body.get("action", "").strip()   # APPROVE | REJECT
+    admin_memo  = body.get("admin_memo", "").strip()
+
+    if not request_ids or action not in ("APPROVE", "REJECT"):
+        return JSONResponse({"ok": False, "error": "잘못된 요청"}, status_code=400)
+    if action == "REJECT" and not admin_memo:
+        return JSONResponse({"ok": False, "error": "반려 시 사유 입력 필수"}, status_code=400)
+
+    reviewed_by = session.get("emp_code", "")
+    success_ids, fail_ids = [], []
+    for rid in request_ids:
+        try:
+            result = portal_db.pm_review_change_request(
+                request_id=int(rid),
+                action=action,
+                reviewed_by=reviewed_by,
+                admin_memo=admin_memo,
+            )
+        except Exception:
+            result = None
+        if result is not None:
+            success_ids.append(rid)
+        else:
+            fail_ids.append(rid)
+
+    return JSONResponse({
+        "ok": True,
+        "success_count": len(success_ids),
+        "fail_count":    len(fail_ids),
+        "fail_ids":      fail_ids,
+    })
+
+
 # ── 화면 7: 관리자 셀러 설정 ─────────────────────────────────────────────
 
 @router.get("/admin/sellers", response_class=HTMLResponse)
