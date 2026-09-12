@@ -2254,16 +2254,23 @@ async def api_simulation(
     for m in all_mappings:
         if m.get("platform") != platform:
             continue
-        if seller_id:
-            # seller_id 기준 필터 (우선순위 높음)
-            if str(m.get("platform_seller_id", "")) == str(seller_id):
-                seller_mappings.append(m)
-        else:
-            # seller_name 기준: 매핑 레코드 OR 크롤링 데이터 중 하나라도 일치하면 포함
+        # [v2 버그수정] AI 매핑워크스페이스(pm_mapping_workspace.html)에서 저장한
+        # 매핑은 platform_seller_id가 항상 빈 문자열('')로 저장됨(프런트에서
+        # platform_seller_id: '' 하드코딩). 기존 로직은 seller_id 쿼리파라미터가
+        # 있으면 seller_name 매칭을 아예 건너뛰고 platform_seller_id만 비교했기
+        # 때문에, ''== '1384' 비교가 항상 실패해 워크스페이스로 매핑한 상품
+        # 대부분이 시뮬레이션 결과에서 누락되는 문제가 있었음(505건 매핑 중
+        # 91 SKU만 노출). platform_seller_id 매칭과 seller_name 매칭을
+        # OR 조건으로 병행 확인하도록 수정.
+        _map_seller_id = str(m.get("platform_seller_id") or "")
+        matched = bool(seller_id) and _map_seller_id != "" and _map_seller_id == str(seller_id)
+        if not matched and seller_name:
             _map_seller  = (m.get("seller_name") or "")
             _plat_seller = _plat_name_map.get(m["product_key"], "")
             if _map_seller == seller_name or _plat_seller == seller_name:
-                seller_mappings.append(m)
+                matched = True
+        if matched:
+            seller_mappings.append(m)
 
     if not seller_mappings:
         return JSONResponse({

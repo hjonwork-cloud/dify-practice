@@ -775,7 +775,7 @@ async function bulkApproveHigh() {
           items: [{
             product_key:         item.product_key,
             platform:            currentPlatform,
-            platform_seller_id:  '',
+            platform_seller_id:  currentSellerId || '',
             platform_product_id: '',
             product_name:        item.product_name || '',
             seller_name:         item.seller_name || currentSeller,
@@ -1298,7 +1298,7 @@ async function confirmMapping() {
       itemsToMap.push({
         product_key:         pk,
         platform:            found.platform,
-        platform_seller_id:  '',
+        platform_seller_id:  currentSellerId || '',
         platform_product_id: '',
         product_name:        found.product_name || '',
         seller_name:         found.platform_seller_name || '',
