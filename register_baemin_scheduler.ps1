@@ -14,11 +14,13 @@ $ACTION = New-ScheduledTaskAction `
     -Argument "-NonInteractive -ExecutionPolicy Bypass -File `"$PS_SCRIPT`"" `
     -WorkingDirectory "e:\git-copilot\dify-practice"
 
-# 설정: 이미 실행 중이면 새 인스턴스 실행 안 함
+# 설정: 이미 실행 중이면 새 인스턴스 실행 안 함, 배터리 사용 중에도 중단되지 않도록 설정
 $SETTINGS = New-ScheduledTaskSettingsSet `
     -MultipleInstances IgnoreNew `
     -ExecutionTimeLimit (New-TimeSpan -Hours 3) `
     -StartWhenAvailable `
+    -DontStopIfGoingOnBatteries `
+    -AllowStartIfOnBatteries `
     -WakeToRun:$false
 
 # 트리거 4개 생성 후 XML로 직접 등록 (멀티 트리거는 XML 방식이 안정적)
@@ -39,6 +41,8 @@ $XML = @"
   </Principals>
   <Settings>
     <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
     <ExecutionTimeLimit>PT3H</ExecutionTimeLimit>
     <StartWhenAvailable>true</StartWhenAvailable>
     <WakeToRun>false</WakeToRun>
