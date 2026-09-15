@@ -363,7 +363,7 @@ def _get_plat_rows(platform: str, seller_name: str) -> list[dict]:
             rows = _q(f"""
                 SELECT p.product_key, p.product_name, p.spec,
                        p.price_sale, p.price_original, p.delivery_type,
-                       p.is_free_delivery, p.platform_seller_name
+                       p.is_free_delivery, p.platform_seller_name, p.crawl_date
                 FROM {T_SILVER} p
                 INNER JOIN (
                     SELECT platform_seller_name, MAX(crawl_date) AS max_date
@@ -379,7 +379,7 @@ def _get_plat_rows(platform: str, seller_name: str) -> list[dict]:
             rows = _q(f"""
                 SELECT p.product_key, p.product_name, p.spec,
                        p.price_sale, p.price_original, p.delivery_type,
-                       p.is_free_delivery, p.platform_seller_name
+                       p.is_free_delivery, p.platform_seller_name, p.crawl_date
                 FROM {T_SILVER} p
                 INNER JOIN (
                     SELECT MAX(crawl_date) AS max_date
@@ -2286,9 +2286,16 @@ async def api_simulation(
     # 셀러 필터 보완: 매핑 DB의 seller_name 외에 platform 크롤링 데이터의
     # platform_seller_name도 함께 확인 (경쟁분석과 동일 로직)
     # → 매핑 저장 당시 seller_name이 비어있거나 달랐던 레코드까지 포함
-    _plat_pkeys = [m["product_key"] for m in all_mappings if m.get("platform") == platform]
-    _plat_rows_for_filter = _get_platform_latest(product_keys=_plat_pkeys)
-    _plat_name_map = {r["product_key"]: (r.get("platform_seller_name") or "") for r in _plat_rows_for_filter}
+    #
+    # [성능 개선] 과거에는 이 플랫폼에 매핑된 "전체" product_key(다른 셀러
+    # 포함, 배민 기준 12,000건 이상)를 모아 IN절로 Databricks를 매 요청마다
+    # 캐시 없이 직접 조회했음 → 매핑이 많은 인기 셀러(예: 푸드팡)일수록
+    # 다른 셀러 매핑 수까지 전부 끌어와 매번 수 초~수십 초가 걸렸다.
+    # _get_plat_rows()는 이미 셀러 단위로 캐시(메모리 10분/디스크 1시간)되어
+    # 있으므로 이를 재사용해 해당 셀러 범위로만 조회하도록 축소한다.
+    _seller_plat_rows = _get_plat_rows(platform, seller_name) if seller_name else []
+    _seller_pkey_set  = {r["product_key"] for r in _seller_plat_rows}
+    platform_map = {r["product_key"]: r for r in _seller_plat_rows}
 
     seller_mappings = []
     for m in all_mappings:
@@ -2305,12 +2312,20 @@ async def api_simulation(
         _map_seller_id = str(m.get("platform_seller_id") or "")
         matched = bool(seller_id) and _map_seller_id != "" and _map_seller_id == str(seller_id)
         if not matched and seller_name:
-            _map_seller  = (m.get("seller_name") or "")
-            _plat_seller = _plat_name_map.get(m["product_key"], "")
-            if _map_seller == seller_name or _plat_seller == seller_name:
+            _map_seller = (m.get("seller_name") or "")
+            if _map_seller == seller_name or m["product_key"] in _seller_pkey_set:
                 matched = True
         if matched:
             seller_mappings.append(m)
+
+    # 위 셀러 범위 조회에서 가격 데이터를 찾지 못한 매핑만 소수 있을 수 있음
+    # (예: 크롤링 시점 이후 셀러명이 변경된 경우). 이런 소수 건만 targeted로
+    # 추가 조회 — 전체 재조회보다 훨씬 가볍다.
+    _missing_keys = [m["product_key"] for m in seller_mappings if m["product_key"] not in platform_map]
+    if _missing_keys:
+        _fallback_rows = _get_platform_latest(product_keys=_missing_keys)
+        for r in _fallback_rows:
+            platform_map[r["product_key"]] = r
 
     if not seller_mappings:
         return JSONResponse({
@@ -2351,11 +2366,7 @@ async def api_simulation(
             pass
         return p_code
 
-    # ── 플랫폼 최신가 (필터용으로 이미 로드된 데이터 재사용) ──
-    product_keys = [m["product_key"] for m in seller_mappings]
-    # _plat_rows_for_filter는 이미 platform 전체 product_key 기준으로 로드됨
-    platform_map = {r["product_key"]: r for r in _plat_rows_for_filter}
-
+    # ── 플랫폼 최신가 (필터 단계에서 이미 셀러 범위로 로드된 platform_map 재사용) ──
     crawl_date = ""
 
     # ── 우리 상품코드 기준 그룹화 ──
