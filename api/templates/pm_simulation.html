@@ -346,6 +346,21 @@
 .sim-table tr.row-hidden { display: none; }
 .sim-table tr.row-no-sales td { opacity: .55; }
 
+/* 페이지네이션 */
+.sim-pagination {
+  display: flex; align-items: center; justify-content: center; gap: .6rem;
+  padding: .9rem 1rem; background: #fff; flex-wrap: wrap;
+}
+.sim-page-btn {
+  padding: .35rem .85rem; border: 1.5px solid #cbd5e1;
+  border-radius: 8px; background: #fff; font-size: .78rem;
+  font-weight: 600; color: #475569; cursor: pointer;
+  font-family: inherit; transition: all .12s;
+}
+.sim-page-btn:hover:not(:disabled) { background: #f1f5f9; border-color: #a78bfa; }
+.sim-page-btn:disabled { opacity: .4; cursor: not-allowed; }
+.sim-page-info { font-size: .78rem; color: #475569; font-weight: 600; white-space: nowrap; }
+
 /* 선택 체크박스 */
 .sim-check {
   width: 16px; height: 16px; cursor: pointer;
@@ -668,8 +683,11 @@
 
 <script>
 let _products = [];
+let _selections = [];   // 매핑 상품별 선택 상태: {checked, selectedLine} — 페이지/필터와 무관하게 전체 유지
 let _seller   = {};
 let _filter   = 'all';
+let _page     = 1;
+const PAGE_SIZE = 10;    // 한 페이지에 보여줄 매핑 상품 수
 let _simResults = [];
 let _plant    = 'ALL';
 
@@ -689,6 +707,8 @@ async function loadData() {
     const data = await resp.json();
     _seller   = data.seller   || {};
     _products = data.products || [];
+    _selections = _products.map(() => ({ checked: true, selectedLine: null }));
+    _page = 1;
 
     renderSellerCard(data);
     renderTable();
@@ -723,6 +743,20 @@ function renderSellerCard(data) {
     </div>`;
 }
 
+function getFilteredIndices() {
+  const indices = [];
+  _products.forEach((prod, i) => {
+    const hasSales = prod.prev_sales_amt > 0;
+    const isLose   = prod.lines && prod.lines.some(l => l.status === 'lose');
+    let show = true;
+    if (_filter === 'sales')      show = hasSales;
+    else if (_filter === 'lose')  show = isLose;
+    else if (_filter === 'unselected') show = _selections[i] && _selections[i].selectedLine == null;
+    if (show) indices.push(i);
+  });
+  return indices;
+}
+
 function renderTable() {
   const wrap = document.getElementById('simTableWrap');
   if (!_products.length) {
@@ -730,11 +764,22 @@ function renderTable() {
     return;
   }
 
-  const rows = _products.map((prod, pi) => {
+  // [성능개선] 매핑 상품이 많을 경우(수백~수천건) 전체를 한번에 DOM에 그리면
+  // 로딩/선택/시뮬레이션 반응이 몹시 느려진다. 10개씩 페이지네이션해서
+  // 화면엔 <=10개 행만 그리고, 선택 상태(_selections)는 페이지와 무관하게 별도 배열로 유지한다.
+  const filtered = getFilteredIndices();
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  if (_page > totalPages) _page = totalPages;
+  if (_page < 1) _page = 1;
+  const startIdx = (_page - 1) * PAGE_SIZE;
+  const pageIndices = filtered.slice(startIdx, startIdx + PAGE_SIZE);
+
+  const rows = pageIndices.map(pi => {
+    const prod = _products[pi];
+    const sel  = _selections[pi] || { checked: true, selectedLine: null };
     const hasLines  = prod.lines && prod.lines.length > 0;
     const hasSales  = prod.prev_sales_amt > 0;
     const isLose    = prod.lines.some(l => l.status === 'lose');
-    const isUnsel   = true; // 초기엔 모두 미선택
 
     const cmClass = prod.current_margin == null ? 'cm-na'
                   : prod.current_margin < 10 ? 'cm-lose'
@@ -747,14 +792,15 @@ function renderTable() {
                : ln.match_margin < 15 ? 'line-margin-warn'
                : 'line-margin-ok';
       const loseClass = ln.status === 'lose' ? 'line-lose' : '';
+      const isSel = sel.selectedLine === li;
       const mStr = ln.match_margin != null
         ? `<span class="${mc}">${ln.match_margin}%${ln.match_margin < 10 ? ' 🔴' : ln.match_margin < 15 ? ' ⚠️' : ' ✅'}</span>`
         : '<span style="color:#9ca3af;">-</span>';
       const netStr = ln.comp_net_price != null ? ln.comp_net_price.toLocaleString() + '원' : '-';
       const compStr = ln.competitor_price != null ? ln.competitor_price.toLocaleString() + '원' : '-';
       return `
-        <label class="line-item ${loseClass}" id="li_${pi}_${li}" onclick="onLineSelect(${pi},${li})">
-          <input type="radio" name="line_${pi}" value="${li}" onchange="onLineSelect(${pi},${li})">
+        <label class="line-item ${loseClass}${isSel ? ' selected' : ''}" id="li_${pi}_${li}" onclick="onLineSelect(${pi},${li})">
+          <input type="radio" name="line_${pi}" value="${li}" ${isSel ? 'checked' : ''} onchange="onLineSelect(${pi},${li})">
           <div>
             <div style="font-weight:600;">${escHtml(ln.ext_product_name || '-')}</div>
             <div class="line-net">소비자가 ${compStr} → 실수취 ${netStr} &nbsp; 이익률 ${mStr}</div>
@@ -766,7 +812,7 @@ function renderTable() {
     const rowFilter = `data-has-sales="${hasSales}" data-is-lose="${isLose}"`;
     return `<tr data-pi="${pi}" class="${!hasSales ? 'row-no-sales' : ''}" ${rowFilter}>
       <td>
-        <input type="checkbox" class="sim-check" id="chk_${pi}" checked onchange="updateSelCount()">
+        <input type="checkbox" class="sim-check" id="chk_${pi}" ${sel.checked ? 'checked' : ''} onchange="onCheckToggle(${pi})">
       </td>
       <td style="font-size:.72rem;color:#6b7280;">${escHtml(prod.our_product_code)}</td>
       <td style="font-weight:600;">${escHtml(prod.product_name)}</td>
@@ -777,12 +823,24 @@ function renderTable() {
     </tr>`;
   }).join('');
 
+  const rangeEnd = filtered.length ? Math.min(startIdx + PAGE_SIZE, filtered.length) : 0;
+  const pageInfoStr = `필터 ${filtered.length}건 중 ${filtered.length ? startIdx + 1 : 0}-${rangeEnd}번째 · ${_page}/${totalPages} 페이지`;
+  const pagination = `
+    <div class="sim-pagination">
+      <button class="sim-page-btn" onclick="goToPage(1)" ${_page<=1?'disabled':''}>« 처음</button>
+      <button class="sim-page-btn" onclick="goToPage(${_page-1})" ${_page<=1?'disabled':''}>‹ 이전</button>
+      <span class="sim-page-info">${pageInfoStr}</span>
+      <button class="sim-page-btn" onclick="goToPage(${_page+1})" ${_page>=totalPages?'disabled':''}>다음 ›</button>
+      <button class="sim-page-btn" onclick="goToPage(${totalPages})" ${_page>=totalPages?'disabled':''}>마지막 »</button>
+    </div>`;
+
+  const allChecked = _selections.length > 0 && _selections.every(s => s.checked);
   wrap.innerHTML = `
     <div class="sim-table-wrap">
       <table class="sim-table">
         <thead>
           <tr>
-            <th style="width:32px;"><input type="checkbox" id="chkAll" checked onclick="toggleAll(this)" style="accent-color:#7c3aed;"></th>
+            <th style="width:32px;"><input type="checkbox" id="chkAll" ${allChecked ? 'checked' : ''} onclick="toggleAll(this)" style="accent-color:#7c3aed;"></th>
             <th style="width:76px;">자재코드</th>
             <th>우리 상품명</th>
             <th style="text-align:right;width:110px;">전월 매출액</th>
@@ -793,87 +851,80 @@ function renderTable() {
         </thead>
         <tbody>${rows}</tbody>
       </table>
+      ${pagination}
     </div>`;
 
   updateSelCount();
 }
 
+function goToPage(p) {
+  _page = p;
+  renderTable();
+  const wrap = document.getElementById('simTableWrap');
+  if (wrap) wrap.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
 function setFilter(f, btn) {
   _filter = f;
+  _page = 1;
   document.querySelectorAll('.sim-filter-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
-  const rows = document.querySelectorAll('#simTableWrap tbody tr');
-  rows.forEach(tr => {
-    const hasSales = tr.dataset.hasSales === 'true';
-    const isLose   = tr.dataset.isLose === 'true';
-    const pi = parseInt(tr.dataset.pi);
-    const chk = document.getElementById('chk_' + pi);
-    let show = true;
-    if (f === 'sales') show = hasSales;
-    if (f === 'lose')  show = isLose;
-    if (f === 'unselected') {
-      const radio = document.querySelector(`input[name="line_${pi}"]:checked`);
-      show = !radio;
-    }
-    tr.classList.toggle('row-hidden', !show);
-  });
-  updateSelCount();
+  renderTable();
 }
 
 function toggleAll(cb) {
+  // 페이지/필터와 무관하게 전체 매핑 상품에 적용 (기존 동작과 동일)
+  _selections.forEach(s => s.checked = cb.checked);
   document.querySelectorAll('.sim-check').forEach(c => c.checked = cb.checked);
   updateSelCount();
 }
 
+function onCheckToggle(pi) {
+  const chk = document.getElementById('chk_' + pi);
+  if (_selections[pi]) _selections[pi].checked = chk ? chk.checked : true;
+  updateSelCount();
+}
+
 function onLineSelect(pi, li) {
+  if (_selections[pi]) _selections[pi].selectedLine = li;
   const label = document.getElementById(`li_${pi}_${li}`);
-  // 같은 그룹의 모든 label에서 selected 제거 후 이 label에 추가
-  const row = label.closest('tr');
-  row.querySelectorAll('.line-item').forEach(l => l.classList.remove('selected'));
-  label.classList.add('selected');
+  if (label) {
+    const row = label.closest('tr');
+    if (row) row.querySelectorAll('.line-item').forEach(l => l.classList.remove('selected'));
+    label.classList.add('selected');
+  }
   updateSelCount();
 }
 
 function resetSelection() {
-  document.querySelectorAll('input[type=radio]').forEach(r => r.checked = false);
-  document.querySelectorAll('.line-item').forEach(l => l.classList.remove('selected'));
-  document.querySelectorAll('.sim-check').forEach(c => c.checked = true);
-  document.getElementById('chkAll').checked = true;
+  _selections = _products.map(() => ({ checked: true, selectedLine: null }));
+  _page = 1;
   document.getElementById('simResultPanel').classList.remove('visible');
-  updateSelCount();
+  renderTable();
 }
 
 // 일괄 라인 선택: mode = 'low'(이익률 최저) | 'high'(이익률 최고)
+// [성능개선] 과거에는 매핑 상품 수만큼 DOM을 각각 querySelector로 찾아 직접 조작해서
+// 매핑이 수백~수천건인 셀러일수록 클릭 반응이 매우 느렸다. 이제는 상태 배열(_selections)만
+// 갱신하고 renderTable()로 현재 페이지(최대 10개 행)만 다시 그려 즉각 반응한다.
 function bulkSelectLine(mode) {
   _products.forEach((prod, pi) => {
     if (!prod.lines || !prod.lines.length) return;
-    // match_margin 있는 라인만 후보로, 없으면 전체
     const candidates = prod.lines
       .map((ln, li) => ({ li, margin: ln.match_margin }))
       .filter(c => c.margin != null);
-    if (!candidates.length) return; // null만 있으면 건너맜
+    if (!candidates.length) return;
     candidates.sort((a, b) =>
       mode === 'low' ? a.margin - b.margin : b.margin - a.margin
     );
-    const chosen = candidates[0].li;
-    // 라디오 체크
-    const radio = document.querySelector(`input[name="line_${pi}"][value="${chosen}"]`);
-    if (radio) {
-      radio.checked = true;
-      // 셀렉티드 클래스
-      const row = radio.closest('tr');
-      if (row) {
-        row.querySelectorAll('.line-item').forEach(l => l.classList.remove('selected'));
-        radio.closest('.line-item').classList.add('selected');
-      }
-    }
+    if (_selections[pi]) _selections[pi].selectedLine = candidates[0].li;
   });
-  updateSelCount();
+  renderTable();
 }
 
 function updateSelCount() {
-  const checked = document.querySelectorAll('.sim-check:checked').length;
-  const total   = document.querySelectorAll('.sim-check').length;
+  const checked = _selections.filter(s => s.checked).length;
+  const total   = _products.length;
   document.getElementById('selCount').textContent = `${checked}/${total}건 선택`;
 }
 
@@ -882,12 +933,13 @@ function runSimulation() {
   let totalSales = 0, totalGp = 0, totalCurGp = 0, totalCurSales = 0;
   let skuCount = 0;
 
+  // [성능개선] 페이지네이션 도입 이후 DOM에는 현재 페이지(최대 10개) 행만 존재하므로,
+  // chk_/radio DOM 조회 대신 전체 매핑을 유지하는 _selections 배열에서 직접 읽는다.
   _products.forEach((prod, pi) => {
-    const chk = document.getElementById('chk_' + pi);
-    if (!chk || !chk.checked) return;
-    const radio = document.querySelector(`input[name="line_${pi}"]:checked`);
-    if (!radio) return;
-    const li = parseInt(radio.value);
+    const sel = _selections[pi];
+    if (!sel || !sel.checked) return;
+    if (sel.selectedLine == null) return;
+    const li = sel.selectedLine;
     const line = prod.lines[li];
     if (!line) return;
 
