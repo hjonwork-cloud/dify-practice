@@ -2336,33 +2336,39 @@ def _enrich_action_targets(report: dict, brand_name: str) -> None:
     # ⑤ 고객마스터 수신번호(이동전화번호>전화번호) 배치 조회 — 팝업 열 때마다 조회하지 않고
     #    화면에 표시되는 가맹점코드 전체에 대해 1회만 조회해 둔다 (개별 실시간 조회가 느리거나
     #    응답 없는 문제를 피하기 위함).
-    phone_map: dict = {}
-    codes = sorted({str(c.get("customer_code") or "") for c in customers if c.get("customer_code")})
-    if codes:
+    #    주의: T_MAIN.거래처는 10자리 0-패딩(예: '0000273645')이지만
+    #    T_CUSTOMER_MASTER.고객코드는 앞자리 0이 없는 6~10자리(예: '273645')로 저장되어 있어
+    #    양쪽 모두 앞자리 0을 제거한 키로 매칭해야 한다(그대로 대조하면 상시 결과 없음).
+    phone_map: dict = {}   # stripped_code(앞자리 0 제거) -> phone
+    stripped_codes = sorted({
+        str(c.get("customer_code") or "").lstrip("0")
+        for c in customers if str(c.get("customer_code") or "").lstrip("0")
+    })
+    if stripped_codes:
         try:
-            codes_in = ", ".join(_sql(code) for code in codes)
+            codes_in = ", ".join(_sql(code) for code in stripped_codes)
             phone_rows = _q(f"""
                 WITH ranked AS (
-                    SELECT `고객코드` AS customer_code,
+                    SELECT TRIM(LEADING '0' FROM `고객코드`) AS stripped_code,
                            `이동전화번호` AS mobile,
                            `전화번호` AS phone,
                            ROW_NUMBER() OVER (
-                               PARTITION BY `고객코드`
+                               PARTITION BY TRIM(LEADING '0' FROM `고객코드`)
                                ORDER BY CASE WHEN COALESCE(`LOEVM`, '') = '' THEN 0 ELSE 1 END,
                                         `집계수행일자` DESC,
                                         `update_date` DESC
                            ) AS rn
                     FROM {main.T_CUSTOMER_MASTER}
-                    WHERE `고객코드` IN ({codes_in})
+                    WHERE TRIM(LEADING '0' FROM `고객코드`) IN ({codes_in})
                 )
-                SELECT customer_code, mobile, phone FROM ranked WHERE rn = 1
+                SELECT stripped_code, mobile, phone FROM ranked WHERE rn = 1
             """) or []
         except Exception:
             phone_rows = []
         for r in phone_rows:
             mobile = main._clean_customer_master_value(r.get("mobile"))
             phone = main._clean_customer_master_value(r.get("phone"))
-            phone_map[str(r.get("customer_code") or "")] = mobile or phone or ""
+            phone_map[str(r.get("stripped_code") or "")] = mobile or phone or ""
 
     opportunity_effect_raw = 0.0
     for c in customers:
@@ -2376,7 +2382,7 @@ def _enrich_action_targets(report: dict, brand_name: str) -> None:
         target_total_sales_raw = float(c.get("sales_m") or 0) * 10_000.0
         total_expected_raw = target_total_sales_raw * max(0.0, total_all_factor - owned_factor)
         c["opportunity_sales_m"] = _money_m2(total_expected_raw)
-        c["phone"] = phone_map.get(code, "")
+        c["phone"] = phone_map.get(code.lstrip("0"), "")
         # 브랜드 전체 기회매출 효과 합계는 report['proposal_possible_sales_m'](타겟매출 효과)와
         # 동일하게 "제안 대상"(is_target=True) 가맹점만 스코프로 집계 — 두 지표를 같은 모집단
         # 위에서 비교할 수 있게 하기 위함.
@@ -2865,12 +2871,17 @@ def _get_customer_mobile_phone(customer_code: str) -> str:
 
     우선순위: 이동전화번호 > 전화번호. customer_code가 없거나 조회 실패 시 빈 문자열 반환.
     (버튼 연동 전 준비 단계 — 아직 dm_send_with_price 등 어떤 엔드포인트에서도 호출하지 않음)
+
+    주의: 호출 측(T_MAIN.거래처)은 10자리 0-패딩 코드(예: '0000273645')이지만
+    T_CUSTOMER_MASTER.고객코드는 앞자리 0이 없는 형식(예: '273645')으로 저장되어 있어
+    그대로 비교하면 항상 매칭 실패한다. 앞자리 0을 제거한 뒤 조회한다.
     """
     if not customer_code:
         return ""
     try:
         import main as _m
-        row = _m._fetch_customer_master_by_code(customer_code)
+        stripped = str(customer_code).lstrip("0") or str(customer_code)
+        row = _m._fetch_customer_master_by_code(stripped)
         if not row:
             return ""
         mobile = _m._clean_customer_master_value(row.get("이동전화번호"))
