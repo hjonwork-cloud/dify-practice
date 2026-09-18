@@ -208,6 +208,7 @@
             data-target-sales="{{ c.proposal_possible_sales_m }}"
             data-ratio="{{ c.generic_ratio }}"
             data-gap="{{ c.gap }}"
+            data-phone="{{ c.phone }}"
             data-detail-url="/portal/target-detail?brand={{ report.brand.brand_name|urlencode }}&customer_code={{ c.customer_code|urlencode }}"
             data-open="0" data-loaded="0" onclick="toggleTarget(this)">
           <td class="mono">{{ c.customer_code }}</td>
@@ -324,6 +325,7 @@
   function renderActionPanel(row, body, data) {
     const custCode = row.dataset.code;
     const custName = row.dataset.name;
+    const custPhone = row.dataset.phone || '';
     const plantCode = data.plant_code || '';
     const products = data.products || [];
     const dmMsg    = data.dm_message || '';
@@ -526,7 +528,7 @@
     window[`_doSendDmOnly_${uid}`] = function(btn) {
       if (!guardConfirmed(uid)) return;
       window._openDmModal({
-        uid, custCode, custName,
+        uid, custCode, custName, custPhone,
         title: `💬 DM 발송 확인 — ${custName}`,
         message: document.getElementById(`priceDmText_${uid}`)?.value || '',
         onConfirm: (ctx) => window.sendDmFromPricePanel(uid, custCode, custName, brandCode, brandName, btn, ctx),
@@ -535,7 +537,7 @@
     window[`_doSendPriceDm_${uid}`] = function(btn) {
       if (!guardConfirmed(uid)) return;
       window._openDmModal({
-        uid, custCode, custName,
+        uid, custCode, custName, custPhone,
         title: `💰 판가 등록 + DM 발송 확인 — ${custName}`,
         message: document.getElementById(`priceDmText_${uid}`)?.value || '',
         onConfirm: (ctx) => window.sendPriceDm(uid, custCode, custName, brandCode, brandName, plantCode, btn, ctx),
@@ -610,10 +612,9 @@
     _dmModalUpdateLen();
     const recvEl = document.getElementById('dmModalReceiver');
     if (recvEl) {
-      recvEl.value = '조회 중...';
-      fetch(`/portal/customer-phone?customer_code=${encodeURIComponent(opts.custCode || '')}`)
-        .then(r => r.json()).then(d => { recvEl.value = d.phone || ''; })
-        .catch(() => { recvEl.value = ''; });
+      // 서버가 페이지 로드 시 이미 배치 조회해둔 값을 사용 (모달 오픈 시 매번 조회하지 않음 —
+      // 과거 실시간 fetch 방식은 백엔드 응답 지연/실패 시 '조회 중...'에 머무르는 문제가 있었음)
+      recvEl.value = opts.custPhone || '';
     }
     const cbEl = document.getElementById('dmModalCallback');
     if (cbEl && !cbEl.value) cbEl.value = '02-589-6436';

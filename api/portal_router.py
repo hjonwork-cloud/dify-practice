@@ -2204,7 +2204,11 @@ def _enrich_action_targets(report: dict, brand_name: str) -> None:
     - opportunity_sales_m  : 가맹점별 기회매출액 합계(백만원, 소수점 2자리) — 추천 후보 상품별
                              (사용강도 × 이 가맹점 매출규모 × 평균단가) 를 모두 합산한 값.
       (가맹점 수만큼 무거운 정렬 쿼리를 반복하지 않기 위해, 상품별 집계를 1회만 계산한 뒤
-       가맹점별로는 이미 계산된 owned_map 차집합에 대해서만 가볍게 합산한다)"""
+       가맹점별로는 이미 계산된 owned_map 차집합에 대해서만 가볍게 합산한다)
+    - phone                 : 고객마스터(T_CUSTOMER_MASTER) 이동전화번호/전화번호 — DM 발송 확인
+                             팝업의 수신번호 기본값. 가맹점별로 매번 조회하지 않고 화면에 표시되는
+                             전체 가맹점코드에 대해 1회 배치 조회한다(팝업 오픈 시 실시간 조회가
+                             느리거나 응답이 없는 문제를 피하기 위함)."""
     customers = report.get("customers") or []
     if not customers:
         return
@@ -2215,6 +2219,7 @@ def _enrich_action_targets(report: dict, brand_name: str) -> None:
             c["generic_gp_pct"] = 0
             c["reco_count"] = 0
             c["opportunity_sales_m"] = 0.0
+            c["phone"] = ""
         return
     import main
     bcode = str((report.get("brand") or {}).get("brand_code") or "")
@@ -2323,6 +2328,37 @@ def _enrich_action_targets(report: dict, brand_name: str) -> None:
         per_product_factor[pcode] = qty_intensity * avg_unit_sales_raw
     total_all_factor = sum(per_product_factor.values())
 
+    # ⑤ 고객마스터 수신번호(이동전화번호>전화번호) 배치 조회 — 팝업 열 때마다 조회하지 않고
+    #    화면에 표시되는 가맹점코드 전체에 대해 1회만 조회해 둔다 (개별 실시간 조회가 느리거나
+    #    응답 없는 문제를 피하기 위함).
+    phone_map: dict = {}
+    codes = sorted({str(c.get("customer_code") or "") for c in customers if c.get("customer_code")})
+    if codes:
+        try:
+            codes_in = ", ".join(_sql(code) for code in codes)
+            phone_rows = _q(f"""
+                WITH ranked AS (
+                    SELECT `고객코드` AS customer_code,
+                           `이동전화번호` AS mobile,
+                           `전화번호` AS phone,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY `고객코드`
+                               ORDER BY CASE WHEN COALESCE(`LOEVM`, '') = '' THEN 0 ELSE 1 END,
+                                        `집계수행일자` DESC,
+                                        `update_date` DESC
+                           ) AS rn
+                    FROM {main.T_CUSTOMER_MASTER}
+                    WHERE `고객코드` IN ({codes_in})
+                )
+                SELECT customer_code, mobile, phone FROM ranked WHERE rn = 1
+            """) or []
+        except Exception:
+            phone_rows = []
+        for r in phone_rows:
+            mobile = main._clean_customer_master_value(r.get("mobile"))
+            phone = main._clean_customer_master_value(r.get("phone"))
+            phone_map[str(r.get("customer_code") or "")] = mobile or phone or ""
+
     for c in customers:
         code = str(c.get("customer_code") or "")
         c["generic_gp_pct"] = gp_map.get(code, 0)
@@ -2334,6 +2370,7 @@ def _enrich_action_targets(report: dict, brand_name: str) -> None:
         target_total_sales_raw = float(c.get("sales_m") or 0) * 10_000.0
         total_expected_raw = target_total_sales_raw * max(0.0, total_all_factor - owned_factor)
         c["opportunity_sales_m"] = _money_m2(total_expected_raw)
+        c["phone"] = phone_map.get(code, "")
 
 
 @router.get("/brand-report/action", response_class=HTMLResponse)
