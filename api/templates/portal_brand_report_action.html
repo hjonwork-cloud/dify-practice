@@ -102,6 +102,30 @@
 .sap-open-btn:hover{background:var(--portal-coral-soft,#e8fdf5);border-color:rgba(24,185,199,.45);}
 .price-table input[type=text]{width:80px;border:1px solid #d1d5db;border-radius:.3rem;padding:.2rem .3rem;font-size:.78rem;}
 .del-row-btn{background:none;border:none;color:#ef4444;cursor:pointer;font-size:.95rem;padding:0 .25rem;line-height:1;}
+/* ── DM 발송 확인 모달 ── */
+.dm-modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;align-items:center;justify-content:center;padding:2rem 1rem;}
+.dm-modal-bg.open{display:flex;}
+.dm-modal{background:#fff;border-radius:18px;max-width:640px;width:100%;max-height:90vh;overflow-y:auto;padding:1.75rem 2rem 1.5rem;box-shadow:0 24px 70px rgba(0,0,0,.28);position:relative;}
+.dm-modal h3{margin:0 0 1rem;font-size:1.1rem;}
+.dm-modal-close{position:absolute;top:.75rem;right:1rem;background:none;border:none;font-size:1.4rem;cursor:pointer;color:#9ca3af;}
+.dm-modal-close:hover{color:#374151;}
+.dm-modal-row{margin-bottom:1rem;}
+.dm-modal-row label{display:block;font-size:.8rem;font-weight:700;color:#374151;margin-bottom:.3rem;}
+.dm-modal-row input[type=text],.dm-modal-row input[type=date]{width:100%;border:1px solid #d1d5db;border-radius:.4rem;padding:.5rem .6rem;font-size:.88rem;box-sizing:border-box;}
+.dm-modal-row-inline{display:flex;gap:.75rem;}
+.dm-modal-row-inline > div{flex:1;}
+.dm-send-mode-opts{display:flex;gap:1.25rem;font-size:.85rem;}
+.dm-send-mode-opts label{display:flex;align-items:center;gap:.35rem;font-weight:500;cursor:pointer;}
+.dm-modal-schedule{display:flex;gap:.6rem;align-items:center;flex-wrap:wrap;}
+.dm-modal-schedule select{border:1px solid #d1d5db;border-radius:.4rem;padding:.4rem .5rem;font-size:.85rem;}
+.dm-modal-msg-row textarea{width:100%;border:1px solid #d1d5db;border-radius:.4rem;padding:.6rem;font-size:.85rem;line-height:1.6;resize:vertical;box-sizing:border-box;min-height:220px;}
+.dm-modal-msg-meta{display:flex;justify-content:space-between;font-size:.75rem;color:#6b7280;margin-top:.3rem;}
+.dm-modal-footer{display:flex;justify-content:flex-end;gap:.6rem;margin-top:1.25rem;padding-top:1rem;border-top:1px solid #e5e7eb;}
+.dm-modal-cancel{background:#f3f4f6;color:#374151;border:none;border-radius:999px;padding:.55rem 1.3rem;font-size:.85rem;font-weight:700;cursor:pointer;}
+.dm-modal-cancel:hover{background:#e5e7eb;}
+.dm-modal-send{background:linear-gradient(135deg,#065666,#0891b2);color:#fff;border:none;border-radius:999px;padding:.55rem 1.5rem;font-size:.85rem;font-weight:800;cursor:pointer;box-shadow:0 4px 12px rgba(8,145,178,.35);}
+.dm-modal-send:hover{transform:translateY(-1px);}
+.dm-modal-note{font-size:.72rem;color:#9ca3af;margin-top:.75rem;line-height:1.6;}
 </style>
 
 {% if not report.brand %}
@@ -192,7 +216,7 @@
           <td class="num">{{ c.generic_ratio }}%</td>
           <td class="num">{{ c.generic_gp_pct }}%</td>
           <td class="num">{{ c.reco_count }}</td>
-          <td class="num">{{ '{:,}'.format(c.proposal_possible_sales_m) }}</td>
+          <td class="num">{{ '{:,.2f}'.format(c.proposal_possible_sales_m) }}</td>
           <td><button type="button" class="action-toggle-btn">▶ 액션 실행</button></td>
         </tr>
         <tr class="action-detail-row" hidden>
@@ -344,7 +368,7 @@
         <td style="text-align:left;font-size:.78rem;">${p.product_name || p.product_code || ''}</td>
         <td style="text-align:center;font-size:.78rem;color:#6b7280;">${adoptionRate}%</td>
         <td style="text-align:right;font-size:.78rem;">${expectedQty ? expectedQty.toLocaleString() : '-'}</td>
-        <td id="oppRev_${pid}" style="text-align:right;font-size:.78rem;color:#0369a1;font-weight:700;">${expectedSales ? expectedSales.toLocaleString() : '-'}</td>
+        <td id="oppRev_${pid}" style="text-align:right;font-size:.78rem;color:#0369a1;font-weight:700;">${expectedSales ? expectedSales.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}) : '-'}</td>
         <td><span class="gp-chip neutral">${gp}%</span></td>
         <td style="color:#6b7280;font-size:.78rem;">${unitPrice ? unitPrice.toLocaleString() : '-'}</td>
         <td><input type="number" id="cost_${pid}" value="${unitCost || ''}" placeholder="원가" min="0" step="1"
@@ -438,6 +462,12 @@
           onclick="window.addManualRow('${uid}')">＋ 직접 입력 행 추가</button>
       <button class="tbl-ctrl-btn dm-confirm" type="button"
           onclick="window._confirmDm_${uid}()">✅ 품목 확정 · DM 반영</button>
+      <div class="price-date-row" style="margin:0 0 0 auto;">
+        <div class="action-section-title" style="margin:0 .5rem 0 0;">적용기간</div>
+        <label>시작 <input type="date" id="dateFrom_${uid}" value="${d1}"></label>
+        <label>종료 <input type="date" id="dateTo_${uid}"   value="${d2}"></label>
+        <span style="font-size:.75rem;color:#6b7280;">플랜트: ${plantCode || '미확인'}</span>
+      </div>
     `;
     pricePanel.appendChild(ctrlRow);
     // appendMoreRows 를 전역 접근용으로 노출
@@ -467,13 +497,7 @@
           💬 DM만 발송
         </button>
       </div>
-      <div class="price-date-row" style="margin-top:.6rem;">
-        <div class="action-section-title" style="margin:0 .5rem 0 0;">적용기간</div>
-        <label>시작 <input type="date" id="dateFrom_${uid}" value="${d1}"></label>
-        <label>종료 <input type="date" id="dateTo_${uid}"   value="${d2}"></label>
-        <span style="font-size:.75rem;color:#6b7280;">플랜트: ${plantCode || '미확인'}</span>
-      </div>
-      <div class="price-btn-row">
+      <div class="price-btn-row" style="justify-content:flex-end;">
         <button class="action-send-btn price-only" type="button"
             onclick="window._doSendPriceOnly_${uid}(this)">
           📋 판가만 SAP 등록
@@ -496,13 +520,21 @@
     };
     window[`_doSendDmOnly_${uid}`] = function(btn) {
       if (!guardConfirmed(uid)) return;
-      if (!confirm(`[${custName}]에게 DM을 발송합니다.\n계속하시겠습니까?`)) return;
-      window.sendDmFromPricePanel(uid, custCode, custName, brandCode, brandName, btn);
+      window._openDmModal({
+        uid, custCode, custName,
+        title: `💬 DM 발송 확인 — ${custName}`,
+        message: document.getElementById(`priceDmText_${uid}`)?.value || '',
+        onConfirm: (ctx) => window.sendDmFromPricePanel(uid, custCode, custName, brandCode, brandName, btn, ctx),
+      });
     };
     window[`_doSendPriceDm_${uid}`] = function(btn) {
       if (!guardConfirmed(uid)) return;
-      if (!confirm(`판가 SAP 등록 후 [${custName}]에게 DM을 발송합니다.\n계속하시겠습니까?`)) return;
-      window.sendPriceDm(uid, custCode, custName, brandCode, brandName, plantCode, btn);
+      window._openDmModal({
+        uid, custCode, custName,
+        title: `💰 판가 등록 + DM 발송 확인 — ${custName}`,
+        message: document.getElementById(`priceDmText_${uid}`)?.value || '',
+        onConfirm: (ctx) => window.sendPriceDm(uid, custCode, custName, brandCode, brandName, plantCode, btn, ctx),
+      });
     };
     tbody.addEventListener('input', () => { _confirmed[uid] = false; checkPricePanelBtns(uid); });
 
@@ -541,6 +573,90 @@
     return true;
   }
 
+  // ─── DM 발송 확인 팝업 (수신자/발신자/문자내용/예약발송) ─────────
+  let _dmModalCtx = null;
+  function _dmModalFillTimeSelects() {
+    const h = document.getElementById('dmModalHour');
+    const m = document.getElementById('dmModalMinute');
+    if (h && h.options.length === 0) {
+      for (let i = 0; i < 24; i++) h.insertAdjacentHTML('beforeend', `<option value="${i}">${i}시</option>`);
+    }
+    if (m && m.options.length === 0) {
+      for (let i = 0; i < 60; i += 5) m.insertAdjacentHTML('beforeend', `<option value="${i}">${String(i).padStart(2,'0')}분</option>`);
+    }
+  }
+  function _dmModalUpdateLen() {
+    const el = document.getElementById('dmModalMessage');
+    const lenEl = document.getElementById('dmModalMsgLen');
+    if (!el || !lenEl) return;
+    const len = (el.value || '').length;
+    lenEl.textContent = len;
+    const typeEl = document.getElementById('dmModalMsgType');
+    if (typeEl) typeEl.textContent = len > 80 ? '장문(LMS)' : '단문(SMS)';
+  }
+  window._openDmModal = function(opts) {
+    _dmModalCtx = opts;
+    const titleEl = document.getElementById('dmModalTitle');
+    if (titleEl) titleEl.textContent = opts.title || '💬 발송 확인';
+    const custEl = document.getElementById('dmModalCustName');
+    if (custEl) custEl.value = opts.custName || '';
+    const msgEl = document.getElementById('dmModalMessage');
+    if (msgEl) msgEl.value = opts.message || '';
+    _dmModalUpdateLen();
+    const recvEl = document.getElementById('dmModalReceiver');
+    if (recvEl) {
+      recvEl.value = '조회 중...';
+      fetch(`/portal/customer-phone?customer_code=${encodeURIComponent(opts.custCode || '')}`)
+        .then(r => r.json()).then(d => { recvEl.value = d.phone || ''; })
+        .catch(() => { recvEl.value = ''; });
+    }
+    const cbEl = document.getElementById('dmModalCallback');
+    if (cbEl && !cbEl.value) cbEl.value = '02-589-6436';
+    const nowRadio = document.querySelector('input[name="dmSendMode"][value="now"]');
+    if (nowRadio) nowRadio.checked = true;
+    const schedRow = document.getElementById('dmModalScheduleRow');
+    if (schedRow) schedRow.style.display = 'none';
+    const dateEl = document.getElementById('dmModalDate');
+    if (dateEl) dateEl.value = new Date().toISOString().slice(0, 10);
+    _dmModalFillTimeSelects();
+    document.getElementById('dmModal')?.classList.add('open');
+  };
+  window._closeDmModal = function() {
+    document.getElementById('dmModal')?.classList.remove('open');
+    _dmModalCtx = null;
+  };
+  window._confirmDmModalSend = function() {
+    if (!_dmModalCtx) return;
+    const message  = document.getElementById('dmModalMessage')?.value || '';
+    const receiver = (document.getElementById('dmModalReceiver')?.value || '').trim();
+    const callback = (document.getElementById('dmModalCallback')?.value || '').trim();
+    const mode = document.querySelector('input[name="dmSendMode"]:checked')?.value || 'now';
+    if (!receiver) { alert('수신번호를 입력하세요.'); return; }
+    let scheduledAt = '';
+    if (mode === 'reserve') {
+      const d  = document.getElementById('dmModalDate')?.value;
+      const hh = document.getElementById('dmModalHour')?.value;
+      const mm = document.getElementById('dmModalMinute')?.value;
+      if (!d) { alert('예약 날짜를 선택하세요.'); return; }
+      scheduledAt = `${d} ${hh}:${String(mm).padStart(2, '0')}`;
+    }
+    const dmTextEl = document.getElementById(`priceDmText_${_dmModalCtx.uid}`);
+    if (dmTextEl) dmTextEl.value = message;
+    const ctx = { message, receiver, callback, scheduledAt, mode };
+    const onConfirm = _dmModalCtx.onConfirm;
+    window._closeDmModal();
+    if (onConfirm) onConfirm(ctx);
+  };
+  document.addEventListener('change', (e) => {
+    if (e.target && e.target.name === 'dmSendMode') {
+      const row = document.getElementById('dmModalScheduleRow');
+      if (row) row.style.display = e.target.value === 'reserve' ? 'flex' : 'none';
+    }
+  });
+  document.addEventListener('input', (e) => {
+    if (e.target && e.target.id === 'dmModalMessage') _dmModalUpdateLen();
+  });
+
   // ─── 기회매출(백만) = 설정판가 × 예상수량 ──────────
   window._updateOppRevenue = function(pid) {
     const priceEl = document.getElementById(`price_${pid}`);
@@ -549,7 +665,7 @@
     const price  = parseFloat(priceEl?.value || '');
     const expQty = parseFloat(priceEl?.dataset.expectedQty || '0');
     if (!isNaN(price) && price > 0 && expQty > 0) {
-      oppEl.textContent = Math.round(price * expQty / 1000000).toLocaleString();
+      oppEl.textContent = (price * expQty / 1000000).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     } else {
       oppEl.textContent = '-';
     }
@@ -713,16 +829,18 @@
   };
 
   // ─── DM만 발송 (판가 패널에서) ──────────────────────
-  window.sendDmFromPricePanel = async function(uid, custCode, custName, brandCode, brandName, btn) {
-    const message  = document.getElementById(`priceDmText_${uid}`)?.value || '';
+  window.sendDmFromPricePanel = async function(uid, custCode, custName, brandCode, brandName, btn, ctx) {
+    const message  = (ctx && ctx.message) || document.getElementById(`priceDmText_${uid}`)?.value || '';
     const resultEl = document.getElementById(`priceResult_${uid}`);
     btn.disabled = true; btn.textContent = '발송 중...'; resultEl.style.display = 'none';
     try {
       const data = await _logToServer({ customer_code: custCode, customer_name: custName,
         brand_code: brandCode, brand_name: brandName, action_type: 'dm_only',
-        dm_message: message, price_items: [], sap_result: {} });
+        dm_message: message, price_items: [], sap_result: {},
+        dm_phone: ctx?.receiver || '', dm_callback: ctx?.callback || '', dm_scheduled_at: ctx?.scheduledAt || '' });
       if (data.success) {
-        resultEl.textContent = '✅ DM 발송 완료'; resultEl.className = 'send-result ok';
+        resultEl.textContent = ctx?.scheduledAt ? `✅ 예약 발송 등록 완료 (${ctx.scheduledAt})` : '✅ DM 발송 완료';
+        resultEl.className = 'send-result ok';
         _reloadHistory(uid, custCode, brandCode);
       } else {
         resultEl.textContent = '❌ ' + (data.error || '발송 실패'); resultEl.className = 'send-result err';
@@ -735,8 +853,8 @@
   };
 
   // ─── 판가 등록 + DM 발송 ──────────────────────────
-  window.sendPriceDm = async function(uid, custCode, custName, brandCode, brandName, plantCode, btn) {
-    const message  = document.getElementById(`priceDmText_${uid}`)?.value || '';
+  window.sendPriceDm = async function(uid, custCode, custName, brandCode, brandName, plantCode, btn, ctx) {
+    const message  = (ctx && ctx.message) || document.getElementById(`priceDmText_${uid}`)?.value || '';
     const resultEl = document.getElementById(`priceResult_${uid}`);
     const priceItems = _collectPriceItems(uid, plantCode, custCode);
     if (!priceItems.length) {
@@ -757,9 +875,12 @@
     try {
       const data = await _logToServer({ customer_code: custCode, customer_name: custName,
         brand_code: brandCode, brand_name: brandName, action_type: 'price_and_dm',
-        dm_message: message, price_items: priceItems, sap_result: sapResult });
+        dm_message: message, price_items: priceItems, sap_result: sapResult,
+        dm_phone: ctx?.receiver || '', dm_callback: ctx?.callback || '', dm_scheduled_at: ctx?.scheduledAt || '' });
       if (data.success) {
-        resultEl.textContent = `✅ 판가 ${sapResult.saved_count || priceItems.length}건 등록 + DM 발송 완료`;
+        resultEl.textContent = ctx?.scheduledAt
+          ? `✅ 판가 ${sapResult.saved_count || priceItems.length}건 등록 + 예약 발송 등록 완료 (${ctx.scheduledAt})`
+          : `✅ 판가 ${sapResult.saved_count || priceItems.length}건 등록 + DM 발송 완료`;
         resultEl.className = 'send-result ok';
         _reloadHistory(uid, custCode, brandCode);
       } else {
@@ -1114,6 +1235,64 @@
 
 })();
 </script>
+<!-- DM 발송 확인 모달 (수신자/발신자/문자내용/예약발송) -->
+<div class="dm-modal-bg" id="dmModal" onclick="if(event.target===this) window._closeDmModal()">
+  <div class="dm-modal">
+    <button class="dm-modal-close" type="button" onclick="window._closeDmModal()">&times;</button>
+    <h3 id="dmModalTitle">💬 DM 발송 확인</h3>
+
+    <div class="dm-modal-row">
+      <label>가맹점명</label>
+      <input type="text" id="dmModalCustName" readonly style="background:#f9fafb;color:#6b7280;">
+    </div>
+
+    <div class="dm-modal-row-inline">
+      <div class="dm-modal-row">
+        <label>수신번호 (고객 연락처)</label>
+        <input type="text" id="dmModalReceiver" placeholder="010-0000-0000">
+      </div>
+      <div class="dm-modal-row">
+        <label>발신(회신)번호</label>
+        <input type="text" id="dmModalCallback" placeholder="02-589-6436">
+      </div>
+    </div>
+
+    <div class="dm-modal-row">
+      <label>발송 방식</label>
+      <div class="dm-send-mode-opts">
+        <label><input type="radio" name="dmSendMode" value="now" checked> 즉시발송</label>
+        <label><input type="radio" name="dmSendMode" value="reserve"> 예약발송</label>
+      </div>
+    </div>
+
+    <div class="dm-modal-row" id="dmModalScheduleRow" style="display:none;">
+      <label>예약 시각</label>
+      <div class="dm-modal-schedule">
+        <input type="date" id="dmModalDate">
+        <select id="dmModalHour"></select>
+        <select id="dmModalMinute"></select>
+      </div>
+    </div>
+
+    <div class="dm-modal-row dm-modal-msg-row">
+      <label>문자 내용</label>
+      <textarea id="dmModalMessage" rows="14"></textarea>
+      <div class="dm-modal-msg-meta">
+        <span><span id="dmModalMsgLen">0</span>자 · <span id="dmModalMsgType">단문(SMS)</span></span>
+        <span>발송 이력에 그대로 기록됩니다</span>
+      </div>
+    </div>
+
+    <p class="dm-modal-note">
+      ※ 현재는 실제 SMS 발송 연동 전 단계로, 위 내용은 발송 이력에 기록만 됩니다.
+    </p>
+
+    <div class="dm-modal-footer">
+      <button class="dm-modal-cancel" type="button" onclick="window._closeDmModal()">취소</button>
+      <button class="dm-modal-send" id="dmModalSendBtn" type="button" onclick="window._confirmDmModalSend()">발송</button>
+    </div>
+  </div>
+</div>
 <!-- SAP 브릿지 설치 가이드 모달 -->
 <div class="sap-modal-bg" id="sapModal" onclick="if(event.target===this)this.classList.remove('open')">
   <div class="sap-modal">

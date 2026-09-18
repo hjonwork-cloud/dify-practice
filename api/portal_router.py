@@ -384,6 +384,17 @@ def _money_m(value) -> int:
         return 0
 
 
+def _money_m2(value) -> float:
+    """_money_m 과 동일 단위(백만원)이나 소수점 2자리까지 보존.
+
+    타겟매출액/기회매출액처럼 소액 차이를 세밀하게 보여줘야 하는 값에 사용.
+    """
+    try:
+        return round(float(value or 0) / 10_000, 2)
+    except Exception:
+        return 0.0
+
+
 def _won_m(value) -> int:
     """원 단위 금액을 백만원 단위로 변환."""
     try:
@@ -915,7 +926,7 @@ def _recommend_products(
         # 예상사용수량 = (채택 가맹점 평균 사용강도: 수량÷전체매출) × 이 가맹점 전체매출
         expected_qty = max(0, round(qty_intensity * target_total_sales_raw)) if target_total_sales_raw > 0 else 0
         avg_unit_sales_raw = (sales / total_qty) if total_qty > 0 else 0
-        expected_sales_m = _money_m(expected_qty * avg_unit_sales_raw)
+        expected_sales_m = _money_m2(expected_qty * avg_unit_sales_raw)
         adoption_rate = round(adopter_count / total_franchises * 100, 1) if total_franchises > 0 else 0.0
         result.append({
             **r,
@@ -925,11 +936,11 @@ def _recommend_products(
             "unit_cost":        unit_cost,    # 평균 단가 원가 (₩)
             "adoption_rate":    adoption_rate,     # 가맹점 사용률(%) = 채택 가맹점 수 / 전체 가맹점 수
             "expected_qty":     int(expected_qty),  # 이 가맹점 예상사용수량
-            "expected_sales_m": expected_sales_m,   # 이 가맹점 기회매출액(백만원)
+            "expected_sales_m": expected_sales_m,   # 이 가맹점 기회매출액(백만원, 소수점 2자리)
         })
     # 이 가맹점 매출 규모 기준 "많이 써야 하는 상품" 순 → 예상기회매출 내림차순
     result.sort(key=lambda x: (-(x.get("expected_sales_m") or 0), -(x.get("adopter_count") or 0), -(x.get("gp_pct") or 0)))
-    return result[:30]
+    return result
 
 
 def _dm_message(brand_name: str, customer: dict, brand_avg: float, products: list[dict]) -> str:
@@ -1121,7 +1132,7 @@ def brand_report(
             "dedicated_ratio": round(max(0.0, 100.0 - ratio), 1),
             "gap": round(ratio - avg, 1),
             "is_target": is_target,
-            "proposal_possible_sales_m": _money_m(needed_generic_sales),
+            "proposal_possible_sales_m": _money_m2(needed_generic_sales),
         }
         customers.append(c)
     targets = [c for c in customers if c["is_target"]]
@@ -2182,7 +2193,7 @@ def _enrich_action_targets(report: dict, brand_name: str) -> None:
     customer_page 등과 참조 공유됨)에 in-place 로 두 필드를 추가한다.
     - generic_gp_pct : 가맹점별 범용상품 GP%(선택월 기준)
     - reco_count     : 추천대상품목 개수 근사치 = (브랜드 전체 범용상품 유니버스) - (가맹점 보유 상품)
-      (target-detail 클릭 시 실제로 뜨는 _recommend_products() 의 LIMIT 30 목록과 동일한 후보군 기준으로,
+      (target-detail 클릭 시 실제로 뜨는 _recommend_products() 의 LIMIT 200 목록과 동일한 후보군 기준으로,
        정확한 개수 대신 경량 집계 쿼리 2건으로 근사치를 낸다 — 가맹점 수만큼 반복 쿼리하지 않기 위함)"""
     customers = report.get("customers") or []
     if not customers:
@@ -2255,10 +2266,11 @@ def _enrich_action_targets(report: dict, brand_name: str) -> None:
     for c in customers:
         code = str(c.get("customer_code") or "")
         c["generic_gp_pct"] = gp_map.get(code, 0)
-        # _recommend_products() 는 동일 후보군(차집합)에서 adopter_count/GP율/매출 순 정렬 후
-        # LIMIT 30 으로 자른다. 여기서는 가맹점마다 그 무거운 정렬 쿼리를 다시 돌리지 않기 위해
-        # 후보군 크기만 근사 계산하되, 클릭 시 실제로 뜨는 개수(최대 30건)와 일치하도록 상한을 맞춘다.
-        c["reco_count"] = min(len(universe_set - owned_map.get(code, set())), 30)
+        # _recommend_products() 는 동일 후보군(차집합)에서 예상기회매출 순 정렬 후
+        # SQL LIMIT 200 으로 후보를 추린다(더 이상 30건으로 자르지 않음). 여기서는
+        # 가맹점마다 그 무거운 정렬 쿼리를 다시 돌리지 않기 위해 후보군 크기만 근사
+        # 계산하되, 클릭 시 실제로 뜨는 개수(최대 200건)와 일치하도록 상한을 맞춘다.
+        c["reco_count"] = min(len(universe_set - owned_map.get(code, set())), 200)
 
 
 @router.get("/brand-report/action", response_class=HTMLResponse)
@@ -2643,15 +2655,21 @@ def send_sms_api_call(
     callback_phone: str = "",
     session_cookie: str = "",
     msg_type: str = "1",
+    scheduled_at: str = "",
 ) -> dict:
-    """사내 SMS 서버(direct.dongwon.com)로 SMS/LMS 1건 발송.
+    """사내 SMS 서버(direct.dongwon.com)로 SMS/LMS 1건 발송 (즉시 또는 예약).
 
     Args:
         receiver_phone: 수신자 전화번호 (숫자 이외 문자는 자동 제거)
         message_text: 발송할 메시지 본문
         callback_phone: 회신번호 (미지정 시 SMS_SENDER_PHONE, 그마저 없으면 기본값 사용)
         session_cookie: 세션 쿠키 (미지정 시 SMS_COOKIE 환경변수 사용)
-        msg_type: "1" 단문 SMS, "2" 장문 LMS
+        msg_type: "1" 단문 SMS, "2" 장문 LMS (사이트 원본은 "3"=MMS도 있으나 미지원)
+        scheduled_at: 예약발송 시각. 비워두면 즉시발송.
+            형식: "YYYY-MM-DD H:MM" (사내 SMS 페이지 JS, SendMessageButtonClick()
+            에서 실제 사용하는 것과 동일한 포맷 — 예: "2026-09-20 14:30").
+            5분 단위 분(0,5,10,...,55)만 사이트 UI에서는 허용하지만, API 자체가
+            강제하는지는 미검증이므로 우선 사이트 UI와 동일하게 맞추는 것을 권장.
 
     Returns:
         {"success": bool, "status_code": int|None, "message": str}
@@ -2672,7 +2690,7 @@ def send_sms_api_call(
         "pDstaddr": target_phone,
         "pMsg": message_text,
         "pMsgType": msg_type,
-        "pRequestTime": "",
+        "pRequestTime": scheduled_at or "",
         "pCallBack": sender_number,
         "pPath": "",
     }
@@ -2716,6 +2734,20 @@ def send_sms_api_call(
         return {"success": False, "status_code": None, "message": f"SMS API 전송 실패: {e}"}
 
 
+def build_sms_scheduled_time(dt) -> str:
+    """datetime 객체를 send_sms_api_call(scheduled_at=...)에 넣을 문자열로 변환.
+
+    사내 SMS 페이지(SendMessageButtonClick, SMS_20210528.js) 로직과 동일한
+    포맷("YYYY-MM-DD H:MM")으로 맞춰줌. 분(minute)은 사이트 UI가 5분 단위
+    드롭다운(0,5,10,...,55)만 제공하므로, 여기서도 5분 단위로 내림 처리한다.
+    """
+    import datetime as _dt
+    if not isinstance(dt, _dt.datetime):
+        raise TypeError("dt는 datetime 객체여야 합니다.")
+    rounded_minute = (dt.minute // 5) * 5
+    return f"{dt:%Y-%m-%d} {dt.hour}:{rounded_minute:02d}"
+
+
 def _get_customer_mobile_phone(customer_code: str) -> str:
     """고객마스터(T_CUSTOMER_MASTER)에서 SMS 수신용 번호 조회.
 
@@ -2737,6 +2769,13 @@ def _get_customer_mobile_phone(customer_code: str) -> str:
         return ""
 
 
+@router.get("/customer-phone")
+async def customer_phone(request: Request, customer_code: str = ""):
+    """DM 발송 확인 팝업의 수신번호 기본값 조회용 (고객마스터 이동전화번호/전화번호)."""
+    _require_user(request)
+    return JSONResponse({"phone": _get_customer_mobile_phone(customer_code) if customer_code else ""})
+
+
 class _DmSendPayload(BaseModel):
     customer_code: str
     customer_name: str = ""
@@ -2747,6 +2786,9 @@ class _DmSendPayload(BaseModel):
     price_items: list[dict] = []      # [{plant,kunnr,matnr,price,date_from,date_to}]
     dm_matnr_list: list[str] = []     # dm_only 시 추천 상품코드 목록
     sap_result: dict = {}             # 브라우저에서 SAP Bridge 직접 호출 후 결과 전달
+    dm_phone: str = ""                # DM 발송 확인 팝업에서 편집된 수신번호 (연동 전 단계, 로그 전달용)
+    dm_callback: str = ""             # DM 발송 확인 팝업에서 편집된 회신(발신)번호
+    dm_scheduled_at: str = ""         # 예약발송 시각 "YYYY-MM-DD H:MM" (즉시발송이면 빈 문자열)
 
 
 @router.post("/dm-send-with-price")
@@ -2761,8 +2803,13 @@ async def dm_send_with_price(request: Request, body: _DmSendPayload):
     team = user.get("team") or ""
 
     # SAP 호출은 브라우저가 직접 수행 (localhost:7788), 서버는 결과만 수신·저장
-    sap_result: dict = body.sap_result or {}
+    sap_result: dict = dict(body.sap_result or {})
     saved_count = int(sap_result.get("saved_count") or (len(body.price_items) if body.price_items else 0))
+    # DM 발송 확인 팝업에서 입력한 수신/회신번호·예약시각 (연동 전 단계 — 로그에만 기록)
+    if body.dm_phone or body.dm_callback or body.dm_scheduled_at:
+        sap_result["dm_phone"] = body.dm_phone
+        sap_result["dm_callback"] = body.dm_callback
+        sap_result["dm_scheduled_at"] = body.dm_scheduled_at
 
     # product_names: price_items 있으면 matnr, dm_only면 dm_matnr_list, 없으면 메시지에서 추출 시도
     if body.price_items:

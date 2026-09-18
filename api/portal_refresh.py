@@ -906,6 +906,9 @@ def read_brand_report_from_table(
         def _money_m(v) -> int:
             return int(round(float(v or 0) / 10000))
 
+        def _money_m2(v) -> float:
+            return round(float(v or 0) / 10000, 2)
+
         customers = []
         proposal_possible_raw = 0.0
         for r in cust_rows:
@@ -930,7 +933,7 @@ def read_brand_report_from_table(
                 "dedicated_ratio":        round(max(0.0, 100.0 - ratio), 1),
                 "gap":                    round(ratio - brand_avg, 1),
                 "is_target":              is_target,
-                "proposal_possible_sales_m": _money_m(needed),
+                "proposal_possible_sales_m": _money_m2(needed),
             })
 
         targets = [c for c in customers if c["is_target"]]
