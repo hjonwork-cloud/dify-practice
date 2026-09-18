@@ -166,7 +166,7 @@
       <thead>
         <tr>
           <th>가맹점코드</th><th>가맹점명</th><th>매출액(백만)</th><th>전용상품(백만)</th>
-          <th>범용상품(백만)</th><th>범용GP%</th><th>추천품목</th><th>타겟매출액(백만)</th><th></th>
+          <th>범용상품(백만)</th><th>범용비중</th><th>범용GP%</th><th>추천품목</th><th>타겟매출액(백만)</th><th></th>
         </tr>
       </thead>
       <tbody id="targetTableBody">
@@ -189,20 +189,21 @@
           <td class="num">{{ '{:,}'.format(c.sales_m) }}</td>
           <td class="num">{{ '{:,}'.format(c.dedicated_sales_m) }}</td>
           <td class="num">{{ '{:,}'.format(c.generic_sales_m) }}</td>
+          <td class="num">{{ c.generic_ratio }}%</td>
           <td class="num">{{ c.generic_gp_pct }}%</td>
           <td class="num">{{ c.reco_count }}</td>
           <td class="num">{{ '{:,}'.format(c.proposal_possible_sales_m) }}</td>
           <td><button type="button" class="action-toggle-btn">▶ 액션 실행</button></td>
         </tr>
         <tr class="action-detail-row" hidden>
-          <td colspan="9">
+          <td colspan="10">
             <div class="action-panel" data-target-body>
               <div class="empty" style="font-size:.82rem;">추천상품과 액션 옵션을 불러오는 중...</div>
             </div>
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="9"><div class="empty"><b>가맹점 데이터 없음</b></div></td></tr>
+        <tr><td colspan="10"><div class="empty"><b>가맹점 데이터 없음</b></div></td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -315,22 +316,11 @@
     pricePanel.className = 'action-section';
     pricePanel.id = `pricePanel_${uid}`;
 
-    // 날짜 행
-    const dateRow = document.createElement('div');
-    dateRow.className = 'price-date-row';
-    dateRow.innerHTML = `
-      <div class="action-section-title" style="margin:0 .5rem 0 0;">적용기간</div>
-      <label>시작 <input type="date" id="dateFrom_${uid}" value="${d1}"></label>
-      <label>종료 <input type="date" id="dateTo_${uid}"   value="${d2}"></label>
-      <span style="font-size:.75rem;color:#6b7280;">플랜트: ${plantCode || '미확인'}</span>
-    `;
-    pricePanel.appendChild(dateRow);
-
     // 가격 테이블
     const tbl = document.createElement('table');
     tbl.className = 'price-table';
     tbl.innerHTML = `<thead><tr>
-      <th>상품코드</th><th>상품명</th><th>사용률</th><th>예상수량</th><th>기회매출(백만)</th><th>현재GP%</th>
+      <th>상품코드</th><th>상품명</th><th>타매장 사용률</th><th>예상수량</th><th>기회매출(백만)</th><th>현재GP%</th>
       <th>현재단가(₩)</th><th>원가(₩)</th><th>설정판가(₩)</th><th>목표GP%</th><th></th>
     </tr></thead>`;
     const tbody = document.createElement('tbody');
@@ -354,18 +344,19 @@
         <td style="text-align:left;font-size:.78rem;">${p.product_name || p.product_code || ''}</td>
         <td style="text-align:center;font-size:.78rem;color:#6b7280;">${adoptionRate}%</td>
         <td style="text-align:right;font-size:.78rem;">${expectedQty ? expectedQty.toLocaleString() : '-'}</td>
-        <td style="text-align:right;font-size:.78rem;color:#0369a1;font-weight:700;">${expectedSales ? expectedSales.toLocaleString() : '-'}</td>
+        <td id="oppRev_${pid}" style="text-align:right;font-size:.78rem;color:#0369a1;font-weight:700;">${expectedSales ? expectedSales.toLocaleString() : '-'}</td>
         <td><span class="gp-chip neutral">${gp}%</span></td>
         <td style="color:#6b7280;font-size:.78rem;">${unitPrice ? unitPrice.toLocaleString() : '-'}</td>
         <td><input type="number" id="cost_${pid}" value="${unitCost || ''}" placeholder="원가" min="0" step="1"
              readonly title="원가는 수정할 수 없습니다"
              style="background:#f3f4f6;color:#6b7280;cursor:not-allowed;" class="${unitCost ? '' : 'stale'}"></td>
         <td><input type="number" id="price_${pid}" value="${unitPrice || ''}" placeholder="판가" min="0" step="1"
-             oninput="recalcFromPrice('${pid}')" data-matnr="${p.product_code||''}"></td>
+             oninput="recalcFromPrice('${pid}')" data-matnr="${p.product_code||''}" data-expected-qty="${expectedQty}"></td>
         <td><input type="number" id="gptarget_${pid}" placeholder="GP%" min="0" max="99.9" step="0.1"
              oninput="recalcFromGp('${pid}')" class="derived"></td>
         <td><button type="button" class="row-del-btn" title="행 삭제" onclick="window._delProductRow_${uid}(this)">×</button></td>
       `;
+      setTimeout(() => window._updateOppRevenue && window._updateOppRevenue(pid), 0);
       if (unitCost > 0 && unitPrice > 0) {
         setTimeout(() => window.recalcFromPrice(pid), 0);
       }
@@ -470,14 +461,22 @@
       actionFooter.innerHTML = `
       <div class="action-section-title" style="margin-top:.6rem;">DM 메시지</div>
       <textarea class="dm-preview-area" id="priceDmText_${uid}" rows="4">${dmMsg}</textarea>
+      <div class="price-btn-row" style="justify-content:flex-start;">
+        <button class="action-send-btn dm-only-btn" type="button"
+            onclick="window._doSendDmOnly_${uid}(this)">
+          💬 DM만 발송
+        </button>
+      </div>
+      <div class="price-date-row" style="margin-top:.6rem;">
+        <div class="action-section-title" style="margin:0 .5rem 0 0;">적용기간</div>
+        <label>시작 <input type="date" id="dateFrom_${uid}" value="${d1}"></label>
+        <label>종료 <input type="date" id="dateTo_${uid}"   value="${d2}"></label>
+        <span style="font-size:.75rem;color:#6b7280;">플랜트: ${plantCode || '미확인'}</span>
+      </div>
       <div class="price-btn-row">
         <button class="action-send-btn price-only" type="button"
             onclick="window._doSendPriceOnly_${uid}(this)">
           📋 판가만 SAP 등록
-        </button>
-        <button class="action-send-btn dm-only-btn" type="button"
-            onclick="window._doSendDmOnly_${uid}(this)">
-          💬 DM만 발송
         </button>
         <button class="action-send-btn price-send" type="button"
             onclick="window._doSendPriceDm_${uid}(this)">
@@ -542,11 +541,26 @@
     return true;
   }
 
+  // ─── 기회매출(백만) = 설정판가 × 예상수량 ──────────
+  window._updateOppRevenue = function(pid) {
+    const priceEl = document.getElementById(`price_${pid}`);
+    const oppEl   = document.getElementById(`oppRev_${pid}`);
+    if (!oppEl) return;
+    const price  = parseFloat(priceEl?.value || '');
+    const expQty = parseFloat(priceEl?.dataset.expectedQty || '0');
+    if (!isNaN(price) && price > 0 && expQty > 0) {
+      oppEl.textContent = Math.round(price * expQty / 1000000).toLocaleString();
+    } else {
+      oppEl.textContent = '-';
+    }
+  };
+
   // ─── 상호계산 (판가 ↔ GP%, 원가 기준) ──────────────
   window.recalcFromPrice = function(pid) {
     const cost  = parseFloat(document.getElementById(`cost_${pid}`)?.value || '');
     const price = parseFloat(document.getElementById(`price_${pid}`)?.value || '');
     const gpEl  = document.getElementById(`gptarget_${pid}`);
+    window._updateOppRevenue(pid);
     if (!gpEl) return;
     if (!isNaN(cost) && !isNaN(price) && price > 0) {
       gpEl.value = ((price - cost) / price * 100).toFixed(1);
@@ -569,6 +583,7 @@
       priceEl.value = '';
       priceEl.className = 'stale';
     }
+    window._updateOppRevenue(pid);
   };
 
   window.recalcFromCost = function(pid) {

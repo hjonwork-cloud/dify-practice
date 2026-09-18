@@ -898,7 +898,7 @@ def read_brand_report_from_table(
         )
 
         # ── threshold 계산 ─────────────────────────────────────────
-        threshold_max = round(max(0.0, brand_avg), 1)
+        threshold_max = 100.0
         threshold = round(min(threshold_max, max(0.0, brand_avg if threshold_pct is None else float(threshold_pct))), 1)
         target_ratio = min(0.999, max(0.0, brand_avg / 100.0))
 

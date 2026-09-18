@@ -1066,7 +1066,7 @@ def brand_report(
     """)
     avg = _pct((avg_rows[0] or {}).get("brand_avg")) if avg_rows else 0
     brand_total_sales_m = _money_m((avg_rows[0] or {}).get("sales")) if avg_rows else 0
-    threshold_max = round(max(0.0, avg), 1)
+    threshold_max = 100.0
     threshold = round(min(threshold_max, max(0.0, avg if threshold_pct is None else float(threshold_pct))), 1)
     gp_rows = _q(f"""
         SELECT CASE WHEN SUM(`매출액`) = 0 THEN 0
