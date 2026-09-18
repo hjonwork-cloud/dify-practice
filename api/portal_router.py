@@ -2125,6 +2125,87 @@ async def target_detail(request: Request, brand: str = "", customer_code: str = 
     }))
 
 
+def _enrich_action_targets(report: dict, brand_name: str) -> None:
+    """ACTION TARGETS 통합 화면 전용 보강: report['customers'] 각 항목(딕셔너리, 리스트 슬라이싱으로
+    customer_page 등과 참조 공유됨)에 in-place 로 두 필드를 추가한다.
+    - generic_gp_pct : 가맹점별 범용상품 GP%(선택월 기준)
+    - reco_count     : 추천대상품목 개수 근사치 = (브랜드 전체 범용상품 유니버스) - (가맹점 보유 상품)
+      (target-detail 클릭 시 실제로 뜨는 _recommend_products() 의 LIMIT 30 목록과 동일한 후보군 기준으로,
+       정확한 개수 대신 경량 집계 쿼리 2건으로 근사치를 낸다 — 가맹점 수만큼 반복 쿼리하지 않기 위함)"""
+    customers = report.get("customers") or []
+    if not customers:
+        return
+    selected_ym = report.get("selected_ym") or ""
+    months = report.get("period_months") or []
+    if not selected_ym or not months:
+        for c in customers:
+            c["generic_gp_pct"] = 0
+            c["reco_count"] = 0
+        return
+    import main
+    bcode = str((report.get("brand") or {}).get("brand_code") or "")
+    _is_generic = (bcode == "일반외식")
+    _brand_where = (
+        "(`ZC본부` IS NULL OR LEFT(TRIM(LEADING '0' FROM TRIM(CAST(`ZC본부` AS STRING))), 1) <> '8')"
+        if _is_generic else f"`ZC본부명` = {_sql(brand_name)}"
+    )
+    _div_where = " AND `사업부명` = '외식식재사업부'" if _is_generic else ""
+
+    # ① 가맹점별 범용상품 GP% (선택월 기준)
+    try:
+        gp_rows = _q(f"""
+            SELECT `거래처` AS customer_code,
+                   SUM(CASE WHEN `자재그룹명` IS NOT NULL AND COALESCE(`자재그룹명`, '') <> 'FC전용상품' THEN `매출액` ELSE 0 END) AS generic_sales,
+                   SUM(CASE WHEN `자재그룹명` IS NOT NULL AND COALESCE(`자재그룹명`, '') <> 'FC전용상품' THEN COALESCE(`매출원가`, 0) ELSE 0 END) AS generic_cost
+            FROM {main.T_MAIN}
+            WHERE {_brand_where}
+              AND `년월` = {_sql(selected_ym)}{_div_where}
+            GROUP BY `거래처`
+        """) or []
+    except Exception:
+        gp_rows = []
+    gp_map: dict = {}
+    for r in gp_rows:
+        gs = float(r.get("generic_sales") or 0)
+        gc = float(r.get("generic_cost") or 0)
+        gp_map[str(r.get("customer_code") or "")] = round((gs - gc) / gs * 100, 1) if gs > 0 else 0
+
+    # ② 추천대상품목 개수 근사치
+    try:
+        owned_rows = _q(f"""
+            SELECT DISTINCT `거래처` AS customer_code, `자재` AS product_code
+            FROM {main.T_MAIN}
+            WHERE {_brand_where}
+              AND `년월` IN ({_in_months(months)})
+              AND `자재그룹명` IS NOT NULL
+              AND COALESCE(`자재그룹명`, '') <> 'FC전용상품'{_div_where}
+        """) or []
+    except Exception:
+        owned_rows = []
+    owned_map: dict = {}
+    for r in owned_rows:
+        owned_map.setdefault(str(r.get("customer_code") or ""), set()).add(str(r.get("product_code") or ""))
+    try:
+        universe_rows = _q(f"""
+            SELECT `자재` AS product_code
+            FROM {main.T_MAIN}
+            WHERE {_brand_where}
+              AND `년월` IN ({_in_months(months)})
+              AND `자재그룹명` IS NOT NULL
+              AND COALESCE(`자재그룹명`, '') <> 'FC전용상품'{_div_where}
+            GROUP BY `자재`
+            HAVING SUM(`매출액`) > 0
+        """) or []
+    except Exception:
+        universe_rows = []
+    universe_set = {str(r.get("product_code") or "") for r in universe_rows}
+
+    for c in customers:
+        code = str(c.get("customer_code") or "")
+        c["generic_gp_pct"] = gp_map.get(code, 0)
+        c["reco_count"] = len(universe_set - owned_map.get(code, set()))
+
+
 @router.get("/brand-report/action", response_class=HTMLResponse)
 async def brand_report_action_page(
     request: Request,
@@ -2141,6 +2222,11 @@ async def brand_report_action_page(
         _action_emp = access_control.ADMIN_EMP_CODE
     report = brand_report(brand or None, emp_code=_action_emp,
                           threshold_pct=threshold, customer_page=customer_page, target_page=target_page)
+    if report.get("brand"):
+        try:
+            _enrich_action_targets(report, str((report.get("brand") or {}).get("brand_name") or brand))
+        except Exception as _enrich_err:
+            logger.warning(f"[brand-report/action] 가맹점 GP/추천품목 보강 실패: {_enrich_err}")
     return _render(request, "portal_brand_report_action.html", report=report)
 
 
@@ -2443,6 +2529,157 @@ def _call_sap_upload(items: list[dict]) -> dict:
         return r.json()
     except Exception as e:
         return {"success": False, "error": str(e), "saved_count": 0}
+
+
+# ──────────────────────────────────────────────────────────────
+# 📱 사내 SMS 발송 (direct.dongwon.com 연동)
+# ──────────────────────────────────────────────────────────────
+# ⚠️ 아직 어떤 버튼/엔드포인트에도 연결되어 있지 않습니다. (함수만 준비)
+# ⚠️ 사내망(VPN 또는 사내 PC)에서만 접속 가능한 사이트입니다. 외부망에서는
+#    로그인 페이지만 반환되며(에러 아님), 실제 발송은 사내망 환경에서만 됩니다.
+#
+# 필요 환경변수 (.env):
+#   SMS_API_URL      - 기본값: Send_SMS 엔드포인트 (거의 변경 불필요)
+#   SMS_SENDER_PHONE  - 회신번호 기본값 (예: "02-589-6436")
+#   SMS_COOKIE        - "ASP.NET_SessionId=...; Smart2Application=..."
+#                       ⚠️ 로그인 세션 쿠키라 주기적으로 만료됩니다.
+#                       사내 PC에서 https://direct.dongwon.com 로그인 후
+#                       F12 개발자도구 > Network 탭 > 아무 요청의
+#                       Request Headers > Cookie 값 전체를 복사해서 넣으세요.
+SMS_SERVER_URL = os.getenv(
+    "SMS_SERVER_URL",
+    "https://direct.dongwon.com/website/Common/SMS/SMS_Service.aspx"
+    "?CFN_OpenLayerName=SMS_Service&popupType=popup",
+)
+SMS_API_URL = os.getenv(
+    "SMS_API_URL",
+    "https://direct.dongwon.com/website/Common/SMS/SMS_Service.aspx/Send_SMS",
+)
+SMS_SENDER_PHONE = os.getenv("SMS_SENDER_PHONE", "")
+SMS_COOKIE = os.getenv("SMS_COOKIE", "")
+
+
+def test_sms_server_connection() -> dict:
+    """(진단용) 파이썬 서버 프로세스에서 사내 SMS 서버 접속 가능 여부 테스트.
+
+    이 서버가 사내망(VPN 포함) 밖에 있으면 실패하거나 로그인 페이지만 받습니다.
+    """
+    import httpx
+    try:
+        resp = httpx.get(
+            SMS_SERVER_URL,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                )
+            },
+            follow_redirects=True,
+            timeout=15,
+        )
+        return {"success": True, "status_code": resp.status_code, "body_len": len(resp.text)}
+    except Exception as e:
+        return {"success": False, "status_code": None, "error": str(e)}
+
+
+def send_sms_api_call(
+    receiver_phone: str,
+    message_text: str,
+    callback_phone: str = "",
+    session_cookie: str = "",
+    msg_type: str = "1",
+) -> dict:
+    """사내 SMS 서버(direct.dongwon.com)로 SMS/LMS 1건 발송.
+
+    Args:
+        receiver_phone: 수신자 전화번호 (숫자 이외 문자는 자동 제거)
+        message_text: 발송할 메시지 본문
+        callback_phone: 회신번호 (미지정 시 SMS_SENDER_PHONE, 그마저 없으면 기본값 사용)
+        session_cookie: 세션 쿠키 (미지정 시 SMS_COOKIE 환경변수 사용)
+        msg_type: "1" 단문 SMS, "2" 장문 LMS
+
+    Returns:
+        {"success": bool, "status_code": int|None, "message": str}
+    """
+    import httpx
+    import re as _re
+
+    if not SMS_API_URL:
+        return {"success": False, "status_code": None, "message": "SMS_API_URL 설정이 없습니다."}
+
+    sender_number = callback_phone or SMS_SENDER_PHONE or "02-589-6436"
+    target_phone = _re.sub(r"[^0-9]", "", str(receiver_phone or ""))
+    if not target_phone:
+        return {"success": False, "status_code": None, "message": "수신자 전화번호가 비어있어 발송을 건너뜁니다."}
+
+    payload = {
+        "pNumsCount": "1",
+        "pDstaddr": target_phone,
+        "pMsg": message_text,
+        "pMsgType": msg_type,
+        "pRequestTime": "",
+        "pCallBack": sender_number,
+        "pPath": "",
+    }
+
+    cookie_header = session_cookie or SMS_COOKIE
+    headers = {
+        "Content-Type": "application/json; charset=UTF-8",
+        "Accept": "application/json, text/javascript, */*; q=0.01",
+        "X-Requested-With": "XMLHttpRequest",
+        "Origin": "https://direct.dongwon.com",
+        "Referer": SMS_SERVER_URL,
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        ),
+    }
+    if cookie_header:
+        headers["Cookie"] = cookie_header
+    else:
+        logger.warning("[SMS] 세션 쿠키(SMS_COOKIE)가 없습니다. 인증 오류가 발생할 수 있습니다.")
+
+    try:
+        logger.info("[SMS] 발송 요청 → 수신처=%s, 회신번호=%s", target_phone, sender_number)
+        resp = httpx.post(SMS_API_URL, headers=headers, json=payload, timeout=30)
+        res_text = resp.text
+        if "Error Notice" in res_text or "찾으시려는 웹페이지" in res_text:
+            logger.warning("[SMS] 세션 쿠키 만료/무효로 판단됨 (Error Notice 응답)")
+            return {
+                "success": False,
+                "status_code": resp.status_code,
+                "message": "세션 쿠키(Cookie)가 유효하지 않거나 만료되었습니다. SMS_COOKIE 값을 갱신하세요.",
+            }
+        logger.info("[SMS] 응답 상태=%s", resp.status_code)
+        return {
+            "success": resp.status_code == 200,
+            "status_code": resp.status_code,
+            "message": res_text,
+        }
+    except Exception as e:
+        logger.exception("[SMS] 전송 실패")
+        return {"success": False, "status_code": None, "message": f"SMS API 전송 실패: {e}"}
+
+
+def _get_customer_mobile_phone(customer_code: str) -> str:
+    """고객마스터(T_CUSTOMER_MASTER)에서 SMS 수신용 번호 조회.
+
+    우선순위: 이동전화번호 > 전화번호. customer_code가 없거나 조회 실패 시 빈 문자열 반환.
+    (버튼 연동 전 준비 단계 — 아직 dm_send_with_price 등 어떤 엔드포인트에서도 호출하지 않음)
+    """
+    if not customer_code:
+        return ""
+    try:
+        import main as _m
+        row = _m._fetch_customer_master_by_code(customer_code)
+        if not row:
+            return ""
+        mobile = _m._clean_customer_master_value(row.get("이동전화번호"))
+        phone = _m._clean_customer_master_value(row.get("전화번호"))
+        return mobile or phone or ""
+    except Exception:
+        logger.exception("[SMS] 고객마스터 전화번호 조회 실패: customer_code=%s", customer_code)
+        return ""
 
 
 class _DmSendPayload(BaseModel):

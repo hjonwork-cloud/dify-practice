@@ -11,15 +11,21 @@
 .action-compact-bar .acb-kpi span{font-size:.7rem;color:#6b7280;}
 .action-compact-slider{display:flex;align-items:center;gap:.5rem;flex:1;min-width:200px;}
 .action-compact-slider input[type=range]{flex:1;}
-/* ── 그리드 ── */
-.action-grid{display:grid;grid-template-columns:1fr 2fr;gap:1rem;}
-@media(max-width:900px){.action-grid{grid-template-columns:1fr;}}
-/* ── ACTION TARGET 행 ── */
-.action-target-row{border:1px solid #e5e7eb;border-radius:.5rem;overflow:hidden;margin-bottom:.5rem;}
-.action-target-summary{display:flex;align-items:center;justify-content:space-between;padding:.55rem .75rem;cursor:pointer;background:#fff;gap:.5rem;}
-.action-target-summary:hover{background:#f9fafb;}
-.action-target-summary b{font-size:.9rem;}
-.action-target-summary small{display:block;font-size:.75rem;color:#6b7280;}
+/* ── ACTION TARGETS 통합 테이블 ── */
+.action-table-wrap{overflow-x:auto;}
+.action-target-table{width:100%;border-collapse:collapse;font-size:.85rem;}
+.action-target-table thead th{background:#f3f4f6;padding:.5rem .6rem;text-align:right;font-weight:700;font-size:.78rem;color:#374151;white-space:nowrap;border-bottom:2px solid #e5e7eb;}
+.action-target-table thead th:nth-child(1),.action-target-table thead th:nth-child(2){text-align:left;}
+.action-target-table tbody tr.js-target-row{cursor:pointer;border-top:1px solid #f3f4f6;}
+.action-target-table tbody tr.js-target-row:hover{background:#f9fafb;}
+.action-target-table tbody tr.js-target-row.is-target{background:#fff7ed;}
+.action-target-table tbody tr.js-target-row.is-target:hover{background:#fef3e2;}
+.action-target-table td{padding:.5rem .6rem;vertical-align:middle;}
+.action-target-table td.num{text-align:right;font-variant-numeric:tabular-nums;}
+.action-target-table td.mono{font-size:.75rem;color:#6b7280;}
+.target-badge{display:inline-block;margin-left:.4rem;background:#fed7aa;color:#9a3412;border-radius:.3rem;padding:.05rem .4rem;font-size:.68rem;font-weight:800;vertical-align:middle;}
+.action-detail-row td{padding:0;border-top:none;}
+/* ── ACTION TARGET 토글 버튼 ── */
 .action-toggle-btn{border:0;border-radius:999px;background:#071015;color:#fff;font-weight:900;padding:8px 13px;cursor:pointer;white-space:nowrap;font-size:.82rem;}
 .action-toggle-btn:hover{background:var(--portal-coral,#18b9c7);}
 /* ── 확장 패널 ── */
@@ -140,85 +146,76 @@
   </div>
 </form>
 
-<!-- 메인 그리드: CUSTOMER MIX + ACTION TARGETS -->
-<div class="action-grid">
-
-  <!-- ── CUSTOMER MIX ─────────────────────────────── -->
-  <article class="portal-panel">
-    <div class="portal-panel-head">
-      <div><p class="eyebrow">CUSTOMER MIX</p><h2>가맹점별 범용비중</h2>
-      <p>{{ report.prev_ym }} 기준. 전체 매출 내림차순. {{ report.customers|length }}개 가맹점</p></div>
+<!-- ── ACTION TARGETS 통합 (전체 가맹점 + 액션 실행) ─────────────── -->
+<article class="portal-panel">
+  <div class="portal-panel-head">
+    <div><p class="eyebrow">ACTION TARGETS</p><h2>가맹점별 현황 · 액션 실행</h2>
+    <p>{{ report.prev_ym }} 기준. 전체 {{ report.customers|length }}개 가맹점 · 매출 내림차순 · 제안 대상(범용비중 {{ report.threshold }}% 미만) {{ report.target_count }}건</p></div>
+    <div class="target-sort-actions">
+      <button type="button" class="sap-open-btn" onclick="document.getElementById('sapModal').classList.add('open')">🔧 SAP 브릿지</button>
+      <button type="button" onclick="sortTargets('sales')">매출↓</button>
+      <button type="button" onclick="sortTargets('generic')">범용상품↓</button>
+      <button type="button" onclick="sortTargets('gp')">범용GP↓</button>
+      <button type="button" onclick="sortTargets('reco')">추천품목↓</button>
+      <button type="button" onclick="sortTargets('targetSales')">타겟매출↓</button>
     </div>
-    <div class="portal-bars" id="mixBars">
-      {% for c in report.customers %}
-      <div class="portal-bar-row {% if c.is_target %}target{% endif %}"
-           style="cursor:pointer;" title="{{ c.customer_code }}"
-           onclick="selectTarget('{{ c.customer_code }}','{{ c.customer_name|e }}')">
-        <div class="bar-label">
-          <b>{{ c.customer_name }}</b>
-          <small>{{ c.customer_code }} · {{ '{:,}'.format(c.sales_m) }}백만 · 범용 {{ '{:,}'.format(c.generic_sales_m) }}백만</small>
-        </div>
-        <div class="bar-track"><i style="width:{{ c.generic_ratio }}%"></i><em style="left:{{ report.brand_avg }}%"></em></div>
-        <strong>{{ c.generic_ratio }}%</strong>
-      </div>
-      {% else %}<div class="empty"><b>데이터 없음</b></div>{% endfor %}
-    </div>
-    {% if report.customers|length > 10 %}
-    <nav class="portal-pagination" id="mixPager">
-      <button type="button" onclick="mixPage(-1)">이전</button>
-      <b><span id="mixCur">1</span> / <span id="mixTot">1</span></b>
-      <button type="button" onclick="mixPage(1)">다음</button>
-    </nav>
-    {% endif %}
-  </article>
+  </div>
 
-  <!-- ── ACTION TARGETS ─────────────────────────────── -->
-  <aside class="portal-panel">
-    <div class="portal-panel-head">
-      <div><p class="eyebrow">ACTION TARGETS</p><h2>제안 대상 · 액션 실행</h2>
-      <p>범용비중 {{ report.threshold }}% 미만. {{ report.target_count }}건</p></div>
-      <div class="target-sort-actions">
-        <button type="button" class="sap-open-btn" onclick="document.getElementById('sapModal').classList.add('open')">🔧 SAP 브릿지</button>
-        <button type="button" onclick="sortTargets('sales')">매출↓</button>
-        <button type="button" onclick="sortTargets('ratio')">범용↓</button>
-      </div>
-    </div>
+  <div class="action-table-wrap">
+    <table class="action-target-table">
+      <thead>
+        <tr>
+          <th>가맹점코드</th><th>가맹점명</th><th>매출액(백만)</th><th>전용상품(백만)</th>
+          <th>범용상품(백만)</th><th>범용GP%</th><th>추천품목</th><th>타겟매출액(백만)</th><th></th>
+        </tr>
+      </thead>
+      <tbody id="targetTableBody">
+        {% for c in report.customers %}
+        <tr class="js-target-row {% if c.is_target %}is-target{% endif %}"
+            data-code="{{ c.customer_code }}"
+            data-name="{{ c.customer_name|e }}"
+            data-sales="{{ c.sales_m }}"
+            data-dedicated="{{ c.dedicated_sales_m }}"
+            data-generic="{{ c.generic_sales_m }}"
+            data-gp="{{ c.generic_gp_pct }}"
+            data-reco="{{ c.reco_count }}"
+            data-target-sales="{{ c.proposal_possible_sales_m }}"
+            data-ratio="{{ c.generic_ratio }}"
+            data-gap="{{ c.gap }}"
+            data-detail-url="/portal/target-detail?brand={{ report.brand.brand_name|urlencode }}&customer_code={{ c.customer_code|urlencode }}"
+            data-open="0" data-loaded="0" onclick="toggleTarget(this)">
+          <td class="mono">{{ c.customer_code }}</td>
+          <td><b>{{ c.customer_name }}</b>{% if c.is_target %}<span class="target-badge">타겟</span>{% endif %}</td>
+          <td class="num">{{ '{:,}'.format(c.sales_m) }}</td>
+          <td class="num">{{ '{:,}'.format(c.dedicated_sales_m) }}</td>
+          <td class="num">{{ '{:,}'.format(c.generic_sales_m) }}</td>
+          <td class="num">{{ c.generic_gp_pct }}%</td>
+          <td class="num">{{ c.reco_count }}</td>
+          <td class="num">{{ '{:,}'.format(c.proposal_possible_sales_m) }}</td>
+          <td><button type="button" class="action-toggle-btn">▶ 액션 실행</button></td>
+        </tr>
+        <tr class="action-detail-row" hidden>
+          <td colspan="9">
+            <div class="action-panel" data-target-body>
+              <div class="empty" style="font-size:.82rem;">추천상품과 액션 옵션을 불러오는 중...</div>
+            </div>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="9"><div class="empty"><b>가맹점 데이터 없음</b></div></td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 
-    <div id="targetList">
-      {% for c in report.targets %}
-      <div class="action-target-row js-target-row"
-           data-code="{{ c.customer_code }}"
-           data-name="{{ c.customer_name|e }}"
-           data-sales="{{ c.sales_m }}"
-           data-ratio="{{ c.generic_ratio }}"
-           data-gap="{{ c.gap }}"
-           data-detail-url="/portal/target-detail?brand={{ report.brand.brand_name|urlencode }}&customer_code={{ c.customer_code|urlencode }}"
-           data-open="0" data-loaded="0">
-        <div class="action-target-summary" onclick="toggleTarget(this.closest('.action-target-row'))">
-          <div>
-            <b>{{ c.customer_name }}</b>
-            <small>{{ c.customer_code }} · 범용 {{ c.generic_ratio }}% · Gap {{ c.gap }}%p · 효과 {{ '{:,}'.format(c.proposal_possible_sales_m) }}백만</small>
-          </div>
-          <button type="button" class="action-toggle-btn">▶ 액션 실행</button>
-        </div>
-        <div class="action-panel" hidden data-target-body>
-          <div class="empty" style="font-size:.82rem;">추천상품과 액션 옵션을 불러오는 중...</div>
-        </div>
-      </div>
-      {% else %}
-      <div class="empty"><b>제안 대상 없음</b><span>슬라이더 기준 미만의 가맹점이 없습니다.</span></div>
-      {% endfor %}
-    </div>
-
-    {% if report.target_count > 10 %}
-    <nav class="portal-pagination" id="targetPager">
-      <button type="button" onclick="targetPage(-1)">이전</button>
-      <b><span id="targetCur">1</span> / <span id="targetTot">1</span></b>
-      <button type="button" onclick="targetPage(1)">다음</button>
-    </nav>
-    {% endif %}
-  </aside>
-</div><!-- /action-grid -->
+  {% if report.customers|length > 10 %}
+  <nav class="portal-pagination" id="targetPager">
+    <button type="button" onclick="targetPage(-1)">이전</button>
+    <b><span id="targetCur">1</span> / <span id="targetTot">1</span></b>
+    <button type="button" onclick="targetPage(1)">다음</button>
+  </nav>
+  {% endif %}
+</article>
 
 <script>
 (function(){
@@ -227,66 +224,61 @@
   const brandAvg    = {{ report.brand_avg }};
   const threshold   = {{ report.threshold }};
 
-  // ─── CUSTOMER MIX 페이저 ───────────────────────────
+  // ─── ACTION TARGETS 페이저 (전체 가맹점, 10개씩) ───
   const perPage = 10;
-  let mixCurrentPage = 1;
-  function mixPage(delta) {
-    const rows = Array.from(document.querySelectorAll('#mixBars .portal-bar-row'));
-    const total = Math.max(1, Math.ceil(rows.length / perPage));
-    mixCurrentPage = Math.min(Math.max(1, mixCurrentPage + delta), total);
-    const start = (mixCurrentPage - 1) * perPage;
-    rows.forEach((r, i) => { r.style.display = (i >= start && i < start + perPage) ? '' : 'none'; });
-    const cur = document.getElementById('mixCur'), tot = document.getElementById('mixTot');
-    if (cur) cur.textContent = mixCurrentPage;
-    if (tot) tot.textContent = total;
-  }
-  mixPage(0);
-
-  // ─── ACTION TARGETS 페이저 ─────────────────────────
   let targetCurrentPage = 1;
   function targetPage(delta) {
-    const rows = Array.from(document.querySelectorAll('.js-target-row'));
+    const rows = Array.from(document.querySelectorAll('#targetTableBody > tr.js-target-row'));
     const total = Math.max(1, Math.ceil(rows.length / perPage));
     targetCurrentPage = Math.min(Math.max(1, targetCurrentPage + delta), total);
     const start = (targetCurrentPage - 1) * perPage;
-    rows.forEach((r, i) => { r.style.display = (i >= start && i < start + perPage) ? '' : 'none'; });
+    rows.forEach((r, i) => {
+      const show = i >= start && i < start + perPage;
+      r.style.display = show ? '' : 'none';
+      const detail = r.nextElementSibling;
+      if (detail && detail.classList.contains('action-detail-row')) {
+        if (!show) {
+          detail.hidden = true; detail.style.display = 'none'; r.dataset.open = '0';
+          const btn = r.querySelector('.action-toggle-btn');
+          if (btn) btn.textContent = '▶ 액션 실행';
+        } else {
+          detail.style.display = '';
+        }
+      }
+    });
     const cur = document.getElementById('targetCur'), tot = document.getElementById('targetTot');
     if (cur) cur.textContent = targetCurrentPage;
     if (tot) tot.textContent = total;
   }
   targetPage(0);
   window.targetPage = targetPage;
-  window.mixPage = mixPage;
 
   // ─── 정렬 ──────────────────────────────────────────
   window.sortTargets = function(key) {
-    const list = document.getElementById('targetList');
-    const rows = Array.from(document.querySelectorAll('.js-target-row'));
+    const tbody = document.getElementById('targetTableBody');
+    const rows = Array.from(tbody.querySelectorAll('tr.js-target-row'));
     rows.sort((a, b) => Number(b.dataset[key] || 0) - Number(a.dataset[key] || 0));
-    rows.forEach(r => list.appendChild(r));
+    rows.forEach(r => {
+      const detail = r.nextElementSibling;
+      tbody.appendChild(r);
+      if (detail && detail.classList.contains('action-detail-row')) tbody.appendChild(detail);
+    });
     targetPage(0);
-  };
-
-  // ─── CUSTOMER MIX 클릭 → 해당 TARGET 스크롤 ───────
-  window.selectTarget = function(code, name) {
-    const row = document.querySelector(`.js-target-row[data-code="${code}"]`);
-    if (!row) return;
-    row.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    row.style.outline = '2px solid #16a34a';
-    setTimeout(() => { row.style.outline = ''; }, 2000);
   };
 
   // ─── 토글 ──────────────────────────────────────────
   window.toggleTarget = async function(row) {
     const isOpen = row.dataset.open === '1';
-    const body = row.querySelector('[data-target-body]');
+    const detailRow = row.nextElementSibling;
+    if (!detailRow || !detailRow.classList.contains('action-detail-row')) return;
+    const body = detailRow.querySelector('[data-target-body]');
     const btn  = row.querySelector('.action-toggle-btn');
     if (isOpen) {
-      body.hidden = true; row.dataset.open = '0';
+      detailRow.hidden = true; row.dataset.open = '0';
       btn.textContent = '▶ 액션 실행';
       return;
     }
-    body.hidden = false; row.dataset.open = '1';
+    detailRow.hidden = false; row.dataset.open = '1';
     btn.textContent = '▼ 닫기';
     if (row.dataset.loaded === '1') return;
     try {
