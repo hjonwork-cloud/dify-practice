@@ -160,7 +160,12 @@
   <div class="acb-kpi"><strong>{{ report.target_count }}</strong><span>제안 대상</span></div>
   <div class="acb-kpi"><strong>{{ report.threshold }}%</strong><span>현재 기준</span></div>
   <div class="acb-kpi"><strong>{{ report.generic_gp_rate }}%</strong><span>범용GP율</span></div>
-  <div class="acb-kpi"><strong>{{ '{:,}'.format(report.proposal_possible_sales_m) }}백만</strong><span>제안효과</span></div>
+  <div class="acb-kpi" title="제안 대상 가맹점의 범용비중을 브랜드 평균까지 끌어올리는 데 필요한 매출액 합계">
+    <strong>{{ '{:,}'.format(report.proposal_possible_sales_m) }}백만</strong><span>제안효과(타겟매출)</span>
+  </div>
+  <div class="acb-kpi" title="제안 대상 가맹점이 아직 없는 추천상품을 다른 가맹점 평균 수준으로 채택했을 때 기대되는 매출액 합계">
+    <strong>{{ '{:,}'.format(report.opportunity_effect_m) }}백만</strong><span>제안효과(기회매출)</span>
+  </div>
   <div class="action-compact-slider">
     <span style="font-size:.75rem;color:#6b7280;">기준 슬라이더</span>
     <input type="range" name="threshold" min="0" max="{{ report.threshold_max }}" step="0.1" value="{{ report.threshold }}"

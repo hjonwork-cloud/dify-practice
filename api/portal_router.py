@@ -2208,9 +2208,13 @@ def _enrich_action_targets(report: dict, brand_name: str) -> None:
     - phone                 : 고객마스터(T_CUSTOMER_MASTER) 이동전화번호/전화번호 — DM 발송 확인
                              팝업의 수신번호 기본값. 가맹점별로 매번 조회하지 않고 화면에 표시되는
                              전체 가맹점코드에 대해 1회 배치 조회한다(팝업 오픈 시 실시간 조회가
-                             느리거나 응답이 없는 문제를 피하기 위함)."""
+                             느리거나 응답이 없는 문제를 피하기 위함).
+    - report['opportunity_effect_m'] : 제안 대상(is_target=True) 가맹점들의 opportunity_sales_m 합계
+                             (백만원, 정수) — report['proposal_possible_sales_m'](타겟매출액 합계)와
+                             나란히 요약바에 함께 표시하는 용도."""
     customers = report.get("customers") or []
     if not customers:
+        report["opportunity_effect_m"] = 0
         return
     selected_ym = report.get("selected_ym") or ""
     months = report.get("period_months") or []
@@ -2220,6 +2224,7 @@ def _enrich_action_targets(report: dict, brand_name: str) -> None:
             c["reco_count"] = 0
             c["opportunity_sales_m"] = 0.0
             c["phone"] = ""
+        report["opportunity_effect_m"] = 0
         return
     import main
     bcode = str((report.get("brand") or {}).get("brand_code") or "")
@@ -2359,6 +2364,7 @@ def _enrich_action_targets(report: dict, brand_name: str) -> None:
             phone = main._clean_customer_master_value(r.get("phone"))
             phone_map[str(r.get("customer_code") or "")] = mobile or phone or ""
 
+    opportunity_effect_raw = 0.0
     for c in customers:
         code = str(c.get("customer_code") or "")
         c["generic_gp_pct"] = gp_map.get(code, 0)
@@ -2371,6 +2377,12 @@ def _enrich_action_targets(report: dict, brand_name: str) -> None:
         total_expected_raw = target_total_sales_raw * max(0.0, total_all_factor - owned_factor)
         c["opportunity_sales_m"] = _money_m2(total_expected_raw)
         c["phone"] = phone_map.get(code, "")
+        # 브랜드 전체 기회매출 효과 합계는 report['proposal_possible_sales_m'](타겟매출 효과)와
+        # 동일하게 "제안 대상"(is_target=True) 가맹점만 스코프로 집계 — 두 지표를 같은 모집단
+        # 위에서 비교할 수 있게 하기 위함.
+        if c.get("is_target"):
+            opportunity_effect_raw += total_expected_raw
+    report["opportunity_effect_m"] = _money_m(opportunity_effect_raw)
 
 
 @router.get("/brand-report/action", response_class=HTMLResponse)
