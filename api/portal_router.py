@@ -841,6 +841,10 @@ def _pick_brand(brand_name: str | None, emp_code: str = _DEFAULT_EMP_CODE) -> di
     return brands[0]
 
 
+# 추천상품에 포함되기 위한 최소 "타매장 사용률"(%) 기준치. 이 값 미만은 추천/기회매출액 계산에서 제외된다.
+ADOPTION_RATE_MIN = 30.0
+
+
 def _recommend_products(
     brand_name: str, customer_code: str, months: list[str], emp_code: str = _DEFAULT_EMP_CODE,
     target_total_sales_m: float = 0.0,
@@ -851,6 +855,7 @@ def _recommend_products(
     (예상 기회매출액) 내림차순. 단순히 다른 가맹점 채택 수/GP율이 아니라,
     실제 채택 가맹점들의 (사용수량 ÷ 그 가맹점 전체매출) 평균 원단위 사용강도를
     이 가맹점의 전체매출 규모에 대입해 예상사용수량·예상기회매출을 추정한다.
+    타매장 사용률(adoption_rate)이 ADOPTION_RATE_MIN(%) 미만인 상품은 제외한다.
     """
     import main
     target_total_sales_raw = float(target_total_sales_m or 0) * 10_000.0  # 백만원 → raw(100원 단위)
@@ -928,6 +933,8 @@ def _recommend_products(
         avg_unit_sales_raw = (sales / total_qty) if total_qty > 0 else 0
         expected_sales_m = _money_m2(expected_qty * avg_unit_sales_raw)
         adoption_rate = round(adopter_count / total_franchises * 100, 1) if total_franchises > 0 else 0.0
+        if total_franchises > 0 and adoption_rate < ADOPTION_RATE_MIN:
+            continue  # 타매장 사용률 기준치 미만 상품은 추천에서 제외
         result.append({
             **r,
             "sales_m":          _money_m(sales),
@@ -2190,11 +2197,14 @@ async def target_detail(request: Request, brand: str = "", customer_code: str = 
 
 def _enrich_action_targets(report: dict, brand_name: str) -> None:
     """ACTION TARGETS 통합 화면 전용 보강: report['customers'] 각 항목(딕셔너리, 리스트 슬라이싱으로
-    customer_page 등과 참조 공유됨)에 in-place 로 두 필드를 추가한다.
-    - generic_gp_pct : 가맹점별 범용상품 GP%(선택월 기준)
-    - reco_count     : 추천대상품목 개수 근사치 = (브랜드 전체 범용상품 유니버스) - (가맹점 보유 상품)
-      (target-detail 클릭 시 실제로 뜨는 _recommend_products() 의 LIMIT 200 목록과 동일한 후보군 기준으로,
-       정확한 개수 대신 경량 집계 쿼리 2건으로 근사치를 낸다 — 가맹점 수만큼 반복 쿼리하지 않기 위함)"""
+    customer_page 등과 참조 공유됨)에 in-place 로 필드를 추가한다.
+    - generic_gp_pct       : 가맹점별 범용상품 GP%(선택월 기준)
+    - reco_count           : 추천대상품목 개수(타매장 사용률 ADOPTION_RATE_MIN% 이상인 상품만 집계,
+                             _recommend_products() 와 동일한 후보군 기준)
+    - opportunity_sales_m  : 가맹점별 기회매출액 합계(백만원, 소수점 2자리) — 추천 후보 상품별
+                             (사용강도 × 이 가맹점 매출규모 × 평균단가) 를 모두 합산한 값.
+      (가맹점 수만큼 무거운 정렬 쿼리를 반복하지 않기 위해, 상품별 집계를 1회만 계산한 뒤
+       가맹점별로는 이미 계산된 owned_map 차집합에 대해서만 가볍게 합산한다)"""
     customers = report.get("customers") or []
     if not customers:
         return
@@ -2204,6 +2214,7 @@ def _enrich_action_targets(report: dict, brand_name: str) -> None:
         for c in customers:
             c["generic_gp_pct"] = 0
             c["reco_count"] = 0
+            c["opportunity_sales_m"] = 0.0
         return
     import main
     bcode = str((report.get("brand") or {}).get("brand_code") or "")
@@ -2233,7 +2244,7 @@ def _enrich_action_targets(report: dict, brand_name: str) -> None:
         gc = float(r.get("generic_cost") or 0)
         gp_map[str(r.get("customer_code") or "")] = round((gs - gc) / gs * 100, 1) if gs > 0 else 0
 
-    # ② 추천대상품목 개수 근사치
+    # ② 가맹점별 보유 상품 (추천 후보 제외 기준)
     try:
         owned_rows = _q(f"""
             SELECT DISTINCT `거래처` AS customer_code, `자재` AS product_code
@@ -2248,29 +2259,81 @@ def _enrich_action_targets(report: dict, brand_name: str) -> None:
     owned_map: dict = {}
     for r in owned_rows:
         owned_map.setdefault(str(r.get("customer_code") or ""), set()).add(str(r.get("product_code") or ""))
+
+    # ③ 브랜드 전체 가맹점 수 (사용률 분모)
     try:
-        universe_rows = _q(f"""
-            SELECT `자재` AS product_code
+        total_fr_rows = _q(f"""
+            SELECT COUNT(DISTINCT `거래처`) AS total
             FROM {main.T_MAIN}
             WHERE {_brand_where}
-              AND `년월` IN ({_in_months(months)})
-              AND `자재그룹명` IS NOT NULL
-              AND COALESCE(`자재그룹명`, '') <> 'FC전용상품'{_div_where}
-            GROUP BY `자재`
-            HAVING SUM(`매출액`) > 0
+              AND `년월` IN ({_in_months(months)}){_div_where}
+        """) or []
+        total_franchises = int((total_fr_rows[0] or {}).get("total") or 0) if total_fr_rows else 0
+    except Exception:
+        total_franchises = 0
+
+    # ④ 상품별 집계 (채택 가맹점 수 / 사용강도 / 평균단가) — 가맹점 전체에 대해 1회만 계산
+    try:
+        product_agg_rows = _q(f"""
+            WITH customer_totals AS (
+                SELECT `거래처` AS customer_code, SUM(`매출액`) AS cust_total_sales
+                FROM {main.T_MAIN}
+                WHERE {_brand_where}
+                  AND `년월` IN ({_in_months(months)}){_div_where}
+                GROUP BY `거래처`
+            ),
+            product_customer AS (
+                SELECT `자재` AS product_code, `거래처` AS customer_code,
+                       SUM(`매출액`) AS cust_sales,
+                       SUM(COALESCE(`매출수량`, 0)) AS cust_qty
+                FROM {main.T_MAIN}
+                WHERE {_brand_where}
+                  AND `년월` IN ({_in_months(months)})
+                  AND `자재그룹명` IS NOT NULL
+                  AND COALESCE(`자재그룹명`, '') <> 'FC전용상품'{_div_where}
+                GROUP BY `자재`, `거래처`
+            )
+            SELECT pc.product_code,
+                   COUNT(DISTINCT pc.customer_code) AS adopter_count,
+                   SUM(pc.cust_sales) AS sales,
+                   SUM(pc.cust_qty) AS total_qty,
+                   AVG(CASE WHEN ct.cust_total_sales > 0 THEN pc.cust_qty / ct.cust_total_sales ELSE NULL END) AS qty_intensity
+            FROM product_customer pc
+            JOIN customer_totals ct ON pc.customer_code = ct.customer_code
+            GROUP BY pc.product_code
+            HAVING SUM(pc.cust_sales) > 0
         """) or []
     except Exception:
-        universe_rows = []
-    universe_set = {str(r.get("product_code") or "") for r in universe_rows}
+        product_agg_rows = []
+
+    # 타매장 사용률(%) >= ADOPTION_RATE_MIN 인 상품만 추천 후보 유니버스에 포함
+    per_product_factor: dict = {}   # product_code -> qty_intensity * avg_unit_sales_raw
+    universe_set: set = set()
+    for r in product_agg_rows:
+        pcode = str(r.get("product_code") or "")
+        adopter_count = int(r.get("adopter_count") or 0)
+        adoption_rate = round(adopter_count / total_franchises * 100, 1) if total_franchises > 0 else 0.0
+        if total_franchises > 0 and adoption_rate < ADOPTION_RATE_MIN:
+            continue
+        sales = float(r.get("sales") or 0)
+        total_qty = float(r.get("total_qty") or 0)
+        qty_intensity = float(r.get("qty_intensity") or 0)
+        avg_unit_sales_raw = (sales / total_qty) if total_qty > 0 else 0.0
+        universe_set.add(pcode)
+        per_product_factor[pcode] = qty_intensity * avg_unit_sales_raw
+    total_all_factor = sum(per_product_factor.values())
 
     for c in customers:
         code = str(c.get("customer_code") or "")
         c["generic_gp_pct"] = gp_map.get(code, 0)
-        # _recommend_products() 는 동일 후보군(차집합)에서 예상기회매출 순 정렬 후
-        # SQL LIMIT 200 으로 후보를 추린다(더 이상 30건으로 자르지 않음). 여기서는
-        # 가맹점마다 그 무거운 정렬 쿼리를 다시 돌리지 않기 위해 후보군 크기만 근사
-        # 계산하되, 클릭 시 실제로 뜨는 개수(최대 200건)와 일치하도록 상한을 맞춘다.
-        c["reco_count"] = min(len(universe_set - owned_map.get(code, set())), 200)
+        owned = owned_map.get(code, set())
+        # 추천대상품목 개수: (타매장 사용률 기준치 이상 상품 유니버스) - (가맹점 보유 상품)
+        c["reco_count"] = len(universe_set - owned)
+        # 기회매출액 합계: target_total_sales_raw × Σ(qty_intensity × avg_unit_sales_raw) (보유 상품 제외)
+        owned_factor = sum(per_product_factor.get(pc, 0.0) for pc in owned if pc in per_product_factor)
+        target_total_sales_raw = float(c.get("sales_m") or 0) * 10_000.0
+        total_expected_raw = target_total_sales_raw * max(0.0, total_all_factor - owned_factor)
+        c["opportunity_sales_m"] = _money_m2(total_expected_raw)
 
 
 @router.get("/brand-report/action", response_class=HTMLResponse)
