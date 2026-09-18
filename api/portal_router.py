@@ -2203,7 +2203,10 @@ def _enrich_action_targets(report: dict, brand_name: str) -> None:
     for c in customers:
         code = str(c.get("customer_code") or "")
         c["generic_gp_pct"] = gp_map.get(code, 0)
-        c["reco_count"] = len(universe_set - owned_map.get(code, set()))
+        # _recommend_products() 는 동일 후보군(차집합)에서 adopter_count/GP율/매출 순 정렬 후
+        # LIMIT 30 으로 자른다. 여기서는 가맹점마다 그 무거운 정렬 쿼리를 다시 돌리지 않기 위해
+        # 후보군 크기만 근사 계산하되, 클릭 시 실제로 뜨는 개수(최대 30건)와 일치하도록 상한을 맞춘다.
+        c["reco_count"] = min(len(universe_set - owned_map.get(code, set())), 30)
 
 
 @router.get("/brand-report/action", response_class=HTMLResponse)
