@@ -830,8 +830,28 @@ def _pick_brand(brand_name: str | None, emp_code: str = _DEFAULT_EMP_CODE) -> di
     return brands[0]
 
 
-def _recommend_products(brand_name: str, customer_code: str, months: list[str], emp_code: str = _DEFAULT_EMP_CODE) -> list[dict]:
+def _recommend_products(
+    brand_name: str, customer_code: str, months: list[str], emp_code: str = _DEFAULT_EMP_CODE,
+    target_total_sales_m: float = 0.0,
+) -> list[dict]:
+    """가맹점(customer_code)이 아직 쓰지 않는 범용상품 추천 목록.
+
+    정렬 기준: 이 가맹점의 매출 규모를 가정했을 때 "얼마나 써야 하는 상품인지"
+    (예상 기회매출액) 내림차순. 단순히 다른 가맹점 채택 수/GP율이 아니라,
+    실제 채택 가맹점들의 (사용수량 ÷ 그 가맹점 전체매출) 평균 원단위 사용강도를
+    이 가맹점의 전체매출 규모에 대입해 예상사용수량·예상기회매출을 추정한다.
+    """
     import main
+    target_total_sales_raw = float(target_total_sales_m or 0) * 10_000.0  # 백만원 → raw(100원 단위)
+
+    total_fr_rows = _q(f"""
+        SELECT COUNT(DISTINCT `거래처`) AS total
+        FROM {main.T_MAIN}
+        WHERE `ZC본부명` = {_sql(brand_name)}
+          AND `년월` IN ({_in_months(months)})
+    """)
+    total_franchises = int((total_fr_rows[0] or {}).get("total") or 0) if total_fr_rows else 0
+
     rows = _q(f"""
         WITH target_products AS (
             SELECT DISTINCT `자재`
@@ -841,44 +861,75 @@ def _recommend_products(brand_name: str, customer_code: str, months: list[str], 
               AND `년월` IN ({_in_months(months)})
               AND `자재그룹명` IS NOT NULL
               AND COALESCE(`자재그룹명`, '') <> 'FC전용상품'
+        ),
+        customer_totals AS (
+            SELECT `거래처` AS customer_code, SUM(`매출액`) AS cust_total_sales
+            FROM {main.T_MAIN}
+            WHERE `ZC본부명` = {_sql(brand_name)}
+              AND `년월` IN ({_in_months(months)})
+            GROUP BY `거래처`
+        ),
+        product_customer AS (
+            SELECT `자재` AS product_code,
+                   MAX(`자재명`) AS product_name,
+                   `거래처` AS customer_code,
+                   SUM(`매출액`) AS cust_sales,
+                   SUM(COALESCE(`매출수량`, 0)) AS cust_qty,
+                   SUM(COALESCE(`매출원가`, 0)) AS cust_cost
+            FROM {main.T_MAIN}
+            WHERE `ZC본부명` = {_sql(brand_name)}
+              AND `년월` IN ({_in_months(months)})
+              AND `자재그룹명` IS NOT NULL
+              AND COALESCE(`자재그룹명`, '') <> 'FC전용상품'
+              AND `거래처` <> {_sql(customer_code)}
+              AND `자재` NOT IN (SELECT `자재` FROM target_products)
+            GROUP BY `자재`, `거래처`
         )
-        SELECT `자재` AS product_code,
-               MAX(`자재명`) AS product_name,
-               COUNT(DISTINCT `거래처`) AS adopter_count,
-               SUM(`매출액`) AS sales,
-               SUM(COALESCE(`매출수량`, 0)) AS total_qty,
-               SUM(COALESCE(`매출원가`, 0)) AS total_cost,
-               CASE WHEN SUM(`매출액`) = 0 THEN 0
-                    ELSE (SUM(`매출액`) - SUM(COALESCE(`매출원가`, 0))) / SUM(`매출액`) END AS gp_rate
-        FROM {main.T_MAIN}
-        WHERE `ZC본부명` = {_sql(brand_name)}
-          AND `년월` IN ({_in_months(months)})
-          AND `자재그룹명` IS NOT NULL
-          AND COALESCE(`자재그룹명`, '') <> 'FC전용상품'
-          AND `거래처` <> {_sql(customer_code)}
-          AND `자재` NOT IN (SELECT `자재` FROM target_products)
-        GROUP BY `자재`
-        HAVING SUM(`매출액`) > 0
-        ORDER BY adopter_count DESC, gp_rate DESC, sales DESC
-        LIMIT 30
+        SELECT pc.product_code,
+               MAX(pc.product_name) AS product_name,
+               COUNT(DISTINCT pc.customer_code) AS adopter_count,
+               SUM(pc.cust_sales) AS sales,
+               SUM(pc.cust_qty) AS total_qty,
+               SUM(pc.cust_cost) AS total_cost,
+               CASE WHEN SUM(pc.cust_sales) = 0 THEN 0
+                    ELSE (SUM(pc.cust_sales) - SUM(pc.cust_cost)) / SUM(pc.cust_sales) END AS gp_rate,
+               AVG(CASE WHEN ct.cust_total_sales > 0 THEN pc.cust_qty / ct.cust_total_sales ELSE NULL END) AS qty_intensity
+        FROM product_customer pc
+        JOIN customer_totals ct ON pc.customer_code = ct.customer_code
+        GROUP BY pc.product_code
+        HAVING SUM(pc.cust_sales) > 0
+        ORDER BY sales DESC
+        LIMIT 200
     """)
     result = []
     for r in rows:
-        sales      = float(r.get("sales") or 0)
-        total_qty  = float(r.get("total_qty") or 0)
-        total_cost = float(r.get("total_cost") or 0)
+        sales         = float(r.get("sales") or 0)
+        total_qty     = float(r.get("total_qty") or 0)
+        total_cost    = float(r.get("total_cost") or 0)
+        adopter_count = int(r.get("adopter_count") or 0)
+        qty_intensity = float(r.get("qty_intensity") or 0)
         # 단가/원가 단위 계산: raw 매출액 1단위 = 100원 (SUM/10,000 = 백만원 기준)
         # → 원(₩) 단위로 변환하려면 ×100 필요
         unit_price = round(sales / total_qty * 100)       if total_qty > 0 else 0
         unit_cost  = round(total_cost / total_qty * 100)  if total_qty > 0 else 0
+        # 예상사용수량 = (채택 가맹점 평균 사용강도: 수량÷전체매출) × 이 가맹점 전체매출
+        expected_qty = max(0, round(qty_intensity * target_total_sales_raw)) if target_total_sales_raw > 0 else 0
+        avg_unit_sales_raw = (sales / total_qty) if total_qty > 0 else 0
+        expected_sales_m = _money_m(expected_qty * avg_unit_sales_raw)
+        adoption_rate = round(adopter_count / total_franchises * 100, 1) if total_franchises > 0 else 0.0
         result.append({
             **r,
-            "sales_m":    _money_m(sales),
-            "gp_pct":     _pct(r.get("gp_rate")),
-            "unit_price": unit_price,   # 평균 단가 (₩)
-            "unit_cost":  unit_cost,    # 평균 단가 원가 (₩)
+            "sales_m":          _money_m(sales),
+            "gp_pct":           _pct(r.get("gp_rate")),
+            "unit_price":       unit_price,   # 평균 단가 (₩)
+            "unit_cost":        unit_cost,    # 평균 단가 원가 (₩)
+            "adoption_rate":    adoption_rate,     # 가맹점 사용률(%) = 채택 가맹점 수 / 전체 가맹점 수
+            "expected_qty":     int(expected_qty),  # 이 가맹점 예상사용수량
+            "expected_sales_m": expected_sales_m,   # 이 가맹점 기회매출액(백만원)
         })
-    return result
+    # 이 가맹점 매출 규모 기준 "많이 써야 하는 상품" 순 → 예상기회매출 내림차순
+    result.sort(key=lambda x: (-(x.get("expected_sales_m") or 0), -(x.get("adopter_count") or 0), -(x.get("gp_pct") or 0)))
+    return result[:30]
 
 
 def _dm_message(brand_name: str, customer: dict, brand_avg: float, products: list[dict]) -> str:
@@ -2100,7 +2151,8 @@ async def target_detail(request: Request, brand: str = "", customer_code: str = 
     if not customer:
         raise HTTPException(status_code=404, detail="customer_not_found")
     bname = str((report.get("brand") or {}).get("brand_name") or brand)
-    products = _recommend_products(bname, code, report.get("period_months") or [], user["emp_code"])
+    products = _recommend_products(bname, code, report.get("period_months") or [], user["emp_code"],
+                                    target_total_sales_m=float(customer.get("sales_m") or 0))
 
     # plant_code: 사전계산 테이블 우선, fallback 실시간
     plant_code = str(customer.get("plant_code") or "")

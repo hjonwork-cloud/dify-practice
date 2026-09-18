@@ -330,7 +330,7 @@
     const tbl = document.createElement('table');
     tbl.className = 'price-table';
     tbl.innerHTML = `<thead><tr>
-      <th>상품코드</th><th>상품명</th><th>현재GP%</th>
+      <th>상품코드</th><th>상품명</th><th>사용률</th><th>예상수량</th><th>기회매출(백만)</th><th>현재GP%</th>
       <th>현재단가(₩)</th><th>원가(₩)</th><th>설정판가(₩)</th><th>목표GP%</th><th></th>
     </tr></thead>`;
     const tbody = document.createElement('tbody');
@@ -344,11 +344,17 @@
       const gp        = parseFloat(p.gp_pct    || 0).toFixed(1);
       const unitPrice = parseInt(p.unit_price  || 0, 10);
       const unitCost  = parseInt(p.unit_cost   || 0, 10);
+      const adoptionRate  = p.adoption_rate    || 0;
+      const expectedQty   = p.expected_qty     || 0;
+      const expectedSales = p.expected_sales_m || 0;
       const tr = document.createElement('tr');
       tr.dataset.rowIdx = i;
       tr.innerHTML = `
         <td style="font-size:.72rem;color:#6b7280;">${p.product_code || ''}</td>
         <td style="text-align:left;font-size:.78rem;">${p.product_name || p.product_code || ''}</td>
+        <td style="text-align:center;font-size:.78rem;color:#6b7280;">${adoptionRate}%</td>
+        <td style="text-align:right;font-size:.78rem;">${expectedQty ? expectedQty.toLocaleString() : '-'}</td>
+        <td style="text-align:right;font-size:.78rem;color:#0369a1;font-weight:700;">${expectedSales ? expectedSales.toLocaleString() : '-'}</td>
         <td><span class="gp-chip neutral">${gp}%</span></td>
         <td style="color:#6b7280;font-size:.78rem;">${unitPrice ? unitPrice.toLocaleString() : '-'}</td>
         <td><input type="number" id="cost_${pid}" value="${unitCost || ''}" placeholder="원가" min="0" step="1"
@@ -765,6 +771,7 @@
       <td><input type="text" id="matnr_${pid}" placeholder="상품코드" style="width:72px;"
            oninput="this.closest('tr').querySelector('[data-matnr]').dataset.matnr=this.value"></td>
       <td style="text-align:left;"><input type="text" placeholder="상품명" style="width:90px;border:1px solid #d1d5db;border-radius:.3rem;padding:.2rem .3rem;font-size:.78rem;"></td>
+      <td>-</td><td>-</td><td>-</td>
       <td>-</td><td>-</td>
       <td><input type="number" id="cost_${pid}" placeholder="원가" min="0" step="1" style="width:72px;border:1px solid #d1d5db;border-radius:.3rem;padding:.2rem .3rem;font-size:.78rem;"
            oninput="recalcFromCost('${pid}')"></td>
