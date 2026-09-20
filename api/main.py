@@ -93,9 +93,16 @@ app.router.lifespan_context = _lifespan
 from fastapi.responses import JSONResponse as _JSONResponse, RedirectResponse as _RedirectResponse
 from fastapi.exceptions import HTTPException as _HTTPExc
 
+@app.get("/", include_in_schema=False)
+async def _root_redirect():
+    """루트("/")로 접속 시 포털로 이동. 로그인 여부는 /portal 자체에서(포털 홈 라우터 → _require_user)
+    판단하며, 미로그인 상태면 아래 _portal_auth_redirect 핸들러가 /portal/login 으로 다시 리다이렉트한다."""
+    return _RedirectResponse(url="/portal", status_code=302)
+
 @app.exception_handler(_HTTPExc)
 async def _portal_auth_redirect(request: Request, exc: _HTTPExc):
-    if exc.status_code == 401 and request.url.path.startswith("/portal/"):
+    _path = request.url.path
+    if exc.status_code == 401 and (_path == "/portal" or _path.startswith("/portal/")):
         accept = request.headers.get("accept", "")
         if "text/html" in accept:
             return _RedirectResponse(url="/portal/login", status_code=302)
