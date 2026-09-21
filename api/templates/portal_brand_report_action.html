@@ -9,6 +9,13 @@
 .action-compact-bar strong{font-size:1rem;color:#111;}
 .action-compact-bar .acb-kpi{display:flex;flex-direction:column;align-items:center;min-width:70px;}
 .action-compact-bar .acb-kpi span{font-size:.7rem;color:#6b7280;}
+.action-compact-bar .acb-kpi span.acb-kpi-label{display:inline-flex;align-items:center;gap:.2rem;}
+/* 정보 툴팁(호버/포커스 시 노출) — native title 속성보다 크고 읽기 쉬운 설명박스 */
+.help-tip{position:relative;display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:50%;background:#c7cdd6;color:#fff;font-size:.62rem;font-weight:800;line-height:1;cursor:help;flex:none;}
+.help-tip:hover,.help-tip:focus{background:#6b7280;outline:none;}
+.help-tip-box{display:none;position:absolute;z-index:60;bottom:140%;right:-12px;width:230px;background:#111827;color:#f9fafb;padding:.55rem .7rem;border-radius:.5rem;font-size:.7rem;line-height:1.55;font-weight:400;text-align:left;box-shadow:0 10px 24px rgba(0,0,0,.3);white-space:normal;}
+.help-tip-box::after{content:'';position:absolute;top:100%;right:14px;border:6px solid transparent;border-top-color:#111827;}
+.help-tip:hover .help-tip-box,.help-tip:focus .help-tip-box{display:block;}
 .action-compact-slider{display:flex;align-items:center;gap:.5rem;flex:1;min-width:200px;}
 .action-compact-slider input[type=range]{flex:1;}
 /* ── ACTION TARGETS 통합 테이블 ── */
@@ -34,8 +41,8 @@
 .action-radio-group label{display:flex;align-items:center;gap:.3rem;cursor:pointer;}
 .action-section{margin-top:.75rem;}
 .action-section-title{font-size:.8rem;font-weight:600;color:#374151;margin-bottom:.4rem;text-transform:uppercase;letter-spacing:.04em;}
-/* ── DM 미리보기 ── */
-.dm-preview-area{width:100%;border:1px solid #d1d5db;border-radius:.4rem;padding:.5rem;font-size:.82rem;line-height:1.5;resize:vertical;background:#fff;min-height:90px;}
+/* ── DM 미리보기 (기존 90px → 225px, rows 4→9 = 약 2.5배) ── */
+.dm-preview-area{width:100%;border:1px solid #d1d5db;border-radius:.4rem;padding:.5rem;font-size:.82rem;line-height:1.5;resize:vertical;background:#fff;min-height:225px;}
 /* ── 가격 설정 테이블 ── */
 .price-table{width:100%;border-collapse:collapse;font-size:.78rem;margin-bottom:.5rem;}
 .price-table th{background:#e5e7eb;padding:.3rem .4rem;text-align:center;font-weight:600;white-space:nowrap;}
@@ -160,11 +167,21 @@
   <div class="acb-kpi"><strong>{{ report.target_count }}</strong><span>제안 대상</span></div>
   <div class="acb-kpi"><strong>{{ report.threshold }}%</strong><span>현재 기준</span></div>
   <div class="acb-kpi"><strong>{{ report.generic_gp_rate }}%</strong><span>범용GP율</span></div>
-  <div class="acb-kpi" title="제안 대상 가맹점의 범용비중을 브랜드 평균까지 끌어올리는 데 필요한 매출액 합계">
-    <strong>{{ '{:,}'.format(report.proposal_possible_sales_m) }}백만</strong><span>제안효과(타겟매출)</span>
+  <div class="acb-kpi">
+    <strong>{{ '{:,}'.format(report.proposal_possible_sales_m) }}백만</strong>
+    <span class="acb-kpi-label">제안효과(타겟매출)
+      <span class="help-tip" tabindex="0">?
+        <span class="help-tip-box"><b>타겟매출액</b>: 제안 대상 가맹점의 범용상품 비중을 브랜드 평균 수준까지 끌어올리는 데 필요한 매출액입니다. (현재 전용/범용 매출 구성비 기준 역산)</span>
+      </span>
+    </span>
   </div>
-  <div class="acb-kpi" title="제안 대상 가맹점이 아직 없는 추천상품을 다른 가맹점 평균 수준으로 채택했을 때 기대되는 매출액 합계">
-    <strong>{{ '{:,}'.format(report.opportunity_effect_m) }}백만</strong><span>제안효과(기회매출)</span>
+  <div class="acb-kpi">
+    <strong>{{ '{:,}'.format(report.opportunity_effect_m) }}백만</strong>
+    <span class="acb-kpi-label">제안효과(기회매출)
+      <span class="help-tip" tabindex="0">?
+        <span class="help-tip-box"><b>기회매출액</b>: 가맹점이 아직 사용하지 않는 추천상품을, 다른 가맹점들의 평균 사용 수준만큼 도입했을 때 기대할 수 있는 추가 매출액입니다. (상품별 타매장 사용률 × 판매량 기준 계산)</span>
+      </span>
+    </span>
   </div>
   <div class="action-compact-slider">
     <span style="font-size:.75rem;color:#6b7280;">기준 슬라이더</span>
@@ -500,7 +517,7 @@
     } else {
       actionFooter.innerHTML = `
       <div class="action-section-title" style="margin-top:.6rem;">DM 메시지</div>
-      <textarea class="dm-preview-area" id="priceDmText_${uid}" rows="4">${dmMsg}</textarea>
+      <textarea class="dm-preview-area" id="priceDmText_${uid}" rows="10">${dmMsg}</textarea>
       <div class="price-btn-row" style="justify-content:space-between;">
         <div class="price-btn-row" style="margin:0;">
           <button class="action-send-btn dm-only-btn" type="button"
