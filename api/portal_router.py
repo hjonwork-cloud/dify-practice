@@ -178,7 +178,13 @@ def _current_user(request: Request) -> dict | None:
     emp_code = _read_session(request.cookies.get(_SESSION_COOKIE))
     if not emp_code:
         return None
-    return _portal_user(emp_code)
+    user = _portal_user(emp_code)
+    if user is not None:
+        try:
+            user["phone"] = portal_db.get_phone(emp_code)
+        except Exception:
+            user["phone"] = ""
+    return user
 
 
 def _require_user(request: Request) -> dict:
@@ -2897,6 +2903,28 @@ async def customer_phone(request: Request, customer_code: str = ""):
     """DM 발송 확인 팝업의 수신번호 기본값 조회용 (고객마스터 이동전화번호/전화번호)."""
     _require_user(request)
     return JSONResponse({"phone": _get_customer_mobile_phone(customer_code) if customer_code else ""})
+
+
+class _MyPhonePayload(BaseModel):
+    phone: str = ""
+
+
+@router.post("/me/phone")
+async def update_my_phone(request: Request, body: _MyPhonePayload):
+    """로그인 사용자 본인의 연락처 등록/수정 (DM 발신(회신)번호 '내 연락처' 옵션에 사용)."""
+    user = _require_user(request)
+    import re as _re_phone
+    digits = _re_phone.sub(r"[^0-9]", "", body.phone or "")
+    if not digits or len(digits) < 9 or len(digits) > 11:
+        raise HTTPException(status_code=400, detail="올바른 연락처를 입력하세요. (예: 010-1234-5678)")
+    if len(digits) == 11:
+        formatted = f"{digits[:3]}-{digits[3:7]}-{digits[7:]}"
+    elif len(digits) == 10:
+        formatted = f"{digits[:3]}-{digits[3:6]}-{digits[6:]}"
+    else:
+        formatted = digits
+    portal_db.set_phone(user["emp_code"], formatted)
+    return JSONResponse({"ok": True, "phone": formatted})
 
 
 class _DmSendPayload(BaseModel):

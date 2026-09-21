@@ -639,7 +639,19 @@
       recvEl.value = opts.custPhone || '';
     }
     const cbEl = document.getElementById('dmModalCallback');
-    if (cbEl && !cbEl.value) cbEl.value = '02-589-6436';
+    const _myPhone = window.PORTAL_USER_PHONE || '';
+    const _mineRadio = document.getElementById('dmSenderMine');
+    const _csRadio = document.getElementById('dmSenderCs');
+    const _minePhoneEl = document.getElementById('dmSenderMinePhone');
+    if (_minePhoneEl) _minePhoneEl.textContent = _myPhone ? `(${_myPhone})` : '(미등록 — 춌쪽하단 프로필에서 등록)';
+    if (_mineRadio) _mineRadio.disabled = !_myPhone;
+    if (_myPhone) {
+      if (_mineRadio) _mineRadio.checked = true;
+      if (cbEl) cbEl.value = _myPhone;
+    } else {
+      if (_csRadio) _csRadio.checked = true;
+      if (cbEl) cbEl.value = '1588-8658';
+    }
     const nowRadio = document.querySelector('input[name="dmSendMode"][value="now"]');
     if (nowRadio) nowRadio.checked = true;
     const schedRow = document.getElementById('dmModalScheduleRow');
@@ -679,6 +691,10 @@
     if (e.target && e.target.name === 'dmSendMode') {
       const row = document.getElementById('dmModalScheduleRow');
       if (row) row.style.display = e.target.value === 'reserve' ? 'flex' : 'none';
+    }
+    if (e.target && e.target.name === 'dmSenderMode') {
+      const cb = document.getElementById('dmModalCallback');
+      if (cb) cb.value = e.target.value === 'mine' ? (window.PORTAL_USER_PHONE || '') : '1588-8658';
     }
   });
   document.addEventListener('input', (e) => {
@@ -1281,7 +1297,11 @@
       </div>
       <div class="dm-modal-row">
         <label>발신(회신)번호</label>
-        <input type="text" id="dmModalCallback" placeholder="02-589-6436">
+        <div class="dm-send-mode-opts" id="dmSenderOpts">
+          <label><input type="radio" name="dmSenderMode" id="dmSenderMine" value="mine"> 내 연락처 <span id="dmSenderMinePhone" style="color:#6b7280;font-weight:400;"></span></label>
+          <label><input type="radio" name="dmSenderMode" id="dmSenderCs" value="cs"> 고객센터 연락처 <span style="color:#6b7280;font-weight:400;">(1588-8658)</span></label>
+        </div>
+        <input type="hidden" id="dmModalCallback">
       </div>
     </div>
 

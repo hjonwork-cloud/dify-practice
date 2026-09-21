@@ -57,6 +57,29 @@
   body.sidebar-collapsed .portal-user-card { justify-content: center; padding: 10px 4px; min-width: 0; }
   body.sidebar-collapsed .portal-user-card>div { display: none; }
   body.sidebar-collapsed .portal-avatar  { width: 36px; height: 36px; flex-shrink: 0; }
+  /* 내 연락처 등록/수정 버튼 + 모달 */
+  .pu-phone-btn { border: 0; background: rgba(255,255,255,.14); color: #fff; width: 20px; height: 20px;
+    border-radius: 50%; font-size: 10px; cursor: pointer; display: inline-flex; align-items: center;
+    justify-content: center; margin-left: 5px; vertical-align: middle; flex-shrink: 0; }
+  .pu-phone-btn:hover { background: rgba(255,255,255,.28); }
+  .my-phone-modal-bg { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 9999;
+    align-items: center; justify-content: center; padding: 1rem; }
+  .my-phone-modal-bg.open { display: flex; }
+  .my-phone-modal { background: #fff; border-radius: 16px; max-width: 380px; width: 100%; padding: 1.5rem 1.6rem 1.3rem;
+    box-shadow: 0 24px 70px rgba(0,0,0,.28); position: relative; }
+  .my-phone-modal h3 { margin: 0 0 .3rem; font-size: 1.05rem; }
+  .my-phone-modal p { font-size: .82rem; color: #6b7280; margin: .2rem 0 .9rem; line-height: 1.5; }
+  .my-phone-modal input[type=text] { width: 100%; border: 1px solid #d1d5db; border-radius: .5rem; padding: .55rem .7rem;
+    font-size: .92rem; box-sizing: border-box; }
+  .my-phone-modal-actions { display: flex; justify-content: flex-end; gap: .5rem; margin-top: 1.1rem; }
+  .my-phone-modal-actions button { border: 0; border-radius: .5rem; padding: .5rem 1rem; font-size: .85rem;
+    font-weight: 700; cursor: pointer; }
+  .my-phone-modal-actions button.mp-cancel { background: #f3f4f6; color: #374151; }
+  .my-phone-modal-actions button.mp-save { background: #071015; color: #fff; }
+  .my-phone-modal-actions button.mp-save:hover { background: var(--portal-coral,#18b9c7); }
+  .my-phone-modal-close { position: absolute; top: 10px; right: 12px; border: 0; background: none; font-size: 1.3rem;
+    line-height: 1; cursor: pointer; color: #9ca3af; }
+  .my-phone-modal-close:hover { color: #111; }
   @media(max-width:760px){
     body.sidebar-collapsed .portal-sidebar { width: 280px!important; }
     body.sidebar-collapsed .portal-main    { margin-left: 0!important; width: 100%!important; }
@@ -146,7 +169,7 @@
     </nav>
     <div class="portal-user-card">
       <span class="portal-avatar">{{ user.name[:1] if user else 'U' }}</span>
-      <div><b>{{ user.name if user else '' }}</b><small>{{ user.emp_code if user else '' }} · {{ user.team if user else '' }}</small></div>
+      <div><b>{{ user.name if user else '' }}{% if user %}<button type="button" class="pu-phone-btn" onclick="window._openMyPhoneModal()" title="내 연락처 등록/수정">📞</button>{% endif %}</b><small>{{ user.emp_code if user else '' }} · {{ user.team if user else '' }}</small></div>
     </div>
   </aside>
   <main class="portal-main">
@@ -158,6 +181,56 @@
     <section class="portal-content">{% block content %}{% endblock %}</section>
   </main>
 </div>
+{% if user %}
+<!-- 내 연락처 등록/수정 모달 (DM 발신번호 '내 연락처' 옵션에 사용) -->
+<div class="my-phone-modal-bg" id="myPhoneModalBg" onclick="if(event.target===this) window._closeMyPhoneModal()">
+  <div class="my-phone-modal">
+    <button type="button" class="my-phone-modal-close" onclick="window._closeMyPhoneModal()">&times;</button>
+    <h3>📞 내 연락처</h3>
+    <p>DM 발송 시 발신(회신)번호 '내 연락처' 옵션으로 사용됩니다. 처음 1회만 등록해두면 다음부터는 자동으로 적용됩니다.</p>
+    <input type="text" id="myPhoneInput" placeholder="010-0000-0000">
+    <div class="my-phone-modal-actions">
+      <button type="button" class="mp-cancel" onclick="window._closeMyPhoneModal()">취소</button>
+      <button type="button" class="mp-save" onclick="window._saveMyPhone()">저장</button>
+    </div>
+  </div>
+</div>
+<script>
+window.PORTAL_USER_PHONE = {{ (user.phone or '') | tojson }};
+(function(){
+  function openModal(){
+    var inp = document.getElementById('myPhoneInput');
+    if (inp) inp.value = window.PORTAL_USER_PHONE || '';
+    document.getElementById('myPhoneModalBg')?.classList.add('open');
+    setTimeout(function(){ inp && inp.focus(); }, 50);
+  }
+  function closeModal(){ document.getElementById('myPhoneModalBg')?.classList.remove('open'); }
+  window._openMyPhoneModal = openModal;
+  window._closeMyPhoneModal = closeModal;
+  window._saveMyPhone = function(){
+    var inp = document.getElementById('myPhoneInput');
+    var val = (inp && inp.value || '').trim();
+    if (!val) { alert('연락처를 입력하세요.'); return; }
+    fetch('/portal/me/phone', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({phone: val})
+    }).then(function(r){ return r.json().then(function(d){ return {status:r.status, data:d}; }); })
+      .then(function(res){
+        if (res.status === 200 && res.data.ok) {
+          window.PORTAL_USER_PHONE = res.data.phone;
+          closeModal();
+        } else {
+          alert(res.data.detail || '저장에 실패했습니다.');
+        }
+      }).catch(function(){ alert('저장 중 오류가 발생했습니다.'); });
+  };
+  // 로그인 후 대시보드에서 연락처가 미등록이면 한 번 안내 (최초 1회 수집 유도)
+  if (!window.PORTAL_USER_PHONE && (location.pathname === '/portal' || location.pathname === '/portal/')) {
+    setTimeout(openModal, 500);
+  }
+})();
+</script>
+{% endif %}
 <script src="/static/admin.js?v={{ asset_v }}"></script>
 <script>
 (function(){

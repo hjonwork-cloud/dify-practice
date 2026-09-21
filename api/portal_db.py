@@ -125,6 +125,14 @@ def init_db() -> None:
                 updated_at    TEXT NOT NULL
             );
         """)
+        # 사용자 프로필(연락처 등) 테이블 — DM 발신번호 개인화용
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS portal_user_profile (
+                emp_code   TEXT PRIMARY KEY,
+                phone      TEXT,
+                updated_at TEXT NOT NULL
+            );
+        """)
         # VOC 게시판 마이그레이션
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS voc_posts (
@@ -668,6 +676,31 @@ def has_password(emp_code: str) -> bool:
             "SELECT 1 FROM portal_user_passwords WHERE emp_code = ?", (emp_code,)
         ).fetchone()
         return row is not None
+
+
+def get_phone(emp_code: str) -> str:
+    """사용자가 등록한 개인 연락처 조회 (미등록 시 빈 문자열)."""
+    init_db()
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT phone FROM portal_user_profile WHERE emp_code = ?", (emp_code,)
+        ).fetchone()
+        return (row["phone"] or "") if row else ""
+
+
+def set_phone(emp_code: str, phone: str) -> None:
+    """사용자 개인 연락처 등록/수정 (DM 발신번호 '내 연락처' 옵션에 사용)."""
+    init_db()
+    now = _now()
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO portal_user_profile (emp_code, phone, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(emp_code) DO UPDATE SET phone=excluded.phone, updated_at=excluded.updated_at
+            """,
+            (emp_code, phone, now),
+        )
 
 
 def reset_password(emp_code: str) -> str:
