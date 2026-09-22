@@ -2725,9 +2725,10 @@ def _call_sap_upload(items: list[dict]) -> dict:
 # ──────────────────────────────────────────────────────────────
 # 📱 사내 SMS 발송 (direct.dongwon.com 연동)
 # ──────────────────────────────────────────────────────────────
-# ⚠️ 아직 어떤 버튼/엔드포인트에도 연결되어 있지 않습니다. (함수만 준비)
-# ⚠️ 사내망(VPN 또는 사내 PC)에서만 접속 가능한 사이트입니다. 외부망에서는
-#    로그인 페이지만 반환되며(에러 아님), 실제 발송은 사내망 환경에서만 됩니다.
+# ✅ /portal/dm-send-with-price 엔드포인트(dm_only, price_and_dm)에서 실제 발송에 사용됩니다.
+# ⚠️ 사내망(VPN 또는 사내 PC)에서만 접속 가능한 사이트입니다. 외부망(Azure App Service 등)에서는
+#    로그인 페이지만 반환되거나 접속 자체가 실패할 수 있습니다(서버 에러 아님) — 이 경우
+#    DM 로그는 정상 저장되고 상태만 '발송 실패'로 남습니다.
 #
 # 필요 환경변수 (.env):
 #   SMS_API_URL      - 기본값: Send_SMS 엔드포인트 (거의 변경 불필요)
@@ -2876,7 +2877,7 @@ def _get_customer_mobile_phone(customer_code: str) -> str:
     """고객마스터(T_CUSTOMER_MASTER)에서 SMS 수신용 번호 조회.
 
     우선순위: 이동전화번호 > 전화번호. customer_code가 없거나 조회 실패 시 빈 문자열 반환.
-    (버튼 연동 전 준비 단계 — 아직 dm_send_with_price 등 어떤 엔드포인트에서도 호출하지 않음)
+    /portal/customer-phone 엔드포인트(DM 발송 확인 팝업 수신번호 기본값)에서 호출됨.
 
     주의: 호출 측(T_MAIN.거래처)은 10자리 0-패딩 코드(예: '0000273645')이지만
     T_CUSTOMER_MASTER.고객코드는 앞자리 0이 없는 형식(예: '273645')으로 저장되어 있어
@@ -2985,6 +2986,29 @@ async def dm_send_with_price(request: Request, body: _DmSendPayload):
         import datetime as _dt
         _action_ym = _dt.datetime.now().strftime("%Y%m")
 
+    # ── 실제 DM(SMS/LMS) 발송 — price_only는 DM 메시지가 없으므로 대상 아님 ──────────
+    dm_attempted = body.action_type in ("dm_only", "price_and_dm")
+    sms_result: dict = {}
+    if dm_attempted:
+        if not body.dm_phone:
+            sms_result = {"success": False, "status_code": None, "message": "수신번호가 없어 DM 발송을 건널뛰었습니다."}
+        elif not body.dm_message:
+            sms_result = {"success": False, "status_code": None, "message": "발송할 메시지 내용이 없습니다."}
+        else:
+            sms_result = send_sms_api_call(
+                receiver_phone=body.dm_phone,
+                message_text=body.dm_message,
+                callback_phone=body.dm_callback,
+                msg_type=("2" if len(body.dm_message) > 80 else "1"),
+                scheduled_at=body.dm_scheduled_at,
+            )
+        sap_result["sms_result"] = sms_result
+        if not sms_result.get("success"):
+            logger.warning("[DM] SMS 발송 실패: %s", sms_result.get("message"))
+    _dm_status = ("n/a" if not dm_attempted
+        else "sent" if sms_result.get("success")
+        else "failed")
+
     from portal_db import record_dm_log_v2
     record_dm_log_v2(
         emp_code=emp,
@@ -3001,21 +3025,27 @@ async def dm_send_with_price(request: Request, body: _DmSendPayload):
         sap_saved_count=saved_count,
         sap_result_json=_json.dumps(sap_result, ensure_ascii=False),
         action_ym=_action_ym,
-        status=("price_applied_dm_sent" if body.action_type == "price_and_dm"
-            else "price_only" if body.action_type == "price_only"
-            else "dm_only_sent"),
+        status=(
+            "price_only" if body.action_type == "price_only"
+            else ("price_applied_dm_sent" if _dm_status == "sent" else "price_applied_dm_failed") if body.action_type == "price_and_dm"
+            else ("dm_only_sent" if _dm_status == "sent" else "dm_only_failed")
+        ),
     )
 
     # ── 판가설정 또는 DM 발송 액션 시 실적 테이블 debounce 갱신 ──────────
     if body.action_type in ("price_and_dm", "price_only", "dm_only"):
         _schedule_action_refresh(delay=60)
 
-    return JSONResponse({
-        "success": True,
+    overall_success = (not dm_attempted) or bool(sms_result.get("success"))
+    response_payload = {
+        "success": overall_success,
         "action_type": body.action_type,
         "sap_saved_count": saved_count,
-        "dm_status": "logged",
-    })
+        "dm_status": _dm_status,
+    }
+    if dm_attempted and not overall_success:
+        response_payload["error"] = sms_result.get("message") or "DM 발송에 실패했습니다."
+    return JSONResponse(response_payload)
 
 
 @router.get("/dm-log-list")
