@@ -378,7 +378,7 @@ T_MAIN    = "h_hmfo_fsi_dm.gd_rst_ing.sales_custmasters_compat_v"
 T_MISULGO = "h_hmfo_fsi_dm.gd_rst_ing.unshipped_compat_v"
 T_PROFIT  = "h_hmfo.gd_dcube.`00_customers_cm`"          # 수익성
 T_AR      = "h_hmfo_fsi.gd_rst_ing.sap_zfird015_monthly_accounts_receivable_history_rst_ing_f"  # 고객 여신/미수채권
-T_CUSTOMER_MASTER = "h_hmfo_fsi.gd_rst_ing.sap_zsdrxd03_customers_master_rst_ing_d"  # 고객마스터
+T_CUSTOMER_MASTER = "h_hmfo_fsi.gd_rst_ing.sap_zsdrxd03_customers_masters_rst_ing_d"  # 고객마스터
 T_INVENTORY_EXP = "h_hmfo_fsi.gd_fsi_ent.helo_inventory_status_by_expiration_date_f"  # 재고현황(소비기한)
 
 # 수익성 인텐트 키워드 패턴 (CM/공헌이익/수익성 등 다양한 표현 통합)

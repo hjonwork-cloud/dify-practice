@@ -968,9 +968,9 @@ def _recommend_products(
 
 def _dm_message(brand_name: str, customer: dict, brand_avg: float, products: list[dict]) -> str:
     product_lines = "\n".join(
-        f"• [{p.get('product_code','')}] {p.get('product_name') or p.get('product_code')}"
+        f"- [{p.get('product_code','')}] {p.get('product_name') or p.get('product_code')}"
         for p in products[:5]
-    ) or "• 추천 후보 상품 확인 필요"
+    ) or "- 추천 후보 상품 확인 필요"
     return (
         f"안녕하세요, {customer.get('customer_name')} 사장님.\n\n"
         f"동원홈푸드를 이용해 주셔서 감사합니다. "

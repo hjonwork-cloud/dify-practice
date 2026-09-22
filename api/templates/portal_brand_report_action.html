@@ -430,9 +430,9 @@
         if (!p) return;
         const code = p.product_code || '';
         const name = p.product_name || p.product_code || '';
-        lines.push(`\u2022 [${code}] ${name}`);
+        lines.push(`- [${code}] ${name}`);
       });
-      const productLines = lines.length ? lines.join('\n') : '\u2022 추천 후보 상품 확인 필요';
+      const productLines = lines.length ? lines.join('\n') : '- 추천 후보 상품 확인 필요';
       const newMsg =
         `안녕하세요, ${custName} 사장님.\n\n` +
         `동원홈푸드를 이용해 주셔서 감사합니다. ` +
