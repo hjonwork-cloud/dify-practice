@@ -133,6 +133,15 @@ def init_db() -> None:
                 updated_at TEXT NOT NULL
             );
         """)
+        # 앱 설정값 키-값 저장소 — SMS_COOKIE 등 재배포 없이 관리자가 즉시 갱신해야 하는 값용
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS app_settings (
+                key        TEXT PRIMARY KEY,
+                value      TEXT,
+                updated_by TEXT,
+                updated_at TEXT NOT NULL
+            );
+        """)
         # VOC 게시판 마이그레이션
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS voc_posts (
@@ -701,6 +710,60 @@ def set_phone(emp_code: str, phone: str) -> None:
             """,
             (emp_code, phone, now),
         )
+
+
+def get_setting(key: str, default: str = "") -> str:
+    """앱 설정값 조회 (예: sms_cookie). 없으면 default 반환."""
+    init_db()
+    with _connect() as conn:
+        row = conn.execute("SELECT value FROM app_settings WHERE key = ?", (key,)).fetchone()
+        return row["value"] if row and row["value"] is not None else default
+
+
+def get_setting_meta(key: str) -> dict | None:
+    """설정값 + 갱신자/갱신시각 메타정보 반환 (관리자 화면용). 없으면 None."""
+    init_db()
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT value, updated_by, updated_at FROM app_settings WHERE key = ?", (key,)
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def set_setting(key: str, value: str, updated_by: str = "") -> None:
+    """앱 설정값 저장/수정 (배포 없이 관리자가 즉시 갱신 가능 — 예: SMS 세션쿠키)."""
+    init_db()
+    now = _now()
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO app_settings (key, value, updated_by, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_by=excluded.updated_by, updated_at=excluded.updated_at
+            """,
+            (key, value, updated_by, now),
+        )
+
+
+def count_dm_failures_since(hours: int = 24) -> dict:
+    """최근 N시간 내 DM 발송 실패 건수 (전체/인증만료 추정). 관리자 대시보드용."""
+    init_db()
+    from datetime import timedelta
+    cutoff = (datetime.now(_KST) - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
+    with _connect() as conn:
+        rows = conn.execute(
+            """SELECT sap_result_json FROM dm_send_logs
+               WHERE status IN ('dm_only_failed','price_applied_dm_failed')
+                 AND created_at >= ?""",
+            (cutoff,),
+        ).fetchall()
+    total = len(rows)
+    cookie_related = 0
+    for r in rows:
+        blob = (r["sap_result_json"] or "")
+        if "인증" in blob or "쿼키" in blob or "cookie" in blob.lower():
+            cookie_related += 1
+    return {"total": total, "cookie_related": cookie_related}
 
 
 def reset_password(emp_code: str) -> str:

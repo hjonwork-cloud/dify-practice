@@ -367,6 +367,16 @@ def _cache_clear_all():
     _cache.clear()
 
 
+def _cache_clear_pattern(*prefixes: str):
+    """주어진 접두어(prefix)들 중 하나로 시작하는 캐시 키만 선택적으로 무효화.
+    employee_whitelist·brands 등 무관한 캐시는 유지한 채 대시보드/집계 캐시만 갱신할 때 사용."""
+    if not prefixes:
+        return
+    for key in list(_cache.keys()):
+        if any(key.startswith(p) for p in prefixes):
+            _cache.pop(key, None)
+
+
 def _sql(value: str) -> str:
     import main
     return "'" + main._sql_literal(str(value or "")) + "'"
@@ -2004,8 +2014,18 @@ async def admin_users_page(request: Request):
             u["emp_name"] = _wl_entry.get("name") or _bt_entry.get("name") or stored_name or code
     pw_status = portal_db.list_password_status([u["emp_code"] for u in users])
     login_logs = portal_db.list_login_logs(limit=100)
+    _sms_meta = portal_db.get_setting_meta("sms_cookie")
+    sms_cookie_info = {
+        "has_cookie": bool(_get_sms_cookie()),
+        "source": "db" if (_sms_meta and _sms_meta.get("value")) else ("env" if SMS_COOKIE else "none"),
+        "masked_cookie": _mask_cookie(_get_sms_cookie()),
+        "updated_by": (_sms_meta or {}).get("updated_by") or "",
+        "updated_at": (_sms_meta or {}).get("updated_at") or "",
+        "failures_24h": portal_db.count_dm_failures_since(24),
+    }
     return _render(request, "portal_admin_users.html",
-                   users=users, pw_status=pw_status, login_logs=login_logs)
+                   users=users, pw_status=pw_status, login_logs=login_logs,
+                   sms_cookie_info=sms_cookie_info)
 
 @router.post("/admin/reset-password")
 async def admin_reset_password(request: Request):
@@ -2026,6 +2046,56 @@ async def admin_unlock_account(request: Request):
         raise HTTPException(status_code=400, detail="emp_code 필요")
     portal_db.unlock_account(emp_code)
     return JSONResponse({"ok": True, "emp_code": emp_code})
+
+
+def _mask_cookie(cookie: str) -> str:
+    """관리자 화면에 쿠키 전체를 노출하지 않도록 앞/뒤 일부만 보여준다."""
+    if not cookie:
+        return ""
+    if len(cookie) <= 24:
+        return cookie[:4] + "…" + cookie[-4:] if len(cookie) > 8 else "****"
+    return f"{cookie[:16]}…({len(cookie)}자)…{cookie[-8:]}"
+
+
+@router.get("/admin/sms-cookie-status")
+async def admin_sms_cookie_status(request: Request):
+    """(관리자용) 현재 SMS 세션쿠키 상태 + 최근 24시간 DM 발송 실패 통계 조회."""
+    _require_admin(request)
+    meta = portal_db.get_setting_meta("sms_cookie")
+    current = _get_sms_cookie()
+    fail_stats = portal_db.count_dm_failures_since(24)
+    return JSONResponse({
+        "ok": True,
+        "has_cookie": bool(current),
+        "source": "db" if (meta and meta.get("value")) else ("env" if SMS_COOKIE else "none"),
+        "masked_cookie": _mask_cookie(current),
+        "updated_by": (meta or {}).get("updated_by") or "",
+        "updated_at": (meta or {}).get("updated_at") or "",
+        "failures_24h": fail_stats,
+    })
+
+
+@router.post("/admin/sms-cookie")
+async def admin_update_sms_cookie(request: Request):
+    """(관리자용) SMS 세션쿠키를 DB에 저장 — 배포/재시작 없이 즉시 반영된다."""
+    user = _require_admin(request)
+    form = await _read_form(request)
+    cookie = (form.get("cookie") or "").strip()
+    if not cookie:
+        raise HTTPException(status_code=400, detail="쿠키 값이 비어있습니다.")
+    portal_db.set_setting("sms_cookie", cookie, updated_by=user.get("emp_code", ""))
+    test_result = _test_sms_cookie_validity(cookie)
+    return JSONResponse({"ok": True, "test": test_result, "masked_cookie": _mask_cookie(cookie)})
+
+
+@router.post("/admin/sms-cookie-test")
+async def admin_test_sms_cookie(request: Request):
+    """(관리자용) 현재 저장된(또는 폼으로 전달된) SMS 쿠키의 유효성만 테스트 — 실제 발송 없음."""
+    _require_admin(request)
+    form = await _read_form(request)
+    cookie = (form.get("cookie") or "").strip() or _get_sms_cookie()
+    result = _test_sms_cookie_validity(cookie)
+    return JSONResponse({"ok": True, "test": result})
 
 
 @router.get("/brand-report", response_class=HTMLResponse)
@@ -2751,6 +2821,59 @@ SMS_SENDER_PHONE = os.getenv("SMS_SENDER_PHONE", "")
 SMS_COOKIE = os.getenv("SMS_COOKIE", "")
 
 
+def _get_sms_cookie() -> str:
+    """SMS 세션 쿠키 조회 — DB 설정값(관리자가 포털에서 직접 갱신)을 우선 사용하고,
+    없으면 .env의 SMS_COOKIE로 fallback한다. DB 값은 배포/재시작 없이 즉시 반영되므로,
+    세션 만료 시 관리자가 포털 '관리자 기능 > 사용자 관리' 페이지에서 바로 갱신할 수 있다.
+    """
+    try:
+        db_val = portal_db.get_setting("sms_cookie", "")
+        if db_val:
+            return db_val
+    except Exception:
+        pass
+    return SMS_COOKIE
+
+
+def _test_sms_cookie_validity(cookie: str) -> dict:
+    """(관리자용) 실제 SMS를 발송하지 않고 쿠키 유효성만 안전하게 확인.
+
+    SMS_API_URL(Send_SMS 엔드포인트)에 수신번호/내용이 빈 no-op 페이로드로 POST한다.
+    이 엔드포인트는 요청 진입 시점에 세션 인증을 검사하므로, 실제로 문자가 발송되지 않으면서도
+    "Error Notice" 응답 여부로 쿠키 만료를 정확히 판별할 수 있다.
+    (※ SMS_Service.aspx 팝업 페이지 자체는 쿠키 없이도 200을 반환해 신뢰할 수 없음을 확인함 —
+      반드시 실제 발송 엔드포인트로 테스트해야 한다.)
+    """
+    import httpx
+    if not cookie:
+        return {"valid": False, "message": "쿠키가 비어있습니다."}
+    headers = {
+        "Content-Type": "application/json; charset=UTF-8",
+        "Accept": "application/json, text/javascript, */*; q=0.01",
+        "X-Requested-With": "XMLHttpRequest",
+        "Origin": "https://direct.dongwon.com",
+        "Referer": SMS_SERVER_URL,
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "Cookie": cookie,
+    }
+    noop_payload = {"pNumsCount": "0", "pDstaddr": "", "pMsg": "", "pMsgType": "1",
+                     "pRequestTime": "", "pCallBack": "", "pPath": ""}
+    try:
+        resp = httpx.post(SMS_API_URL, headers=headers, json=noop_payload, timeout=15)
+        body = resp.text
+        if "Error Notice" in body or "찾으시려는 웹페이지" in body or "Login.aspx" in body:
+            return {"valid": False, "status_code": resp.status_code,
+                     "message": "로그인이 만료되었거나 쿠키가 무효합니다. (인증 오류 응답)"}
+        if resp.status_code != 200:
+            return {"valid": False, "status_code": resp.status_code, "message": f"응답 상태코드 {resp.status_code}"}
+        return {"valid": True, "status_code": resp.status_code, "message": "정상 응답 (유효한 것으로 보임)"}
+    except Exception as e:
+        return {"valid": False, "message": f"접속 실패: {e} (사내망/VPN 미접속 일 수 있음)"}
+
+
 def test_sms_server_connection() -> dict:
     """(진단용) 파이썬 서버 프로세스에서 사내 SMS 서버 접속 가능 여부 테스트.
 
@@ -2820,7 +2943,7 @@ def send_sms_api_call(
         "pPath": "",
     }
 
-    cookie_header = session_cookie or SMS_COOKIE
+    cookie_header = session_cookie or _get_sms_cookie()
     headers = {
         "Content-Type": "application/json; charset=UTF-8",
         "Accept": "application/json, text/javascript, */*; q=0.01",
@@ -2842,11 +2965,12 @@ def send_sms_api_call(
         resp = httpx.post(SMS_API_URL, headers=headers, json=payload, timeout=30)
         res_text = resp.text
         if "Error Notice" in res_text or "찾으시려는 웹페이지" in res_text:
-            logger.warning("[SMS] 세션 쿠키 만료/무효로 판단됨 (Error Notice 응답)")
+            logger.warning("[SMS] 세션 쿠키 만료/무효로 판단됨 (Error Notice 응답) — 관리자: 포털 > 관리자 기능 > 사용자 관리에서 SMS 연동 쿠키를 갱신해주세요.")
             return {
                 "success": False,
                 "status_code": resp.status_code,
-                "message": "세션 쿠키(Cookie)가 유효하지 않거나 만료되었습니다. SMS_COOKIE 값을 갱신하세요.",
+                "message": "사내 SMS 인증이 만료되어 발송하지 못했습니다. 관리자에게 인증 갱신을 요청해 주세요.",
+                "detail": "SMS_COOKIE(또는 DB sms_cookie 설정)가 유효하지 않거나 만료되었습니다.",
             }
         logger.info("[SMS] 응답 상태=%s", resp.status_code)
         return {
@@ -2856,7 +2980,7 @@ def send_sms_api_call(
         }
     except Exception as e:
         logger.exception("[SMS] 전송 실패")
-        return {"success": False, "status_code": None, "message": f"SMS API 전송 실패: {e}"}
+        return {"success": False, "status_code": None, "message": f"SMS 발송 중 오류가 발생했습니다. 관리자에게 문의해 주세요.", "detail": str(e)}
 
 
 def build_sms_scheduled_time(dt) -> str:

@@ -25,6 +25,11 @@
     .act-btn.reset{background:#f59e0b;color:#fff;}
     .act-btn.unlock{background:#3b82f6;color:#fff;}
     .act-btn:hover{opacity:.85;}
+    .act-btn.save{background:#16a34a;color:#fff;}
+    .act-btn.test{background:#64748b;color:#fff;}
+    .sms-status{display:flex;flex-wrap:wrap;gap:1.2rem;align-items:center;margin-bottom:.9rem;font-size:.82rem;color:#374151;}
+    .sms-status b{color:#111827;}
+    textarea#smsCookieInput{width:100%;min-height:80px;font-family:ui-monospace,Consolas,monospace;font-size:.75rem;padding:.6rem;border:1px solid #d1d5db;border-radius:8px;box-sizing:border-box;resize:vertical;}
     .toast{position:fixed;bottom:1.5rem;right:1.5rem;background:#1e293b;color:#fff;padding:.6rem 1rem;border-radius:8px;font-size:.85rem;display:none;z-index:999;}
   </style>
 </head>
@@ -112,6 +117,42 @@
     </table>
   </div>
 
+  <div class="section">
+    <h2>📱 사내 SMS 발신 연동 관리</h2>
+    <div class="sms-status">
+      <span>상태:
+        {% if sms_cookie_info.has_cookie %}
+          <span class="badge ok">쿠키 등록됨</span>
+        {% else %}
+          <span class="badge danger">쿠키 없음</span>
+        {% endif %}
+      </span>
+      <span>출처: <b>{{ '관리자 설정(DB)' if sms_cookie_info.source == 'db' else ('.env 기본값' if sms_cookie_info.source == 'env' else '없음') }}</b></span>
+      <span>현재 값: <code>{{ sms_cookie_info.masked_cookie or '-' }}</code></span>
+      {% if sms_cookie_info.updated_at %}
+      <span>마지막 갱신: <b>{{ sms_cookie_info.updated_by or '-' }}</b> · {{ sms_cookie_info.updated_at }}</span>
+      {% endif %}
+      <span>최근 24시간 DM 실패:
+        <b class="{{ 'badge danger' if sms_cookie_info.failures_24h.total else 'badge ok' }}" style="display:inline-block;padding:.15rem .5rem;border-radius:99px;">
+          {{ sms_cookie_info.failures_24h.total }}건
+        </b>
+        {% if sms_cookie_info.failures_24h.cookie_related %}
+        <span class="badge warn">인증만료 추정 {{ sms_cookie_info.failures_24h.cookie_related }}건</span>
+        {% endif %}
+      </span>
+    </div>
+    <p style="font-size:.78rem;color:#6b7280;margin:.2rem 0 .6rem;">
+      사내망(direct.dongwon.com)에 로그인 후 브라우저 개발자도구(F12) → Application/저장공간 → 쿠키에서
+      <code>ASP.NET_SessionId</code>, <code>Smart2Application</code> 값을 복사해 아래에 붙여넣고 저장하세요.
+      저장 시 재배포/재시작 없이 즉시 전 사용자에게 반영됩니다.
+    </p>
+    <textarea id="smsCookieInput" placeholder="예: ASP.NET_SessionId=xxxxx; Smart2Application=yyyyy"></textarea>
+    <div style="margin-top:.6rem;">
+      <button class="act-btn save" onclick="saveSmsCookie()">저장 및 테스트</button>
+      <button class="act-btn test" onclick="testSmsCookie()">현재 저장값 테스트</button>
+    </div>
+  </div>
+
   <div class="toast" id="toast"></div>
   <script>
   function showToast(msg) {
@@ -119,6 +160,24 @@
     t.textContent = msg;
     t.style.display = 'block';
     setTimeout(() => { t.style.display = 'none'; }, 3000);
+  }
+  async function saveSmsCookie() {
+    const cookie = document.getElementById('smsCookieInput').value.trim();
+    if (!cookie) { showToast('❌ 쿠키 값을 입력하세요.'); return; }
+    const fd = new URLSearchParams(); fd.append('cookie', cookie);
+    const res = await fetch('/portal/admin/sms-cookie', {method:'POST', body:fd, credentials:'same-origin'});
+    const d = await res.json();
+    if (d.ok) {
+      const t = d.test || {};
+      showToast((t.valid ? '✅ 저장 완료 · 유효성 확인됨: ' : '⚠️ 저장은 완료됐지만 유효성 확인 실패: ') + (t.message || ''));
+      setTimeout(() => location.reload(), 1500);
+    } else { showToast('❌ 저장 실패'); }
+  }
+  async function testSmsCookie() {
+    const res = await fetch('/portal/admin/sms-cookie-test', {method:'POST', credentials:'same-origin'});
+    const d = await res.json();
+    const t = d.test || {};
+    showToast((t.valid ? '✅ 유효함: ' : '❌ 무효/실패: ') + (t.message || ''));
   }
   async function resetPw(empCode, name) {
     if (!confirm(`${name}(${empCode})의 비밀번호를 초기화하시겠습니까?\n임시 비밀번호: 사번 뒤 4자리`)) return;
