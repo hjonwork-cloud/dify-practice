@@ -2022,6 +2022,7 @@ async def admin_users_page(request: Request):
         "updated_by": (_sms_meta or {}).get("updated_by") or "",
         "updated_at": (_sms_meta or {}).get("updated_at") or "",
         "failures_24h": portal_db.count_dm_failures_since(24),
+        "health": _get_sms_cookie_health(),
     }
     return _render(request, "portal_admin_users.html",
                    users=users, pw_status=pw_status, login_logs=login_logs,
@@ -2057,6 +2058,18 @@ def _mask_cookie(cookie: str) -> str:
     return f"{cookie[:16]}…({len(cookie)}자)…{cookie[-8:]}"
 
 
+def _get_sms_cookie_health() -> dict:
+    """sms_keepalive.py가 주기적으로 기록하는 최근 자동 점검 결과를 조회.
+    아직 한 번도 점검되지 않았으면(서버 방금 재시작 등) 빈 dict를 반환."""
+    try:
+        raw = portal_db.get_setting("sms_cookie_health", "")
+        if not raw:
+            return {}
+        return json.loads(raw)
+    except Exception:
+        return {}
+
+
 @router.get("/admin/sms-cookie-status")
 async def admin_sms_cookie_status(request: Request):
     """(관리자용) 현재 SMS 세션쿠키 상태 + 최근 24시간 DM 발송 실패 통계 조회."""
@@ -2072,6 +2085,7 @@ async def admin_sms_cookie_status(request: Request):
         "updated_by": (meta or {}).get("updated_by") or "",
         "updated_at": (meta or {}).get("updated_at") or "",
         "failures_24h": fail_stats,
+        "health": _get_sms_cookie_health(),
     })
 
 

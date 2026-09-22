@@ -141,10 +141,27 @@
         {% endif %}
       </span>
     </div>
+    <div class="sms-status" style="margin-top:-.6rem;">
+      <span>자동 유지(keep-alive):
+        {% if sms_cookie_info.health.ts %}
+          {% if sms_cookie_info.health.valid %}
+            <span class="badge ok">정상</span>
+          {% else %}
+            <span class="badge danger">실패</span>
+          {% endif %}
+          <span style="color:#6b7280;">마지막 자동 점검 {{ sms_cookie_info.health.ts }} · {{ sms_cookie_info.health.message }}</span>
+        {% else %}
+          <span class="badge gray">점검 대기중</span>
+        {% endif %}
+      </span>
+    </div>
     <p style="font-size:.78rem;color:#6b7280;margin:.2rem 0 .6rem;">
       사내망(direct.dongwon.com)에 로그인 후 브라우저 개발자도구(F12) → Application/저장공간 → 쿠키에서
       <code>ASP.NET_SessionId</code>, <code>Smart2Application</code> 값을 복사해 아래에 붙여넣고 저장하세요.
       저장 시 재배포/재시작 없이 즉시 전 사용자에게 반영됩니다.
+      저장된 쿠키는 서버가 10분마다 자동으로 세션 유지 점검을 수행해, 브라우저를 계속 열어둔 것과 같은
+      효과로 세션이 오래 유지되도록 합니다(단, 서버 측에서 세션을 강제 종료하거나 완전히 만료시키는 경우는
+      막을 수 없으므로 그 경우엔 재로그인 후 다시 저장해야 합니다).
     </p>
     <textarea id="smsCookieInput" placeholder="예: ASP.NET_SessionId=xxxxx; Smart2Application=yyyyy"></textarea>
     <div style="margin-top:.6rem;">

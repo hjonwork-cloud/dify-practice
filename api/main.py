@@ -77,6 +77,8 @@ import admin_db  # VOC 접수 / 공개 FAQ 자동응답
 
 # ── 크롤러 스케줄러 (매일 03:00 KST) ────────────────────────────────────────
 import crawl_scheduler as _crawl_scheduler
+# ── 사내 SMS 세션쿠키 자동 유지(keep-alive) 스케줄러 (10분마다 점검) ───────
+import sms_keepalive as _sms_keepalive
 
 from contextlib import asynccontextmanager
 
@@ -84,8 +86,10 @@ from contextlib import asynccontextmanager
 async def _lifespan(app):
     """FastAPI lifespan: 시작 시 스케줄러 ON, 종료 시 OFF"""
     _crawl_scheduler.start()
+    _sms_keepalive.start()
     yield
     _crawl_scheduler.stop()
+    _sms_keepalive.stop()
 
 app.router.lifespan_context = _lifespan
 
