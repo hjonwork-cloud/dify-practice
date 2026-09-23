@@ -16,7 +16,8 @@
 
   "permissions": [
     "tabs",
-    "cookies"
+    "cookies",
+    "webNavigation"
   ],
 
   "externally_connectable": {

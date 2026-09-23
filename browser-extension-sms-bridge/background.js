@@ -118,7 +118,39 @@ async function warmUpSession(timeoutMs = 12000) {
           // 일부 Chrome/Edge 버전에서 로딩 자체가 취소되는 현상이 있어 순서를 분리함)
           try { chrome.windows.update(winId, { state: "minimized" }); } catch (e) {}
 
+          // 진단: 예열 중 이 탭(메인 프레임)이 실제로 거쳐가는 모든 URL을 순서대로 기록.
+          // 최종 URL만 봐서는 리다이렉트 체인이 정확히 어디서 갈라지는지 알 수 없어서,
+          // chrome.webNavigation으로 매 단계(요청 시작/커밋 시점)를 실시간으로 남긴다.
+          function onBeforeNav(details) {
+            if (details.tabId === tabId && details.frameId === 0) {
+              console.log("[SMS 브릿지][nav 시작]", details.url);
+            }
+          }
+          function onCommitted(details) {
+            if (details.tabId === tabId && details.frameId === 0) {
+              console.log("[SMS 브릿지][nav 커밋]", details.url, "(transitionType=" + details.transitionType + ", qualifiers=" + JSON.stringify(details.transitionQualifiers) + ")");
+            }
+          }
+          function onErrorOccurred(details) {
+            if (details.tabId === tabId && details.frameId === 0) {
+              console.log("[SMS 브릿지][nav 오류]", details.url, details.error);
+            }
+          }
+          try {
+            chrome.webNavigation.onBeforeNavigate.addListener(onBeforeNav);
+            chrome.webNavigation.onCommitted.addListener(onCommitted);
+            chrome.webNavigation.onErrorOccurred.addListener(onErrorOccurred);
+          } catch (e) {
+            console.log("[SMS 브릿지] webNavigation 리스너 등록 실패:", e);
+          }
+          const removeNavListeners = () => {
+            try { chrome.webNavigation.onBeforeNavigate.removeListener(onBeforeNav); } catch (e) {}
+            try { chrome.webNavigation.onCommitted.removeListener(onCommitted); } catch (e) {}
+            try { chrome.webNavigation.onErrorOccurred.removeListener(onErrorOccurred); } catch (e) {}
+          };
+
           const cleanupAndFinish = (reason) => {
+            removeNavListeners();
             // 진단: 예열 종료 시점에 탭이 실제로 어느 URL에 있는지 확인
             try {
               chrome.tabs.get(tabId, (tab) => {
