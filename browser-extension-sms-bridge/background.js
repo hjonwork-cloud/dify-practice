@@ -39,33 +39,48 @@ function looksLikeAuthError(bodyText) {
  *
  * ⚠️ fetch()로 팝업 HTML만 받아오는 방식은 실패함이 확인됨 — 페이지 안의 JS(세션
  *    초기화 또는 SSO 재인증)가 전혀 실행되지 않기 때문. 그룹웨어에서 수동으로 팝업을
- *    띄우면 성공하는 것과 동일하게 만들기 위해, 실제 미니화된 창(탭)을 열어 페이지를
- *    완전히 로드한 후(JS 실행 포함) 닫는 방식으로 바꿈.
+ *    띄우면 성공하는 것과 동일하게 만들기 위해, 실제 창(탭)을 열어 페이지를 완전히
+ *    로드한 후(JS 실행 포함) 닫는 방식으로 바꿈.
+ * ⚠️ state:"minimized"로 생성 즉시 최소화하면 일부 Chrome/Edge 버전에서 실제 페이지
+ *    로딩이 완료되지 않고 취소되는 현상이 있어, 대신 화면 밖(off-screen) 좌표에
+ *    작은 창을 띄우는 방식으로 변경함(로딩은 정상적으로 완료됨).
  */
-async function warmUpSession(timeoutMs = 6000) {
+async function warmUpSession(timeoutMs = 8000) {
   return new Promise((resolve) => {
     let settled = false;
-    const finish = () => { if (!settled) { settled = true; resolve(); } };
+    const finish = (reason) => {
+      if (!settled) {
+        settled = true;
+        console.log("[SMS 브릿지] warmUpSession 종료:", reason);
+        resolve();
+      }
+    };
     try {
       chrome.windows.create(
-        { url: SMS_SERVER_URL, focused: false, state: "minimized", type: "popup" },
+        { url: SMS_SERVER_URL, focused: false, type: "popup",
+          width: 420, height: 320, left: -3000, top: -3000 },
         (win) => {
-          if (chrome.runtime.lastError || !win) { finish(); return; }
+          if (chrome.runtime.lastError || !win) {
+            console.log("[SMS 브릿지] warmUpSession 창 생성 실패:", chrome.runtime.lastError);
+            finish("create_failed"); return;
+          }
           const winId = win.id;
           const tabId = win.tabs && win.tabs[0] && win.tabs[0].id;
+          console.log("[SMS 브릿지] warmUpSession 창 생성됨:", winId, tabId);
           const timer = setTimeout(() => {
             try { chrome.tabs.onUpdated.removeListener(onUpdated); } catch (e) {}
             try { chrome.windows.remove(winId); } catch (e) {}
-            finish();
+            finish("timeout");
           }, timeoutMs);
           function onUpdated(updatedTabId, info) {
             if (updatedTabId === tabId && info.status === "complete") {
+              console.log("[SMS 브릿지] warmUpSession 페이지 로드 완료");
               // 로드 완료 후에도 페이지 JS가 추가 AJAX를 보낼 수 있으므로 약간 대기
               setTimeout(() => {
                 clearTimeout(timer);
                 try { chrome.tabs.onUpdated.removeListener(onUpdated); } catch (e) {}
                 try { chrome.windows.remove(winId); } catch (e) {}
-                finish();
+                finish("loaded");
               }, 1200);
             }
           }
@@ -73,7 +88,8 @@ async function warmUpSession(timeoutMs = 6000) {
         }
       );
     } catch (e) {
-      finish();
+      console.log("[SMS 브릿지] warmUpSession 예외:", e);
+      finish("exception");
     }
   });
 }
@@ -103,6 +119,7 @@ async function callSendSms({ phone, message, callback, msgType, scheduledAt }) {
   });
 
   const bodyText = await resp.text();
+  console.log("[SMS 브릿지] Send_SMS 응답 status=%d, body(앞 500자)=%s", resp.status, bodyText.slice(0, 500));
 
   if (looksLikeAuthError(bodyText)) {
     return {
