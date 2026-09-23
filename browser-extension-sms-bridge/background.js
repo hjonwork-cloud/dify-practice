@@ -167,6 +167,22 @@ async function logDirectCookiesSnapshot(label) {
   } catch (e) {
     console.log("[SMS 브릿지] 쿠키 스냅샷(dongwon.com) 조회 실패:", e);
   }
+  // ⚠️ 실제 리다이렉트 종착지는 direct.dongwon.com이 아니라 www.dongwon.net이다.
+  // SSO/로그인 상태를 판별하는 세션 힌트 쿠키가 dongwon.net 쪽에 있을 가능성이 높은데,
+  // 지금까지는 dongwon.com(.com!)만 조회했지 dongwon.net(.net!)은 한 번도 확인한 적이
+  // 없었다. 두 도메인은 서로 다른 TLD라서 domain 필터가 겹치지 않는다.
+  try {
+    const netWide = await chrome.cookies.getAll({ domain: "dongwon.net" });
+    console.log(`[SMS 브릿지] dongwon.net(상위 도메인) 쿠키 스냅샷(${label}):`, netWide.map((c) => `${c.name}(domain=${c.domain})`));
+  } catch (e) {
+    console.log("[SMS 브릿지] 쿠키 스냅샷(dongwon.net) 조회 실패:", e);
+  }
+  try {
+    const wwwNet = await chrome.cookies.getAll({ url: "https://www.dongwon.net/" });
+    console.log(`[SMS 브릿지] www.dongwon.net 요청 시 첨부될 쿠키 전체(${label}, url 필터):`, wwwNet.map((c) => `${c.name}(domain=${c.domain})`));
+  } catch (e) {
+    console.log("[SMS 브릿지] 쿠키 스냅샷(www.dongwon.net url) 조회 실패:", e);
+  }
 }
 
 async function clearRefererOverrideRule() {
