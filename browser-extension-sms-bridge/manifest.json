@@ -15,7 +15,8 @@
   ],
 
   "permissions": [
-    "tabs"
+    "tabs",
+    "cookies"
   ],
 
   "externally_connectable": {

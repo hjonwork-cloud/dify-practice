@@ -62,7 +62,37 @@ function looksLikeAuthError(bodyText) {
  *    예열이 끝난 시점에 탭이 실제로 어디에 도달했는지(SMS_Service.aspx까지 갔는지,
  *    아니면 Login.aspx/oidc 로그인 페이지에 멈춰 있는지) 콘솔에 진단 로그를 남긴다.
  */
+/** direct.dongwon.com에 남아있는 쿠키를 전부 지운다.
+ *
+ * 왜 필요한가: 콘솔 로그로 확인한 결과, 예열용 창을 SMS_Service.aspx로 바로 열면
+ * 서버가 Login.aspx → SsoHelper.aspx → OIDC 인증 → Callback.aspx 순으로 정상적으로
+ * 리다이렉트를 태우지만, 최종적으로 SMS_Service.aspx가 아니라 포털 홈
+ * (www.dongwon.net/portalapp/home)으로 돌아와 버리는 현상이 있었다.
+ * OIDC 콜백에는 state 파라미터가 없어서 "인증 후 어디로 돌아갈지"는 서버 세션에
+ * 저장된 값을 따르는 것으로 보이는데, 이 확장 프로그램으로 과거에 시도했던 여러
+ * 예열 방식(Sso Helper 직접 방문 등)이 같은 세션 쿠키에 잘못된 "돌아갈 곳" 정보를
+ * 남겨뒀을 가능성이 있다. 예열 직전에 direct.dongwon.com 쿠키를 전부 지워서 완전히
+ * 깨끗한 상태에서 Login.aspx부터 다시 시작하게 만든다.
+ * (Brity SSO 로그인 자체는 다른 도메인의 쿠키이므로 영향받지 않는다.)
+ */
+async function clearDirectCookies() {
+  try {
+    const cookies = await chrome.cookies.getAll({ domain: "direct.dongwon.com" });
+    console.log("[SMS 브릿지] direct.dongwon.com 쿠키 삭제 대상:", cookies.map((c) => c.name));
+    await Promise.all(
+      cookies.map((c) => {
+        const protocol = c.secure ? "https:" : "http:";
+        const url = `${protocol}//${c.domain.replace(/^\./, "")}${c.path}`;
+        return chrome.cookies.remove({ url, name: c.name }).catch(() => {});
+      })
+    );
+  } catch (e) {
+    console.log("[SMS 브릿지] 쿠키 삭제 중 예외:", e);
+  }
+}
+
 async function warmUpSession(timeoutMs = 12000) {
+  await clearDirectCookies();
   return new Promise((resolve) => {
     let settled = false;
     const finish = (reason) => {
