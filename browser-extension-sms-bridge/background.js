@@ -353,6 +353,11 @@ async function warmUpSession(senderTabId, timeoutMs = 12000) {
           { urls: ["https://direct.dongwon.com/*", "https://www.dongwon.net/*"] },
           ["requestHeaders"]
         );
+        chrome.webRequest.onHeadersReceived.addListener(
+          onHeadersReceived,
+          { urls: ["https://direct.dongwon.com/*", "https://www.dongwon.net/*"] },
+          ["responseHeaders", "extraHeaders"]
+        );
       } catch (e) {
         console.log("[SMS 브릿지] webRequest 리스너 등록 실패:", e);
       }
@@ -365,6 +370,7 @@ async function warmUpSession(senderTabId, timeoutMs = 12000) {
         try { chrome.webRequest.onCompleted.removeListener(onCompleted); } catch (e) {}
         try { chrome.webRequest.onErrorOccurred.removeListener(onRequestErrorOccurred); } catch (e) {}
         try { chrome.webRequest.onBeforeSendHeaders.removeListener(onBeforeSendHeaders); } catch (e) {}
+        try { chrome.webRequest.onHeadersReceived.removeListener(onHeadersReceived); } catch (e) {}
       };
 
       const closeWarmupTarget = () => {
