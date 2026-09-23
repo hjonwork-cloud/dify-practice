@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "동원홈푸드 SMS 발송 브릿지",
+  "version": "1.0.0",
+  "description": "포털(dw-fsi-platform)에서 클릭한 SMS 발송 요청을, 현재 브라우저에 이미 로그인되어 있는 Direct(direct.dongwon.com) 세션을 그대로 사용해 전달합니다. 별도 프로그램 실행이나 백그라운드 상주 없이, 이 확장 프로그램이 설치된 상태에서만 동작합니다.",
+
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv7yv7qQFPe9UVOPA1BKMHZWOkDi2KI3reIcy1wTdeymuTAAVQkrqedCKQ45AYvXjSCwOGQse1XMRJfcbL61terMRDPKVtnYgAPJHeiD1JGHaS07QhMxF2oP9jX4gtZ/hlGZoRFyYiBcn6SvgxrSb4fMUgDQ8fCClcEyZ6v2qXmDRBY/IeWYVAPFldZfoiQUdYFNx7h/Bnf14xBYHUCzmmhPTYnNgL7qSFWARU/Ors249M/rXjcpUEurZgKitomITGXA5Ca4eQtU/Wt/TxCJT0YGEXUjT5IcB0krzsUisTYv43oeyYG/MWT2Df6dFUuGynuFc5XCmnjMdzanspmgeDQIDAQAB",
+
+  "background": {
+    "service_worker": "background.js"
+  },
+
+  "host_permissions": [
+    "https://direct.dongwon.com/*"
+  ],
+
+  "externally_connectable": {
+    "matches": [
+      "https://dw-fsi-platform-cgg6apc4ffaxb4d5.koreacentral-01.azurewebsites.net/*",
+      "http://localhost:8000/*",
+      "http://127.0.0.1:8000/*",
+      "https://localhost:8000/*"
+    ]
+  },
+
+  "minimum_chrome_version": "88"
+}

@@ -3079,6 +3079,9 @@ class _DmSendPayload(BaseModel):
     dm_phone: str = ""                # DM 발송 확인 팝업에서 편집된 수신번호 (연동 전 단계, 로그 전달용)
     dm_callback: str = ""             # DM 발송 확인 팝업에서 편집된 회신(발신)번호
     dm_scheduled_at: str = ""         # 예약발송 시각 "YYYY-MM-DD H:MM" (즉시발송이면 빈 문자열)
+    client_sms_result: dict | None = None  # 브라우저 확장(SMS 발송 브릿지)이 이미 발송한 경우의 결과.
+                                            # 있으면 서버는 재발송하지 않고 이 결과를 그대로 로그에 사용한다
+                                            # (개인 세션 기반 발송 — 확장 미설치 PC는 None이라 기존 서버 발송으로 폴백)
 
 
 @router.post("/dm-send-with-price")
@@ -3128,11 +3131,20 @@ async def dm_send_with_price(request: Request, body: _DmSendPayload):
     dm_attempted = body.action_type in ("dm_only", "price_and_dm")
     sms_result: dict = {}
     if dm_attempted:
-        if not body.dm_phone:
+        if body.client_sms_result is not None:
+            # 브라우저 확장(SMS 발송 브릿지)이 사용자 본인의 direct.dongwon.com 세션으로
+            # 이미 발송을 마친 경우 — 서버는 재발송하지 않고 그 결과를 그대로 로그에 사용한다.
+            # (개인별 세션 기반 발송이라 공유 쿠키보다 신뢰도가 높고, 발신 이력도 실제
+            #  로그인한 영업사원 본인 기준으로 정확히 남는다.)
+            sms_result = dict(body.client_sms_result)
+            sms_result.setdefault("via", "extension")
+            logger.info("[DM] 확장 프로그램 발송 결과 수신: success=%s", sms_result.get("success"))
+        elif not body.dm_phone:
             sms_result = {"success": False, "status_code": None, "message": "수신번호가 없어 DM 발송을 건널뛰었습니다."}
         elif not body.dm_message:
             sms_result = {"success": False, "status_code": None, "message": "발송할 메시지 내용이 없습니다."}
         else:
+            # 확장 프로그램이 없는 PC(폴백) — 기존처럼 서버가 공유 쿠키로 발송
             sms_result = send_sms_api_call(
                 receiver_phone=body.dm_phone,
                 message_text=body.dm_message,
@@ -3140,6 +3152,7 @@ async def dm_send_with_price(request: Request, body: _DmSendPayload):
                 msg_type=("2" if len(body.dm_message) > 80 else "1"),
                 scheduled_at=body.dm_scheduled_at,
             )
+            sms_result.setdefault("via", "server")
         sap_result["sms_result"] = sms_result
         if not sms_result.get("success"):
             logger.warning("[DM] SMS 발송 실패: %s", sms_result.get("message"))

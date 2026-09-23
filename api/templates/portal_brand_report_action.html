@@ -843,6 +843,49 @@
     return res.json();
   }
 
+  // ─── SMS 발송 브릿지(브라우저 확장) 연동 ─────────────────
+  // 확장이 설치돼 있으면(개인 PC에 이미 로그인된 direct.dongwon.com 세션을 그대로 사용해서)
+  // 브라우저에서 직접 발송하고, 없으면 null을 반환해 기존 서버 경유 발송(공유 쿠키)으로 자동 폴백한다.
+  const SMS_EXT_ID = 'bndgknhcmfakobpppgndlpdloalmkbne';
+
+  function _extMessage(msg, timeoutMs = 8000) {
+    return new Promise((resolve) => {
+      if (!(window.chrome && chrome.runtime && chrome.runtime.sendMessage)) {
+        resolve({ ok: false, error: 'no_extension_api' }); return;
+      }
+      let done = false;
+      const timer = setTimeout(() => { if (!done) { done = true; resolve({ ok: false, error: 'timeout' }); } }, timeoutMs);
+      try {
+        chrome.runtime.sendMessage(SMS_EXT_ID, msg, (response) => {
+          if (done) return;
+          done = true; clearTimeout(timer);
+          if (chrome.runtime.lastError) {
+            resolve({ ok: false, error: chrome.runtime.lastError.message || '확장 프로그램 없음' });
+          } else {
+            resolve(response || { ok: false, error: 'empty_response' });
+          }
+        });
+      } catch (e) {
+        done = true; clearTimeout(timer);
+        resolve({ ok: false, error: String(e) });
+      }
+    });
+  }
+
+  /** 확장 설치 확인 후 있으면 현재 로그인 세션으로 직접 발송, 없으면 null(서버 폴백 신호) 반환 */
+  async function _trySendSmsViaExtension({ phone, message, callback, scheduledAt }) {
+    const ping = await _extMessage({ type: 'ping' });
+    if (!ping || !ping.ok) return null; // 확장 미설치/미응답 → 서버 경유로 폴백
+    const send = await _extMessage({
+      type: 'send_sms', phone, message, callback,
+      msgType: (message || '').length > 80 ? '2' : '1', scheduledAt: scheduledAt || '',
+    });
+    if (!send || !send.ok) {
+      return { success: false, status_code: null, message: (send && send.error) || '확장 프로그램 오류' };
+    }
+    return send.result; // {success, status, message}
+  }
+
   // ─── 판가만 SAP 등록 ───────────────────────────────
   window.sendPriceOnly = async function(uid, custCode, custName, brandCode, brandName, plantCode, btn) {
     const resultEl = document.getElementById(`priceResult_${uid}`);
@@ -875,10 +918,14 @@
     const resultEl = document.getElementById(`priceResult_${uid}`);
     btn.disabled = true; btn.textContent = '발송 중...'; resultEl.style.display = 'none';
     try {
+      const clientSmsResult = await _trySendSmsViaExtension({
+        phone: ctx?.receiver || '', message, callback: ctx?.callback || '', scheduledAt: ctx?.scheduledAt || '',
+      });
       const data = await _logToServer({ customer_code: custCode, customer_name: custName,
         brand_code: brandCode, brand_name: brandName, action_type: 'dm_only',
         dm_message: message, price_items: [], sap_result: {},
-        dm_phone: ctx?.receiver || '', dm_callback: ctx?.callback || '', dm_scheduled_at: ctx?.scheduledAt || '' });
+        dm_phone: ctx?.receiver || '', dm_callback: ctx?.callback || '', dm_scheduled_at: ctx?.scheduledAt || '',
+        client_sms_result: clientSmsResult });
       if (data.success) {
         resultEl.textContent = ctx?.scheduledAt ? `✅ 예약 발송 등록 완료 (${ctx.scheduledAt})` : '✅ DM 발송 완료';
         resultEl.className = 'send-result ok';
@@ -915,10 +962,14 @@
     }
     btn.textContent = 'DM 발송 중...';
     try {
+      const clientSmsResult = await _trySendSmsViaExtension({
+        phone: ctx?.receiver || '', message, callback: ctx?.callback || '', scheduledAt: ctx?.scheduledAt || '',
+      });
       const data = await _logToServer({ customer_code: custCode, customer_name: custName,
         brand_code: brandCode, brand_name: brandName, action_type: 'price_and_dm',
         dm_message: message, price_items: priceItems, sap_result: sapResult,
-        dm_phone: ctx?.receiver || '', dm_callback: ctx?.callback || '', dm_scheduled_at: ctx?.scheduledAt || '' });
+        dm_phone: ctx?.receiver || '', dm_callback: ctx?.callback || '', dm_scheduled_at: ctx?.scheduledAt || '',
+        client_sms_result: clientSmsResult });
       if (data.success) {
         resultEl.textContent = ctx?.scheduledAt
           ? `✅ 판가 ${sapResult.saved_count || priceItems.length}건 등록 + 예약 발송 등록 완료 (${ctx.scheduledAt})`
