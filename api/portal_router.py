@@ -2876,6 +2876,7 @@ def _test_sms_cookie_validity(cookie: str) -> dict:
     noop_payload = {"pNumsCount": "0", "pDstaddr": "", "pMsg": "", "pMsgType": "1",
                      "pRequestTime": "", "pCallBack": "", "pPath": ""}
     try:
+        _warm_up_sms_session(cookie)
         resp = httpx.post(SMS_API_URL, headers=headers, json=noop_payload, timeout=15)
         body = resp.text
         if "Error Notice" in body or "찾으시려는 웹페이지" in body or "Login.aspx" in body:
@@ -2886,6 +2887,33 @@ def _test_sms_cookie_validity(cookie: str) -> dict:
         return {"valid": True, "status_code": resp.status_code, "message": "정상 응답 (유효한 것으로 보임)"}
     except Exception as e:
         return {"valid": False, "message": f"접속 실패: {e} (사내망/VPN 미접속 일 수 있음)"}
+
+
+def _warm_up_sms_session(cookie: str) -> None:
+    """Send_SMS 호출 전 SMS_Service.aspx 팝업 페이지를 먼저 GET으로 한 번 열어둔다.
+
+    관찰된 현상: 로그인 세션 자체는 유효한데도 팝업 페이지를 한 번도 로드하지 않은 상태에서
+    곧바로 Send_SMS를 호출하면 "인증 만료"처럼 보이는 오류 응답이 온다 (그룹웨어에서 SMS
+    발송 팝업을 먼저 띄운 뒤 포털에서 발송하면 성공하는 것과 일치). Page_Load 시점에
+    서버 세션에 어떤 상태값(토큰 등)이 설정되어야 Send_SMS가 정상 동작하는 것으로 추정됨.
+    실패해도 예외를 삼키고 넘어간다(예열 실패는 치명적이지 않음 — 그다음 POST에서 어차피
+    실패하면 정상적으로 에러 메시지가 나간다).
+    """
+    import httpx
+    try:
+        httpx.get(
+            SMS_SERVER_URL,
+            headers={
+                "Cookie": cookie,
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                ),
+            },
+            timeout=10,
+        )
+    except Exception:
+        pass
 
 
 def test_sms_server_connection() -> dict:
@@ -2976,6 +3004,8 @@ def send_sms_api_call(
 
     try:
         logger.info("[SMS] 발송 요청 → 수신처=%s, 회신번호=%s", target_phone, sender_number)
+        if cookie_header:
+            _warm_up_sms_session(cookie_header)
         resp = httpx.post(SMS_API_URL, headers=headers, json=payload, timeout=30)
         res_text = resp.text
         if "Error Notice" in res_text or "찾으시려는 웹페이지" in res_text:

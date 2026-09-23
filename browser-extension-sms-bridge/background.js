@@ -35,8 +35,26 @@ function looksLikeAuthError(bodyText) {
   );
 }
 
-/** 실제 Send_SMS 호출 (msg가 빈 문자열이면 no-op 유효성 검사용으로도 사용 가능) */
+/** 실제 Send_SMS 호출 (msg가 빈 문자열이면 no-op 유효성 검사용으로도 사용 가능)
+ *
+ * ⚠️ 팝업 페이지(SMS_Service.aspx)를 먼저 로드하지 않고 곧바로 Send_SMS를 호출하면
+ *    "인증 만료"처럼 보이는 오류가 발생하는 현상이 관찰됨(로그인 세션 자체는 유효한데도
+ *    발생) — 그룹웨어에서 SMS 발송 팝업을 먼저 띄운 뒤 포털에서 발송하면 성공하는 것과
+ *    일치. 즉 Page_Load 시점에 서버 세션에 뭔가(토큰/상태값)가 설정되어야 Send_SMS가
+ *    정상 동작하는 것으로 추정됨. 그래서 매번 발송 전 팝업 페이지를 GET으로 먼저
+ *    "예열"해서 이 상태를 만들어준다.
+ */
+async function warmUpSession() {
+  try {
+    await fetch(SMS_SERVER_URL, { method: "GET", credentials: "include" });
+  } catch (e) {
+    // 예열 실패해도 일단 발송은 시도해본다 (네트워크 일시 오류일 수 있음)
+  }
+}
+
 async function callSendSms({ phone, message, callback, msgType, scheduledAt }) {
+  await warmUpSession();
+
   const payload = {
     pNumsCount: phone ? "1" : "0",
     pDstaddr: (phone || "").replace(/[^0-9]/g, ""),
