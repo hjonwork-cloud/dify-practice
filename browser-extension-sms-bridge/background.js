@@ -136,17 +136,19 @@ async function setRefererOverrideRule() {
   }
 }
 
-/** 진단: 이 규칙이 실제로 어떤 요청에 매치되어 발동했는지 확인.
- * (declarativeNetRequestFeedback 권한 필요) 로그에 아무것도 안 찍히면 규칙 자체가
- * 전혀 발동하지 않았다는 뜻이고, 그러면 Referer 강제 주입이 원인이 아니라 애초에
- * 적용되지 않고 있었다는 것이 확정된다.
+/** 진단(비파괴적): direct.dongwon.com 쿠키를 삭제하지 않고 그대로 스냅샷으로만 남긴다.
+ * netlog 재분석 결과, 성공한 케이스의 최초 SMS_Service.aspx 요청에는 "cookie: [493 bytes
+ * were stripped]"가 찍혀 있었다(즉 이미 예전부터 direct.dongwon.com 쿠키가 존재했다).
+ * 반면 우리 테스트에서는 매번 "쿠키 삭제 대상: []" — 애초에 쿠키가 하나도 없었다.
+ * 즉 clearDirectCookies()로 지우는 것 자체가 원인이었을 가능성이 높다. 이제는 지우지 않고,
+ * 예열 종료 시점에 실제 쿠키가 생겼는지만 확인한다.
  */
-async function logMatchedRefererRules() {
+async function logDirectCookiesSnapshot(label) {
   try {
-    const result = await chrome.declarativeNetRequest.getMatchedRules({});
-    console.log("[SMS 브릿지] declarativeNetRequest 매치된 규칙 목록:", JSON.stringify(result));
+    const cookies = await chrome.cookies.getAll({ domain: "direct.dongwon.com" });
+    console.log(`[SMS 브릿지] direct.dongwon.com 쿠키 스냅샷(${label}):`, cookies.map((c) => c.name));
   } catch (e) {
-    console.log("[SMS 브릿지] getMatchedRules 조회 실패:", e);
+    console.log("[SMS 브릿지] 쿠키 스냅샷 조회 실패:", e);
   }
 }
 
@@ -207,12 +209,22 @@ async function openWarmupTabFromSender(senderTabId, timeoutMs = 3000) {
 }
 
 async function warmUpSession(senderTabId, timeoutMs = 12000) {
-  await clearDirectCookies();
-  await setRefererOverrideRule();
+  // ⚠️ 중요: 예전에는 여기서 clearDirectCookies()를 먼저 호출해 direct.dongwon.com
+  // 쿠키를 전부 지우고 시작했었다. 그런데 netlog를 다시 분석해보니, 실제로 성공한
+  // 케이스의 최초 SMS_Service.aspx 요청에는 "cookie: [493 bytes were stripped]"가
+  // 찍혀 있었다 — 즉 요청 시점에 이미 direct.dongwon.com 쿠키가 존재했고, 그 덕분에
+  // 서버가 ReturnUrl을 살려서 SsoHelper.aspx로 제대로 라우팅했다. 반면 우리 테스트에서는
+  // 매번 "쿠키 삭제 대상: []" — 애초에 쿠키가 하나도 없는 상태였다. 즉 쿠키를 지우는
+  // 것 자체가 "서버가 어디서 온 요청인지 추적할 단서가 없는" 상태를 만들어 실패를
+  // 유발하고 있었을 가능성이 크다. 그래서 쿠키 삭제 단계를 제거한다.
+  // Referer 강제 주입도 실제로 매치까지 확인했지만 결과에 아무 영향이 없었으므로
+  // (가설 기각) 더 이상 호출하지 않는다.
 
   let warmupTabId = null;
   let warmupWinId = null;
   let openedFromSender = false;
+
+  await logDirectCookiesSnapshot("예열 시작 전");
 
   if (typeof senderTabId === "number") {
     const opened = await openWarmupTabFromSender(senderTabId);
@@ -232,7 +244,6 @@ async function warmUpSession(senderTabId, timeoutMs = 12000) {
       if (!settled) {
         settled = true;
         console.log("[SMS 브릿지] warmUpSession 종료:", reason);
-        clearRefererOverrideRule();
         resolve();
       }
     };
@@ -346,7 +357,7 @@ async function warmUpSession(senderTabId, timeoutMs = 12000) {
             if (!chrome.runtime.lastError && tab) {
               console.log("[SMS 브릿지] warmUpSession 최종 탭 URL:", tab.url);
             }
-            logMatchedRefererRules().finally(() => {
+            logDirectCookiesSnapshot("종료 시점").finally(() => {
               closeWarmupTarget();
               finish(reason);
             });
