@@ -23,11 +23,14 @@
   이 ID는 포털 프론트(`portal_brand_report_action.html`)의 `SMS_EXT_ID` 상수와
   반드시 일치해야 통신이 됩니다.
 - `background.js` — 실제 발송 로직 (외부 페이지의 메시지를 받아 Direct에 발송).
-- `extension_private_key.pem` — 위 고정 ID를 만든 개인키. **git에 커밋되지
-  않습니다**(`.gitignore`에 `*.pem` 추가됨). 분실 시 `_gen_key.py`를 다시 돌리면
-  되지만, 그러면 ID가 바뀌므로 포털 프론트의 `SMS_EXT_ID`도 같이 바꿔야 합니다.
-  **분실하지 않도록 안전한 곳에 별도 백업 권장.**
-- `_gen_key.py` — 위 키/ID를 생성한 1회성 스크립트 (참고용, 재실행 불필요).
+- `../_ext_private_key.pem` (확장 폴더 밖, `dify-practice/` 루트) — 위 고정 ID를
+  만든 개인키. **이 폴더 안에 두면 Chrome이 "키 파일을 포함합니다" 경고를 띄우고
+  향후 배포/패키징 시 문제가 될 수 있어 의도적으로 폴더 밖에 둠.** git에도 커밋되지
+  않습니다(`.gitignore`에 `*.pem` 추가됨). 분실 시 `../_ext_gen_key.py`를 다시
+  돌리면 되지만, 그러면 ID가 바뀌므로 포털 프론트의 `SMS_EXT_ID`도 같이 바꿔야
+  합니다. **분실하지 않도록 안전한 곳에 별도 백업 권장.**
+- `../_ext_gen_key.py` (확장 폴더 밖) — 위 키/ID를 생성한 1회성 스크립트 (참고용,
+  재실행 불필요).
 
 ## 테스트(파일럿) 설치 방법 — 개발자 모드
 1. Chrome/Edge 주소창에 `chrome://extensions` (Edge는 `edge://extensions`) 입력
