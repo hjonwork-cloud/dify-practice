@@ -11,13 +11,15 @@
   },
 
   "host_permissions": [
-    "https://direct.dongwon.com/*"
+    "https://direct.dongwon.com/*",
+    "https://www.dongwon.net/*"
   ],
 
   "permissions": [
     "tabs",
     "cookies",
-    "webNavigation"
+    "webNavigation",
+    "webRequest"
   ],
 
   "externally_connectable": {

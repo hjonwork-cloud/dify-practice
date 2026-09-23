@@ -143,10 +143,51 @@ async function warmUpSession(timeoutMs = 12000) {
           } catch (e) {
             console.log("[SMS 브릿지] webNavigation 리스너 등록 실패:", e);
           }
+
+          // 진단(핵심): chrome.webNavigation.onCommitted는 여러 번의 302 리다이렉트가
+          // 있어도 "최종 도착 URL" 한 번만 알려준다. 그 사이의 모든 302 hop(Login.aspx
+          // → SsoHelper.aspx → oidc/authorize → oidc/login → Callback.aspx 등)을 실제로
+          // 보려면 chrome.webRequest.onBeforeRedirect로 요청 단위 리다이렉트를 추적해야
+          // 한다. main_frame 요청만, 이 tabId에 한해 기록한다.
+          function onBeforeRedirect(details) {
+            if (details.tabId === tabId && details.type === "main_frame") {
+              console.log("[SMS 브릿지][redirect]", details.statusCode, details.url, "→", details.redirectUrl);
+            }
+          }
+          function onCompleted(details) {
+            if (details.tabId === tabId && details.type === "main_frame") {
+              console.log("[SMS 브릿지][요청 완료]", details.statusCode, details.url);
+            }
+          }
+          function onRequestErrorOccurred(details) {
+            if (details.tabId === tabId && details.type === "main_frame") {
+              console.log("[SMS 브릿지][요청 오류]", details.url, details.error);
+            }
+          }
+          try {
+            chrome.webRequest.onBeforeRedirect.addListener(
+              onBeforeRedirect,
+              { urls: ["https://direct.dongwon.com/*", "https://www.dongwon.net/*"] }
+            );
+            chrome.webRequest.onCompleted.addListener(
+              onCompleted,
+              { urls: ["https://direct.dongwon.com/*", "https://www.dongwon.net/*"] }
+            );
+            chrome.webRequest.onErrorOccurred.addListener(
+              onRequestErrorOccurred,
+              { urls: ["https://direct.dongwon.com/*", "https://www.dongwon.net/*"] }
+            );
+          } catch (e) {
+            console.log("[SMS 브릿지] webRequest 리스너 등록 실패:", e);
+          }
+
           const removeNavListeners = () => {
             try { chrome.webNavigation.onBeforeNavigate.removeListener(onBeforeNav); } catch (e) {}
             try { chrome.webNavigation.onCommitted.removeListener(onCommitted); } catch (e) {}
             try { chrome.webNavigation.onErrorOccurred.removeListener(onErrorOccurred); } catch (e) {}
+            try { chrome.webRequest.onBeforeRedirect.removeListener(onBeforeRedirect); } catch (e) {}
+            try { chrome.webRequest.onCompleted.removeListener(onCompleted); } catch (e) {}
+            try { chrome.webRequest.onErrorOccurred.removeListener(onRequestErrorOccurred); } catch (e) {}
           };
 
           const cleanupAndFinish = (reason) => {
