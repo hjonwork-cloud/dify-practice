@@ -19,7 +19,8 @@
     "tabs",
     "cookies",
     "webNavigation",
-    "webRequest"
+    "webRequest",
+    "declarativeNetRequestWithHostAccess"
   ],
 
   "externally_connectable": {

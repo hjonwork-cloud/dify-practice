@@ -91,14 +91,64 @@ async function clearDirectCookies() {
   }
 }
 
+/** Referer 강제 주입용 declarativeNetRequest 세션 규칙 ID (고정값) */
+const REFERER_RULE_ID = 9101;
+
+/** direct.dongwon.com / www.dongwon.net 으로 가는 main_frame 요청에 Referer 헤더를
+ * 강제로 심는다.
+ *
+ * 왜 필요한가: webRequest.onBeforeSendHeaders로 실제 전송 헤더를 찍어보니 예열 창의
+ * 요청에는 Referer가 전혀 없었다(주소창에 직접 입력한 것과 동일하게 취급됨). Chrome은
+ * 보안상 webRequest API로는 Referer를 볼 수도, 고칠 수도 없게 막아뒀기 때문에
+ * (forbidden header), 대신 Referer 수정이 명시적으로 허용된
+ * declarativeNetRequest(modifyHeaders)를 사용해 Referer를 강제로 지정한다.
+ * Login.aspx가 "신뢰할 만한 Referer가 있을 때만 ReturnUrl을 세션에 저장하고
+ * SsoHelper.aspx로 보낸다"는 오픈 리다이렉트 방지 로직을 갖고 있을 것이라는 가설을
+ * 검증/우회하기 위함이다.
+ */
+async function setRefererOverrideRule() {
+  try {
+    await chrome.declarativeNetRequest.updateSessionRules({
+      removeRuleIds: [REFERER_RULE_ID],
+      addRules: [
+        {
+          id: REFERER_RULE_ID,
+          priority: 1,
+          action: {
+            type: "modifyHeaders",
+            requestHeaders: [
+              { header: "Referer", operation: "set", value: "https://direct.dongwon.com/" },
+            ],
+          },
+          condition: {
+            requestDomains: ["direct.dongwon.com", "www.dongwon.net"],
+            resourceTypes: ["main_frame"],
+          },
+        },
+      ],
+    });
+    console.log("[SMS 브릿지] Referer 강제 주입 규칙 등록 완료");
+  } catch (e) {
+    console.log("[SMS 브릿지] Referer 강제 주입 규칙 등록 실패:", e);
+  }
+}
+
+async function clearRefererOverrideRule() {
+  try {
+    await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: [REFERER_RULE_ID] });
+  } catch (e) {}
+}
+
 async function warmUpSession(timeoutMs = 12000) {
   await clearDirectCookies();
+  await setRefererOverrideRule();
   return new Promise((resolve) => {
     let settled = false;
     const finish = (reason) => {
       if (!settled) {
         settled = true;
         console.log("[SMS 브릿지] warmUpSession 종료:", reason);
+        clearRefererOverrideRule();
         resolve();
       }
     };
