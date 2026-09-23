@@ -335,6 +335,20 @@ async function warmUpSession(senderTabId, timeoutMs = 12000) {
           console.log("[SMS 브릿지][요청 헤더]", details.url, "\n  " + headers.join("\n  "));
         }
       }
+      // 서버가 Set-Cookie를 실제로 내려주는지 확인한다. chrome.cookies.getAll이 계속
+      // 빈 배열을 보고하는 게 "서버가 애초에 쿠키를 안 준다"인지, "쿠키는 오는데
+      // 브라우저가 거부/무시한다"인지를 구분하기 위한 핵심 진단이다.
+      // Set-Cookie는 민감 헤더라서 extraHeaders를 줘야 onHeadersReceived에서 보인다.
+      function onHeadersReceived(details) {
+        if (details.tabId === tabId && details.type === "main_frame") {
+          const setCookies = (details.responseHeaders || []).filter((h) => h.name.toLowerCase() === "set-cookie");
+          if (setCookies.length > 0) {
+            console.log("[SMS 브릿지][응답 Set-Cookie]", details.statusCode, details.url, "\n  " + setCookies.map((h) => h.value).join("\n  "));
+          } else {
+            console.log("[SMS 브릿지][응답 Set-Cookie 없음]", details.statusCode, details.url);
+          }
+        }
+      }
       try {
         chrome.webRequest.onBeforeRedirect.addListener(
           onBeforeRedirect,
