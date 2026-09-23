@@ -164,6 +164,17 @@ async function warmUpSession(timeoutMs = 12000) {
               console.log("[SMS 브릿지][요청 오류]", details.url, details.error);
             }
           }
+          // 진단(핵심 용의자): 확장 프로그램이 chrome.windows.create(url)로 새 창을 열면
+          // "주소창에 직접 입력"한 것과 동일하게 취급되어 Referer 헤더가 전송되지 않을
+          // 가능성이 높다. Login.aspx가 ReturnUrl을 살려서 SsoHelper.aspx로 보낼지,
+          // 아니면 버리고 www.dongwon.net으로 보낼지가 Referer 유무(오픈 리다이렉트 방지
+          // 로직)에 좌우되는지 직접 헤더를 찍어서 확인한다.
+          function onBeforeSendHeaders(details) {
+            if (details.tabId === tabId && details.type === "main_frame") {
+              const headers = (details.requestHeaders || []).map((h) => h.name + ": " + h.value);
+              console.log("[SMS 브릿지][요청 헤더]", details.url, "\n  " + headers.join("\n  "));
+            }
+          }
           try {
             chrome.webRequest.onBeforeRedirect.addListener(
               onBeforeRedirect,
@@ -177,6 +188,11 @@ async function warmUpSession(timeoutMs = 12000) {
               onRequestErrorOccurred,
               { urls: ["https://direct.dongwon.com/*", "https://www.dongwon.net/*"] }
             );
+            chrome.webRequest.onBeforeSendHeaders.addListener(
+              onBeforeSendHeaders,
+              { urls: ["https://direct.dongwon.com/*", "https://www.dongwon.net/*"] },
+              ["requestHeaders"]
+            );
           } catch (e) {
             console.log("[SMS 브릿지] webRequest 리스너 등록 실패:", e);
           }
@@ -188,6 +204,7 @@ async function warmUpSession(timeoutMs = 12000) {
             try { chrome.webRequest.onBeforeRedirect.removeListener(onBeforeRedirect); } catch (e) {}
             try { chrome.webRequest.onCompleted.removeListener(onCompleted); } catch (e) {}
             try { chrome.webRequest.onErrorOccurred.removeListener(onRequestErrorOccurred); } catch (e) {}
+            try { chrome.webRequest.onBeforeSendHeaders.removeListener(onBeforeSendHeaders); } catch (e) {}
           };
 
           const cleanupAndFinish = (reason) => {
