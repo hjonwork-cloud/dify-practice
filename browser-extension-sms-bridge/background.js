@@ -105,6 +105,13 @@ const REFERER_RULE_ID = 9101;
  * Login.aspx가 "신뢰할 만한 Referer가 있을 때만 ReturnUrl을 세션에 저장하고
  * SsoHelper.aspx로 보낸다"는 오픈 리다이렉트 방지 로직을 갖고 있을 것이라는 가설을
  * 검증/우회하기 위함이다.
+ *
+ * 재검증 배경: 처음엔 Referer 값을 "https://direct.dongwon.com/"(자기 자신)으로
+ * 주입했는데 효과가 없어 기각했었다. 그런데 사용자가 실제 그룹웨어에서 수동으로
+ * SMS를 보내고 바로 이어서 자동화 흐름을 시도하니 성공했고, 그 그룹웨어 페이지 주소가
+ * 정확히 "https://www.dongwon.net/portalapp/home"였다 — 우리 자동화가 실패할 때마다
+ * 튕겨나가던 바로 그 목적지다. Login.aspx가 Referer의 origin이 실제 그룹웨어인지를
+ * 검사할 가능성이 있어, 이번엔 그 실제 페이지 URL로 재주입해 재검증한다.
  */
 async function setRefererOverrideRule() {
   try {
@@ -117,7 +124,7 @@ async function setRefererOverrideRule() {
           action: {
             type: "modifyHeaders",
             requestHeaders: [
-              { header: "Referer", operation: "set", value: "https://direct.dongwon.com/" },
+              { header: "Referer", operation: "set", value: "https://www.dongwon.net/portalapp/home" },
             ],
           },
           condition: {
@@ -250,14 +257,18 @@ async function warmUpSession(senderTabId, timeoutMs = 12000) {
   // 매번 "쿠키 삭제 대상: []" — 애초에 쿠키가 하나도 없는 상태였다. 즉 쿠키를 지우는
   // 것 자체가 "서버가 어디서 온 요청인지 추적할 단서가 없는" 상태를 만들어 실패를
   // 유발하고 있었을 가능성이 크다. 그래서 쿠키 삭제 단계를 제거한다.
-  // Referer 강제 주입도 실제로 매치까지 확인했지만 결과에 아무 영향이 없었으므로
-  // (가설 기각) 더 이상 호출하지 않는다.
+  //
+  // Referer 강제 주입: 처음엔 "https://direct.dongwon.com/"(자기 자신)으로 넣어서
+  // 효과가 없었지만, 그룹웨어 수동 성공 케이스를 분석한 결과 Referer의 origin이
+  // 실제 그룹웨어 페이지(www.dongwon.net/portalapp/home)인지가 핵심일 수 있다는
+  // 새 근거가 나와서 그 값으로 재검증한다.
 
   let warmupTabId = null;
   let warmupWinId = null;
   let openedFromSender = false;
 
   await logDirectCookiesSnapshot("예열 시작 전");
+  await setRefererOverrideRule();
 
   if (typeof senderTabId === "number") {
     const opened = await openWarmupTabFromSender(senderTabId);
@@ -411,13 +422,17 @@ async function warmUpSession(senderTabId, timeoutMs = 12000) {
               console.log("[SMS 브릿지] warmUpSession 최종 탭 URL:", tab.url);
             }
             logDirectCookiesSnapshot("종료 시점").finally(() => {
-              closeWarmupTarget();
-              finish(reason);
+              clearRefererOverrideRule().finally(() => {
+                closeWarmupTarget();
+                finish(reason);
+              });
             });
           });
         } catch (e) {
-          closeWarmupTarget();
-          finish(reason);
+          clearRefererOverrideRule().finally(() => {
+            closeWarmupTarget();
+            finish(reason);
+          });
         }
       };
 
