@@ -46,8 +46,23 @@ function looksLikeAuthError(bodyText) {
  *    생성 직후(state:"minimized"로 즉시 만들지 않고) chrome.windows.update로
  *    최소화하는 방식으로 변경 — 탐색은 이미 시작된 뒤 최소화되므로 로딩이 취소되지
  *    않음.
+ *
+ * ✅ netlog(chrome://net-export) 분석으로 실제 성공 흐름을 확인함:
+ *    direct.dongwon.com/.../SMS_Service.aspx (세션 만료)
+ *      → 302 Login.aspx?ReturnUrl=SMS_Service.aspx
+ *      → 302 WebSite/SsoHelper.aspx
+ *      → 302 www.dongwon.net/sso/oidc/authorize?...&redirect_uri=Callback.aspx
+ *      → 302 oidc/login → 302 oidc/authorize&continue
+ *      → 302 direct.dongwon.com/.../Callback.aspx?code=...  (여기서 Set-Cookie: 새 세션!)
+ *      → 302 SMS_Service.aspx (최종, 성공)
+ *    이건 전부 서버가 302로 자동 처리하는 흐름이라, SMS_Service.aspx 하나만 열어도
+ *    "정상적으로는" 브라우저가 이 체인을 전부 따라가야 한다. 별도로 SsoHelper.aspx를
+ *    먼저 열 필요는 없음(오히려 ReturnUrl 파라미터가 없어 더 불확실함).
+ *    그런데도 예열이 "완료"라고 찍히면서 Send_SMS가 여전히 실패하는 사례가 있었으므로,
+ *    예열이 끝난 시점에 탭이 실제로 어디에 도달했는지(SMS_Service.aspx까지 갔는지,
+ *    아니면 Login.aspx/oidc 로그인 페이지에 멈춰 있는지) 콘솔에 진단 로그를 남긴다.
  */
-async function warmUpSession(timeoutMs = 8000) {
+async function warmUpSession(timeoutMs = 12000) {
   return new Promise((resolve) => {
     let settled = false;
     const finish = (reason) => {
@@ -72,21 +87,37 @@ async function warmUpSession(timeoutMs = 8000) {
           // 탐색이 시작된 뒤 곧바로 최소화 (생성 시점에 바로 minimized로 만들면
           // 일부 Chrome/Edge 버전에서 로딩 자체가 취소되는 현상이 있어 순서를 분리함)
           try { chrome.windows.update(winId, { state: "minimized" }); } catch (e) {}
+
+          const cleanupAndFinish = (reason) => {
+            // 진단: 예열 종료 시점에 탭이 실제로 어느 URL에 있는지 확인
+            try {
+              chrome.tabs.get(tabId, (tab) => {
+                if (!chrome.runtime.lastError && tab) {
+                  console.log("[SMS 브릿지] warmUpSession 최종 탭 URL:", tab.url);
+                }
+                try { chrome.windows.remove(winId); } catch (e) {}
+                finish(reason);
+              });
+            } catch (e) {
+              try { chrome.windows.remove(winId); } catch (e2) {}
+              finish(reason);
+            }
+          };
+
           const timer = setTimeout(() => {
             try { chrome.tabs.onUpdated.removeListener(onUpdated); } catch (e) {}
-            try { chrome.windows.remove(winId); } catch (e) {}
-            finish("timeout");
+            cleanupAndFinish("timeout");
           }, timeoutMs);
           function onUpdated(updatedTabId, info) {
             if (updatedTabId === tabId && info.status === "complete") {
-              console.log("[SMS 브릿지] warmUpSession 페이지 로드 완료");
-              // 로드 완료 후에도 페이지 JS가 추가 AJAX를 보낼 수 있으므로 약간 대기
+              console.log("[SMS 브릿지] warmUpSession 페이지 로드 완료(중간 단계일 수 있음)");
+              // 리다이렉트 체인 중간에 "complete"가 여러 번 뜰 수 있으므로,
+              // 마지막 안정화까지 약간의 유예 시간을 둔 뒤 최종 URL을 확인한다.
               setTimeout(() => {
                 clearTimeout(timer);
                 try { chrome.tabs.onUpdated.removeListener(onUpdated); } catch (e) {}
-                try { chrome.windows.remove(winId); } catch (e) {}
-                finish("loaded");
-              }, 1200);
+                cleanupAndFinish("loaded");
+              }, 1500);
             }
           }
           chrome.tabs.onUpdated.addListener(onUpdated);
