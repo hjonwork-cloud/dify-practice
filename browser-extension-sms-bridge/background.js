@@ -156,9 +156,76 @@ async function clearRefererOverrideRule() {
   } catch (e) {}
 }
 
-async function warmUpSession(timeoutMs = 12000) {
+async function openWarmupTabFromSender(senderTabId, timeoutMs = 3000) {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (result) => {
+      if (done) return;
+      done = true;
+      try { chrome.tabs.onCreated.removeListener(onCreated); } catch (e) {}
+      clearTimeout(timer);
+      resolve(result);
+    };
+
+    const timer = setTimeout(() => finish(null), timeoutMs);
+
+    function onCreated(tab) {
+      if (tab && tab.openerTabId === senderTabId) {
+        finish({ tabId: tab.id, winId: tab.windowId, openedFromSender: true });
+      }
+    }
+
+    try {
+      chrome.tabs.onCreated.addListener(onCreated);
+      chrome.scripting.executeScript(
+        {
+          target: { tabId: senderTabId },
+          func: (url) => {
+            const opened = window.open(url, "_blank", "popup=yes,width=420,height=320,left=0,top=0");
+            return !!opened;
+          },
+          args: [SMS_SERVER_URL],
+        },
+        (results) => {
+          if (chrome.runtime.lastError) {
+            console.log("[SMS 브릿지] sender 탭 window.open 실행 실패:", chrome.runtime.lastError.message);
+            finish(null);
+            return;
+          }
+          const ok = !!(results && results[0] && results[0].result);
+          if (!ok) {
+            console.log("[SMS 브릿지] sender 탭 window.open 반환값 false (팝업 차단 가능)");
+            finish(null);
+          }
+        }
+      );
+    } catch (e) {
+      console.log("[SMS 브릿지] sender 탭 기반 예열 오픈 예외:", e);
+      finish(null);
+    }
+  });
+}
+
+async function warmUpSession(senderTabId, timeoutMs = 12000) {
   await clearDirectCookies();
   await setRefererOverrideRule();
+
+  let warmupTabId = null;
+  let warmupWinId = null;
+  let openedFromSender = false;
+
+  if (typeof senderTabId === "number") {
+    const opened = await openWarmupTabFromSender(senderTabId);
+    if (opened && typeof opened.tabId === "number") {
+      warmupTabId = opened.tabId;
+      warmupWinId = opened.winId;
+      openedFromSender = true;
+      console.log("[SMS 브릿지] warmUpSession sender 탭 기반 오픈 성공:", warmupWinId, warmupTabId);
+    } else {
+      console.log("[SMS 브릿지] warmUpSession sender 탭 기반 오픈 실패, windows.create 폴백 사용");
+    }
+  }
+
   return new Promise((resolve) => {
     let settled = false;
     const finish = (reason) => {
@@ -169,147 +236,175 @@ async function warmUpSession(timeoutMs = 12000) {
         resolve();
       }
     };
+
+    const startTracking = (winId, tabId, fromSender) => {
+      console.log("[SMS 브릿지] warmUpSession 창 생성됨:", winId, tabId);
+      if (!fromSender) {
+        try {
+          chrome.windows.update(winId, { state: "minimized" }, () => {
+            void chrome.runtime.lastError;
+          });
+        } catch (e) {}
+      }
+
+      function onBeforeNav(details) {
+        if (details.tabId === tabId && details.frameId === 0) {
+          console.log("[SMS 브릿지][nav 시작]", details.url);
+        }
+      }
+      function onCommitted(details) {
+        if (details.tabId === tabId && details.frameId === 0) {
+          console.log("[SMS 브릿지][nav 커밋]", details.url, "(transitionType=" + details.transitionType + ", qualifiers=" + JSON.stringify(details.transitionQualifiers) + ")");
+        }
+      }
+      function onErrorOccurred(details) {
+        if (details.tabId === tabId && details.frameId === 0) {
+          console.log("[SMS 브릿지][nav 오류]", details.url, details.error);
+        }
+      }
+      try {
+        chrome.webNavigation.onBeforeNavigate.addListener(onBeforeNav);
+        chrome.webNavigation.onCommitted.addListener(onCommitted);
+        chrome.webNavigation.onErrorOccurred.addListener(onErrorOccurred);
+      } catch (e) {
+        console.log("[SMS 브릿지] webNavigation 리스너 등록 실패:", e);
+      }
+
+      function onBeforeRedirect(details) {
+        if (details.tabId === tabId && details.type === "main_frame") {
+          console.log("[SMS 브릿지][redirect]", details.statusCode, details.url, "→", details.redirectUrl);
+        }
+      }
+      function onCompleted(details) {
+        if (details.tabId === tabId && details.type === "main_frame") {
+          console.log("[SMS 브릿지][요청 완료]", details.statusCode, details.url);
+        }
+      }
+      function onRequestErrorOccurred(details) {
+        if (details.tabId === tabId && details.type === "main_frame") {
+          console.log("[SMS 브릿지][요청 오류]", details.url, details.error);
+        }
+      }
+      function onBeforeSendHeaders(details) {
+        if (details.tabId === tabId && details.type === "main_frame") {
+          const headers = (details.requestHeaders || []).map((h) => h.name + ": " + h.value);
+          console.log("[SMS 브릿지][요청 헤더]", details.url, "\n  " + headers.join("\n  "));
+        }
+      }
+      try {
+        chrome.webRequest.onBeforeRedirect.addListener(
+          onBeforeRedirect,
+          { urls: ["https://direct.dongwon.com/*", "https://www.dongwon.net/*"] }
+        );
+        chrome.webRequest.onCompleted.addListener(
+          onCompleted,
+          { urls: ["https://direct.dongwon.com/*", "https://www.dongwon.net/*"] }
+        );
+        chrome.webRequest.onErrorOccurred.addListener(
+          onRequestErrorOccurred,
+          { urls: ["https://direct.dongwon.com/*", "https://www.dongwon.net/*"] }
+        );
+        chrome.webRequest.onBeforeSendHeaders.addListener(
+          onBeforeSendHeaders,
+          { urls: ["https://direct.dongwon.com/*", "https://www.dongwon.net/*"] },
+          ["requestHeaders"]
+        );
+      } catch (e) {
+        console.log("[SMS 브릿지] webRequest 리스너 등록 실패:", e);
+      }
+
+      const removeNavListeners = () => {
+        try { chrome.webNavigation.onBeforeNavigate.removeListener(onBeforeNav); } catch (e) {}
+        try { chrome.webNavigation.onCommitted.removeListener(onCommitted); } catch (e) {}
+        try { chrome.webNavigation.onErrorOccurred.removeListener(onErrorOccurred); } catch (e) {}
+        try { chrome.webRequest.onBeforeRedirect.removeListener(onBeforeRedirect); } catch (e) {}
+        try { chrome.webRequest.onCompleted.removeListener(onCompleted); } catch (e) {}
+        try { chrome.webRequest.onErrorOccurred.removeListener(onRequestErrorOccurred); } catch (e) {}
+        try { chrome.webRequest.onBeforeSendHeaders.removeListener(onBeforeSendHeaders); } catch (e) {}
+      };
+
+      const closeWarmupTarget = () => {
+        if (fromSender) {
+          try {
+            chrome.tabs.remove(tabId, () => {
+              void chrome.runtime.lastError;
+            });
+          } catch (e) {}
+          return;
+        }
+        try {
+          chrome.windows.remove(winId, () => {
+            void chrome.runtime.lastError;
+          });
+        } catch (e) {}
+      };
+
+      const cleanupAndFinish = (reason) => {
+        removeNavListeners();
+        try {
+          chrome.tabs.get(tabId, (tab) => {
+            if (!chrome.runtime.lastError && tab) {
+              console.log("[SMS 브릿지] warmUpSession 최종 탭 URL:", tab.url);
+            }
+            logMatchedRefererRules().finally(() => {
+              closeWarmupTarget();
+              finish(reason);
+            });
+          });
+        } catch (e) {
+          closeWarmupTarget();
+          finish(reason);
+        }
+      };
+
+      const timer = setTimeout(() => {
+        try { chrome.tabs.onUpdated.removeListener(onUpdated); } catch (e) {}
+        cleanupAndFinish("timeout");
+      }, timeoutMs);
+
+      function onUpdated(updatedTabId, info) {
+        if (updatedTabId === tabId && info.status === "complete") {
+          console.log("[SMS 브릿지] warmUpSession 페이지 로드 완료(중간 단계일 수 있음)");
+          setTimeout(() => {
+            clearTimeout(timer);
+            try { chrome.tabs.onUpdated.removeListener(onUpdated); } catch (e) {}
+            cleanupAndFinish("loaded");
+          }, 1500);
+        }
+      }
+      chrome.tabs.onUpdated.addListener(onUpdated);
+    };
+
     try {
+      if (typeof warmupTabId === "number") {
+        startTracking(warmupWinId, warmupTabId, openedFromSender);
+        return;
+      }
+
       chrome.windows.create(
-        { url: SMS_SERVER_URL, focused: false, type: "popup",
-          width: 420, height: 320, left: 0, top: 0 },
+        {
+          url: SMS_SERVER_URL,
+          focused: false,
+          type: "popup",
+          width: 420,
+          height: 320,
+          left: 0,
+          top: 0,
+        },
         (win) => {
           if (chrome.runtime.lastError || !win) {
             console.log("[SMS 브릿지] warmUpSession 창 생성 실패:", chrome.runtime.lastError);
-            finish("create_failed"); return;
+            finish("create_failed");
+            return;
           }
           const winId = win.id;
           const tabId = win.tabs && win.tabs[0] && win.tabs[0].id;
-          console.log("[SMS 브릿지] warmUpSession 창 생성됨:", winId, tabId);
-          // 탐색이 시작된 뒤 곧바로 최소화 (생성 시점에 바로 minimized로 만들면
-          // 일부 Chrome/Edge 버전에서 로딩 자체가 취소되는 현상이 있어 순서를 분리함)
-          try { chrome.windows.update(winId, { state: "minimized" }); } catch (e) {}
-
-          // 진단: 예열 중 이 탭(메인 프레임)이 실제로 거쳐가는 모든 URL을 순서대로 기록.
-          // 최종 URL만 봐서는 리다이렉트 체인이 정확히 어디서 갈라지는지 알 수 없어서,
-          // chrome.webNavigation으로 매 단계(요청 시작/커밋 시점)를 실시간으로 남긴다.
-          function onBeforeNav(details) {
-            if (details.tabId === tabId && details.frameId === 0) {
-              console.log("[SMS 브릿지][nav 시작]", details.url);
-            }
+          if (typeof tabId !== "number") {
+            console.log("[SMS 브릿지] warmUpSession 탭 ID 획득 실패");
+            finish("create_failed");
+            return;
           }
-          function onCommitted(details) {
-            if (details.tabId === tabId && details.frameId === 0) {
-              console.log("[SMS 브릿지][nav 커밋]", details.url, "(transitionType=" + details.transitionType + ", qualifiers=" + JSON.stringify(details.transitionQualifiers) + ")");
-            }
-          }
-          function onErrorOccurred(details) {
-            if (details.tabId === tabId && details.frameId === 0) {
-              console.log("[SMS 브릿지][nav 오류]", details.url, details.error);
-            }
-          }
-          try {
-            chrome.webNavigation.onBeforeNavigate.addListener(onBeforeNav);
-            chrome.webNavigation.onCommitted.addListener(onCommitted);
-            chrome.webNavigation.onErrorOccurred.addListener(onErrorOccurred);
-          } catch (e) {
-            console.log("[SMS 브릿지] webNavigation 리스너 등록 실패:", e);
-          }
-
-          // 진단(핵심): chrome.webNavigation.onCommitted는 여러 번의 302 리다이렉트가
-          // 있어도 "최종 도착 URL" 한 번만 알려준다. 그 사이의 모든 302 hop(Login.aspx
-          // → SsoHelper.aspx → oidc/authorize → oidc/login → Callback.aspx 등)을 실제로
-          // 보려면 chrome.webRequest.onBeforeRedirect로 요청 단위 리다이렉트를 추적해야
-          // 한다. main_frame 요청만, 이 tabId에 한해 기록한다.
-          function onBeforeRedirect(details) {
-            if (details.tabId === tabId && details.type === "main_frame") {
-              console.log("[SMS 브릿지][redirect]", details.statusCode, details.url, "→", details.redirectUrl);
-            }
-          }
-          function onCompleted(details) {
-            if (details.tabId === tabId && details.type === "main_frame") {
-              console.log("[SMS 브릿지][요청 완료]", details.statusCode, details.url);
-            }
-          }
-          function onRequestErrorOccurred(details) {
-            if (details.tabId === tabId && details.type === "main_frame") {
-              console.log("[SMS 브릿지][요청 오류]", details.url, details.error);
-            }
-          }
-          // 진단(핵심 용의자): 확장 프로그램이 chrome.windows.create(url)로 새 창을 열면
-          // "주소창에 직접 입력"한 것과 동일하게 취급되어 Referer 헤더가 전송되지 않을
-          // 가능성이 높다. Login.aspx가 ReturnUrl을 살려서 SsoHelper.aspx로 보낼지,
-          // 아니면 버리고 www.dongwon.net으로 보낼지가 Referer 유무(오픈 리다이렉트 방지
-          // 로직)에 좌우되는지 직접 헤더를 찍어서 확인한다.
-          function onBeforeSendHeaders(details) {
-            if (details.tabId === tabId && details.type === "main_frame") {
-              const headers = (details.requestHeaders || []).map((h) => h.name + ": " + h.value);
-              console.log("[SMS 브릿지][요청 헤더]", details.url, "\n  " + headers.join("\n  "));
-            }
-          }
-          try {
-            chrome.webRequest.onBeforeRedirect.addListener(
-              onBeforeRedirect,
-              { urls: ["https://direct.dongwon.com/*", "https://www.dongwon.net/*"] }
-            );
-            chrome.webRequest.onCompleted.addListener(
-              onCompleted,
-              { urls: ["https://direct.dongwon.com/*", "https://www.dongwon.net/*"] }
-            );
-            chrome.webRequest.onErrorOccurred.addListener(
-              onRequestErrorOccurred,
-              { urls: ["https://direct.dongwon.com/*", "https://www.dongwon.net/*"] }
-            );
-            chrome.webRequest.onBeforeSendHeaders.addListener(
-              onBeforeSendHeaders,
-              { urls: ["https://direct.dongwon.com/*", "https://www.dongwon.net/*"] },
-              ["requestHeaders"]
-            );
-          } catch (e) {
-            console.log("[SMS 브릿지] webRequest 리스너 등록 실패:", e);
-          }
-
-          const removeNavListeners = () => {
-            try { chrome.webNavigation.onBeforeNavigate.removeListener(onBeforeNav); } catch (e) {}
-            try { chrome.webNavigation.onCommitted.removeListener(onCommitted); } catch (e) {}
-            try { chrome.webNavigation.onErrorOccurred.removeListener(onErrorOccurred); } catch (e) {}
-            try { chrome.webRequest.onBeforeRedirect.removeListener(onBeforeRedirect); } catch (e) {}
-            try { chrome.webRequest.onCompleted.removeListener(onCompleted); } catch (e) {}
-            try { chrome.webRequest.onErrorOccurred.removeListener(onRequestErrorOccurred); } catch (e) {}
-            try { chrome.webRequest.onBeforeSendHeaders.removeListener(onBeforeSendHeaders); } catch (e) {}
-          };
-
-          const cleanupAndFinish = (reason) => {
-            removeNavListeners();
-            // 진단: 예열 종료 시점에 탭이 실제로 어느 URL에 있는지 확인
-            try {
-              chrome.tabs.get(tabId, (tab) => {
-                if (!chrome.runtime.lastError && tab) {
-                  console.log("[SMS 브릿지] warmUpSession 최종 탭 URL:", tab.url);
-                }
-                logMatchedRefererRules().finally(() => {
-                  try { chrome.windows.remove(winId); } catch (e) {}
-                  finish(reason);
-                });
-              });
-            } catch (e) {
-              try { chrome.windows.remove(winId); } catch (e2) {}
-              finish(reason);
-            }
-          };
-
-          const timer = setTimeout(() => {
-            try { chrome.tabs.onUpdated.removeListener(onUpdated); } catch (e) {}
-            cleanupAndFinish("timeout");
-          }, timeoutMs);
-          function onUpdated(updatedTabId, info) {
-            if (updatedTabId === tabId && info.status === "complete") {
-              console.log("[SMS 브릿지] warmUpSession 페이지 로드 완료(중간 단계일 수 있음)");
-              // 리다이렉트 체인 중간에 "complete"가 여러 번 뜰 수 있으므로,
-              // 마지막 안정화까지 약간의 유예 시간을 둔 뒤 최종 URL을 확인한다.
-              setTimeout(() => {
-                clearTimeout(timer);
-                try { chrome.tabs.onUpdated.removeListener(onUpdated); } catch (e) {}
-                cleanupAndFinish("loaded");
-              }, 1500);
-            }
-          }
-          chrome.tabs.onUpdated.addListener(onUpdated);
+          startTracking(winId, tabId, false);
         }
       );
     } catch (e) {
@@ -319,8 +414,8 @@ async function warmUpSession(timeoutMs = 12000) {
   });
 }
 
-async function callSendSms({ phone, message, callback, msgType, scheduledAt }) {
-  await warmUpSession();
+async function callSendSms({ phone, message, callback, msgType, scheduledAt, senderTabId }) {
+  await warmUpSession(senderTabId);
 
   const payload = {
     pNumsCount: phone ? "1" : "0",
@@ -369,7 +464,14 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
 
   if (type === "test_cookie") {
     // 실제 발송 없이(수신번호/내용 없이) 인증 상태만 확인
-    callSendSms({ phone: "", message: "", callback: "", msgType: "1", scheduledAt: "" })
+    callSendSms({
+      phone: "",
+      message: "",
+      callback: "",
+      msgType: "1",
+      scheduledAt: "",
+      senderTabId: sender && sender.tab ? sender.tab.id : undefined,
+    })
       .then((result) => sendResponse({ ok: true, test: result }))
       .catch((err) => sendResponse({ ok: false, error: String(err) }));
     return true; // 비동기 응답 대기
@@ -384,6 +486,7 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
       callback,
       msgType,
       scheduledAt,
+      senderTabId: sender && sender.tab ? sender.tab.id : undefined,
     })
       .then((result) => sendResponse({ ok: true, result }))
       .catch((err) => sendResponse({ ok: false, error: String(err) }));
