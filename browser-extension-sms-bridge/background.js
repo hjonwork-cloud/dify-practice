@@ -41,9 +41,11 @@ function looksLikeAuthError(bodyText) {
  *    초기화 또는 SSO 재인증)가 전혀 실행되지 않기 때문. 그룹웨어에서 수동으로 팝업을
  *    띄우면 성공하는 것과 동일하게 만들기 위해, 실제 창(탭)을 열어 페이지를 완전히
  *    로드한 후(JS 실행 포함) 닫는 방식으로 바꿈.
- * ⚠️ state:"minimized"로 생성 즉시 최소화하면 일부 Chrome/Edge 버전에서 실제 페이지
- *    로딩이 완료되지 않고 취소되는 현상이 있어, 대신 화면 밖(off-screen) 좌표에
- *    작은 창을 띄우는 방식으로 변경함(로딩은 정상적으로 완료됨).
+ * ⚠️ 화면 밖(off-screen) 좌표는 Chrome이 "화면에 50% 이상 보여야 함" 정책으로
+ *    거부함(Invalid value for bounds). 그래서 정상 화면 내 좌표로 작게 생성한 뒤,
+ *    생성 직후(state:"minimized"로 즉시 만들지 않고) chrome.windows.update로
+ *    최소화하는 방식으로 변경 — 탐색은 이미 시작된 뒤 최소화되므로 로딩이 취소되지
+ *    않음.
  */
 async function warmUpSession(timeoutMs = 8000) {
   return new Promise((resolve) => {
@@ -58,7 +60,7 @@ async function warmUpSession(timeoutMs = 8000) {
     try {
       chrome.windows.create(
         { url: SMS_SERVER_URL, focused: false, type: "popup",
-          width: 420, height: 320, left: -3000, top: -3000 },
+          width: 420, height: 320, left: 0, top: 0 },
         (win) => {
           if (chrome.runtime.lastError || !win) {
             console.log("[SMS 브릿지] warmUpSession 창 생성 실패:", chrome.runtime.lastError);
@@ -67,6 +69,9 @@ async function warmUpSession(timeoutMs = 8000) {
           const winId = win.id;
           const tabId = win.tabs && win.tabs[0] && win.tabs[0].id;
           console.log("[SMS 브릿지] warmUpSession 창 생성됨:", winId, tabId);
+          // 탐색이 시작된 뒤 곧바로 최소화 (생성 시점에 바로 minimized로 만들면
+          // 일부 Chrome/Edge 버전에서 로딩 자체가 취소되는 현상이 있어 순서를 분리함)
+          try { chrome.windows.update(winId, { state: "minimized" }); } catch (e) {}
           const timer = setTimeout(() => {
             try { chrome.tabs.onUpdated.removeListener(onUpdated); } catch (e) {}
             try { chrome.windows.remove(winId); } catch (e) {}
