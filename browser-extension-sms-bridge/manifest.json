@@ -20,7 +20,8 @@
     "cookies",
     "webNavigation",
     "webRequest",
-    "declarativeNetRequestWithHostAccess"
+    "declarativeNetRequestWithHostAccess",
+    "declarativeNetRequestFeedback"
   ],
 
   "externally_connectable": {

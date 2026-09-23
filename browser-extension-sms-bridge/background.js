@@ -127,9 +127,26 @@ async function setRefererOverrideRule() {
         },
       ],
     });
-    console.log("[SMS 브릿지] Referer 강제 주입 규칙 등록 완료");
+    // 진단: updateSessionRules 호출이 에러 없이 끝났다고 해서 규칙이 실제로 등록되어
+    // 있다는 보장은 없다(비동기 반영 지연 등). getSessionRules로 실제 등록 상태를 확인.
+    const rules = await chrome.declarativeNetRequest.getSessionRules();
+    console.log("[SMS 브릿지] Referer 강제 주입 규칙 등록 완료. 현재 세션 규칙:", JSON.stringify(rules));
   } catch (e) {
     console.log("[SMS 브릿지] Referer 강제 주입 규칙 등록 실패:", e);
+  }
+}
+
+/** 진단: 이 규칙이 실제로 어떤 요청에 매치되어 발동했는지 확인.
+ * (declarativeNetRequestFeedback 권한 필요) 로그에 아무것도 안 찍히면 규칙 자체가
+ * 전혀 발동하지 않았다는 뜻이고, 그러면 Referer 강제 주입이 원인이 아니라 애초에
+ * 적용되지 않고 있었다는 것이 확정된다.
+ */
+async function logMatchedRefererRules() {
+  try {
+    const result = await chrome.declarativeNetRequest.getMatchedRules({});
+    console.log("[SMS 브릿지] declarativeNetRequest 매치된 규칙 목록:", JSON.stringify(result));
+  } catch (e) {
+    console.log("[SMS 브릿지] getMatchedRules 조회 실패:", e);
   }
 }
 
@@ -265,8 +282,10 @@ async function warmUpSession(timeoutMs = 12000) {
                 if (!chrome.runtime.lastError && tab) {
                   console.log("[SMS 브릿지] warmUpSession 최종 탭 URL:", tab.url);
                 }
-                try { chrome.windows.remove(winId); } catch (e) {}
-                finish(reason);
+                logMatchedRefererRules().finally(() => {
+                  try { chrome.windows.remove(winId); } catch (e) {}
+                  finish(reason);
+                });
               });
             } catch (e) {
               try { chrome.windows.remove(winId); } catch (e2) {}
