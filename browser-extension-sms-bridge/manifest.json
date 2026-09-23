@@ -13,6 +13,8 @@
   "host_permissions": [
     "https://direct.dongwon.com/*",
     "https://www.dongwon.net/*",
+    "https://dongwon.com/*",
+    "https://dongwon.net/*",
     "https://dw-fsi-platform-cgg6apc4ffaxb4d5.koreacentral-01.azurewebsites.net/*",
     "http://localhost:8000/*",
     "http://127.0.0.1:8000/*",

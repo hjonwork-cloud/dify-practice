@@ -138,17 +138,34 @@ async function setRefererOverrideRule() {
 
 /** 진단(비파괴적): direct.dongwon.com 쿠키를 삭제하지 않고 그대로 스냅샷으로만 남긴다.
  * netlog 재분석 결과, 성공한 케이스의 최초 SMS_Service.aspx 요청에는 "cookie: [493 bytes
- * were stripped]"가 찍혀 있었다(즉 이미 예전부터 direct.dongwon.com 쿠키가 존재했다).
- * 반면 우리 테스트에서는 매번 "쿠키 삭제 대상: []" — 애초에 쿠키가 하나도 없었다.
- * 즉 clearDirectCookies()로 지우는 것 자체가 원인이었을 가능성이 높다. 이제는 지우지 않고,
- * 예열 종료 시점에 실제 쿠키가 생겼는지만 확인한다.
+ * were stripped]"가 찍혀 있었다(즉 이미 예전부터 쿠키가 존재했다). 반면 우리 테스트에서는
+ * domain: "direct.dongwon.com" 필터로 조회하면 매번 빈 배열이었다.
+ *
+ * ⚠️ 중요한 함정: chrome.cookies.getAll({ domain: "direct.dongwon.com" })은 쿠키 자체의
+ * Domain 속성이 "direct.dongwon.com"(또는 그 하위 도메인)인 것만 찾는다. 만약 실제
+ * SSO 세션 쿠키가 ".dongwon.com" 이나 ".dongwon.net" 같은 상위/형제 도메인에 설정되어
+ * 있다면(도메인 쿠키는 하위 도메인 요청에도 자동 첨부됨), domain 필터로는 절대 안 잡힌다.
+ * 그래서 실제 "이 URL로 요청 보낼 때 브라우저가 첨부할 쿠키 전체"를 보려면 domain이 아니라
+ * url 파라미터로 조회해야 한다(요청 매칭 시맨틱과 동일).
  */
 async function logDirectCookiesSnapshot(label) {
   try {
-    const cookies = await chrome.cookies.getAll({ domain: "direct.dongwon.com" });
-    console.log(`[SMS 브릿지] direct.dongwon.com 쿠키 스냅샷(${label}):`, cookies.map((c) => c.name));
+    const byDomain = await chrome.cookies.getAll({ domain: "direct.dongwon.com" });
+    console.log(`[SMS 브릿지] direct.dongwon.com 쿠키 스냅샷(${label}, domain 필터):`, byDomain.map((c) => `${c.name}(domain=${c.domain})`));
   } catch (e) {
-    console.log("[SMS 브릿지] 쿠키 스냅샷 조회 실패:", e);
+    console.log("[SMS 브릿지] 쿠키 스냅샷(domain) 조회 실패:", e);
+  }
+  try {
+    const byUrl = await chrome.cookies.getAll({ url: SMS_SERVER_URL });
+    console.log(`[SMS 브릿지] SMS_Service.aspx 요청 시 첨부될 쿠키 전체(${label}, url 필터):`, byUrl.map((c) => `${c.name}(domain=${c.domain})`));
+  } catch (e) {
+    console.log("[SMS 브릿지] 쿠키 스냅샷(url) 조회 실패:", e);
+  }
+  try {
+    const wideDomain = await chrome.cookies.getAll({ domain: "dongwon.com" });
+    console.log(`[SMS 브릿지] dongwon.com(상위 도메인) 쿠키 스냅샷(${label}):`, wideDomain.map((c) => `${c.name}(domain=${c.domain})`));
+  } catch (e) {
+    console.log("[SMS 브릿지] 쿠키 스냅샷(dongwon.com) 조회 실패:", e);
   }
 }
 
