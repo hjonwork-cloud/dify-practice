@@ -14,6 +14,10 @@
     "https://direct.dongwon.com/*"
   ],
 
+  "permissions": [
+    "tabs"
+  ],
+
   "externally_connectable": {
     "matches": [
       "https://dw-fsi-platform-cgg6apc4ffaxb4d5.koreacentral-01.azurewebsites.net/*",
