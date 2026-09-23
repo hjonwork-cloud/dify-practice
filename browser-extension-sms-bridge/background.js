@@ -90,10 +90,11 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
   }
 
   if (type === "send_sms") {
-    const { phone, msg, message, callback, msgType, scheduledAt } = message;
+    const { phone, msg, callback, msgType, scheduledAt } = message;
+    const messageText = message.message || msg; // 호출측 호환을 위해 msg/message 둘 다 허용
     callSendSms({
       phone,
-      message: message || msg, // 호출측 호환을 위해 msg/message 둘 다 허용
+      message: messageText,
       callback,
       msgType,
       scheduledAt,
