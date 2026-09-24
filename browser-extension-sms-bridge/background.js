@@ -25,6 +25,11 @@
 
 const SMS_SERVER_URL = "https://direct.dongwon.com/website/Common/SMS/SMS_Service.aspx?CFN_OpenLayerName=SMS_Service&popupType=popup";
 const SMS_API_URL = "https://direct.dongwon.com/website/Common/SMS/SMS_Service.aspx/Send_SMS";
+// 그룹웨어(www.dongwon.net) SSO 세션이 전혀 없는 사용자는 oidc/login 단계에서
+// 실제 로그인 폼(200 응답)을 만난다. 이 경우 자동으로는 진행할 수 없고 사용자가
+// 팝업에 직접 아이디/비밀번호를 입력해야 한다. 이 대기 시간을 넉넉하게 준다.
+const MANUAL_LOGIN_WAIT_MS = 90000;
+
 
 /** Direct 응답 본문에서 인증 만료/무효 여부를 판별 (백엔드 로직과 동일 기준) */
 function looksLikeAuthError(bodyText) {
@@ -223,7 +228,7 @@ async function openWarmupTabFromSender(senderTabId, timeoutMs = 3000) {
         {
           target: { tabId: senderTabId },
           func: (url) => {
-            const opened = window.open(url, "_blank", "popup=yes,width=420,height=320,left=0,top=0");
+            const opened = window.open(url, "_blank", "popup=yes,width=480,height=640,left=0,top=0");
             return !!opened;
           },
           args: [SMS_SERVER_URL],
@@ -302,9 +307,21 @@ async function warmUpSession(senderTabId, timeoutMs = 12000) {
         } catch (e) {}
       }
 
+      // 그룹웨어(www.dongwon.net) SSO 세션이 없는 사용자는 oidc/login 단계에서
+      // 실제 로그인 폼(200 응답)을 만난다. 세션이 이미 있으면 이 URL은 302로 즉시
+      // 지나가서 절대 "완료"로 잡히지 않는다. 200으로 잡히는 순간이 곧 "사용자가
+      // 직접 로그인해야 하는 상태"라는 신호다. 이 신호를 받으면 자동 종료 타이머를
+      // 늘려서 사용자가 팝업에 로그인할 시간을 준다.
+      let awaitingManualLogin = false;
+      const isOidcLoginFormUrl = (u) => typeof u === "string" && u.indexOf("https://www.dongwon.net/sso/oidc/login") === 0;
+
       function onBeforeNav(details) {
         if (details.tabId === tabId && details.frameId === 0) {
           console.log("[SMS 브릿지][nav 시작]", details.url);
+          if (awaitingManualLogin && !isOidcLoginFormUrl(details.url)) {
+            console.log("[SMS 브릿지] 로그인 폼을 벗어난 새 탐색 감지 — 로그인 완료로 간주하고 대기 해제");
+            awaitingManualLogin = false;
+          }
         }
       }
       function onCommitted(details) {
@@ -328,11 +345,32 @@ async function warmUpSession(senderTabId, timeoutMs = 12000) {
       function onBeforeRedirect(details) {
         if (details.tabId === tabId && details.type === "main_frame") {
           console.log("[SMS 브릿지][redirect]", details.statusCode, details.url, "→", details.redirectUrl);
+          if (awaitingManualLogin && isOidcLoginFormUrl(details.url)) {
+            console.log("[SMS 브릿지] 로그인 폼에서 리다이렉트 발생 — 로그인 완료로 간주하고 대기 해제");
+            awaitingManualLogin = false;
+          }
         }
       }
       function onCompleted(details) {
         if (details.tabId === tabId && details.type === "main_frame") {
           console.log("[SMS 브릿지][요청 완료]", details.statusCode, details.url);
+          // 세션이 없어 로그인 폼이 실제로 200 렌더링된 경우를 감지한다.
+          if (details.statusCode === 200 && isOidcLoginFormUrl(details.url)) {
+            if (!awaitingManualLogin) {
+              console.log("[SMS 브릿지] 그룹웨어 로그인 필요 감지 — 최대 " + (MANUAL_LOGIN_WAIT_MS / 1000) + "초 동안 사용자 로그인을 기다립니다. 팝업 창에서 직접 로그인해주세요.");
+            }
+            awaitingManualLogin = true;
+            clearTimeout(timer);
+            timer = setTimeout(() => {
+              try { chrome.tabs.onUpdated.removeListener(onUpdated); } catch (e) {}
+              cleanupAndFinish("manual_login_timeout");
+            }, MANUAL_LOGIN_WAIT_MS);
+            try {
+              chrome.windows.update(winId, { focused: true }, () => {
+                void chrome.runtime.lastError;
+              });
+            } catch (e) {}
+          }
         }
       }
       function onRequestErrorOccurred(details) {
@@ -436,15 +474,23 @@ async function warmUpSession(senderTabId, timeoutMs = 12000) {
         }
       };
 
-      const timer = setTimeout(() => {
+      let timer = setTimeout(() => {
         try { chrome.tabs.onUpdated.removeListener(onUpdated); } catch (e) {}
         cleanupAndFinish("timeout");
       }, timeoutMs);
 
       function onUpdated(updatedTabId, info) {
         if (updatedTabId === tabId && info.status === "complete") {
+          if (awaitingManualLogin) {
+            console.log("[SMS 브릿지] 로그인 대기 중 — 자동 종료를 보류합니다.");
+            return;
+          }
           console.log("[SMS 브릿지] warmUpSession 페이지 로드 완료(중간 단계일 수 있음)");
           setTimeout(() => {
+            if (awaitingManualLogin) {
+              console.log("[SMS 브릿지] 로그인 대기 상태로 전환됨 — 자동 종료 취소");
+              return;
+            }
             clearTimeout(timer);
             try { chrome.tabs.onUpdated.removeListener(onUpdated); } catch (e) {}
             cleanupAndFinish("loaded");

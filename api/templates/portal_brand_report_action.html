@@ -876,10 +876,14 @@
   async function _trySendSmsViaExtension({ phone, message, callback, scheduledAt }) {
     const ping = await _extMessage({ type: 'ping' });
     if (!ping || !ping.ok) return null; // 확장 미설치/미응답 → 서버 경유로 폴백
+    // ⚠️ 그룹웨어 SSO 세션이 없는 사용자는 확장 프로그램이 띄운 팝업에서 직접
+    // 로그인을 해야 할 수 있다(최대 90초 대기, background.js의
+    // MANUAL_LOGIN_WAIT_MS 참고). 기본 8초 타임아웃으로는 그 사이에 끊겨버리므로
+    // send_sms 요청만 넉넉하게 100초로 늘린다.
     const send = await _extMessage({
       type: 'send_sms', phone, message, callback,
       msgType: (message || '').length > 80 ? '2' : '1', scheduledAt: scheduledAt || '',
-    });
+    }, 100000);
     if (!send || !send.ok) {
       return { success: false, status_code: null, message: (send && send.error) || '확장 프로그램 오류' };
     }
