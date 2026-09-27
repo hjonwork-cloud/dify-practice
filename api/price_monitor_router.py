@@ -679,10 +679,12 @@ async def pm_dashboard(
     plant: str = "ALL",
     platform: str = "",
     alert_only: str = "",
+    page: int = 1,
 ):
     _require_pm_access(request)
     if plant not in PLANTS:
         plant = "ALL"
+    PAGE_SIZE = 100
 
     # 기준가/구매가
     price_rows = _get_base_prices(plant)
@@ -727,7 +729,9 @@ async def pm_dashboard(
         return _render(request, "pm_dashboard.html",
                        rows=[], plant=plant, plants=PLANTS,
                        platform=platform, alert_only=alert_only,
-                       last_crawl_date="", total=0)
+                       last_crawl_date="", total=0,
+                       cnt_alert=0, cnt_warn=0, cnt_ok=0,
+                       page=1, total_pages=1, total_groups=0, page_size=PAGE_SIZE)
 
     # 플랫폼 최신 가격
     product_keys = [m["product_key"] for m in all_mappings]
@@ -778,13 +782,47 @@ async def pm_dashboard(
     # GP 오름차순 (경보 최상단)
     rows.sort(key=lambda r: (r["gp_pct"] if r["gp_pct"] is not None else 999))
 
+    # ⚠️ 성능: 매핑된 전체 상품×플랫폼 조합을 한 페이지에 전부 렌더링하면
+    # (1) `{{ rows | tojson }}`으로 전체 데이터가 HTML에 그대로 인라인되어 응답이
+    #     비대해지고, (2) 프론트 JS가 그 많은 <tr>을 한 번에 DOM에 append하면서
+    #     초기 화면 렌더링이 급격히 느려진다. 화면은 상품코드(그룹) 단위로
+    #     플랫폼별 하위 행을 묶어서 보여주므로, 원시 행이 아니라 "그룹(상품)"
+    #     단위로 100개씩 잘라야 한 상품의 플랫폼별 행이 페이지 경계에서 분리되지
+    #     않는다. 정렬 기준은 프론트 JS의 기본 정렬(전월 매출액 내림차순)과
+    #     동일하게 맞춰 페이지를 넘겨도 순서가 자연스럽게 이어지도록 한다.
+    group_order: list[str] = []
+    group_seen: set[str] = set()
+    group_sales_amt: dict[str, float] = {}
+    for r in rows:
+        code = r["our_product_code"]
+        if code not in group_seen:
+            group_seen.add(code)
+            group_order.append(code)
+            group_sales_amt[code] = r.get("prev_sales_amt") or 0
+    group_order.sort(key=lambda c: group_sales_amt.get(c, 0) or 0, reverse=True)
+
+    total_groups = len(group_order)
+    total_pages = max(1, (total_groups + PAGE_SIZE - 1) // PAGE_SIZE)
+    page = max(1, min(page, total_pages))
+    page_codes = set(group_order[(page - 1) * PAGE_SIZE : page * PAGE_SIZE])
+    page_rows = [r for r in rows if r["our_product_code"] in page_codes]
+
+    # 요약 통계(경보/주의/정상 건수)는 페이지네이션 이전의 전체 결과 기준으로
+    # 집계해야 한다 — 그렇지 않으면 페이지를 넘길 때마다 통계가 흔들려 보인다.
+    cnt_alert = sum(1 for r in rows if r["gp_status"] == "alert")
+    cnt_warn  = sum(1 for r in rows if r["gp_status"] == "warn")
+    cnt_ok    = sum(1 for r in rows if r["gp_status"] == "ok")
+
     last_crawl = rows[0]["crawl_date"] if rows else ""
     return _render(request, "pm_dashboard.html",
-                   rows=rows, plant=plant, plants=PLANTS,
+                   rows=page_rows, plant=plant, plants=PLANTS,
                    platform=platform, alert_only=alert_only,
                    last_crawl_date=last_crawl,
                    gp_alert_pct=GP_ALERT_PCT, gp_warn_pct=GP_WARN_PCT,
-                   total=len(rows))
+                   total=len(rows),
+                   cnt_alert=cnt_alert, cnt_warn=cnt_warn, cnt_ok=cnt_ok,
+                   page=page, total_pages=total_pages,
+                   total_groups=total_groups, page_size=PAGE_SIZE)
 
 
 # ── 화면 2: 운영상품 목록 & 매핑 현황 ─────────────────────────────────────

@@ -1,9 +1,10 @@
 {% extends "pm_base.html" %}
 {% set active_page = "dashboard" %}
 {% macro plant_url(p) %}/portal/price-monitor/?plant={{ p }}{% if platform %}&platform={{ platform }}{% endif %}{% if alert_only %}&alert_only=1{% endif %}{% endmacro %}
+{% macro page_url(p) %}?plant={{ plant }}{% if platform %}&platform={{ platform }}{% endif %}{% if alert_only %}&alert_only=1{% endif %}&page={{ p }}{% endmacro %}
 
 {% block title %}가격비교 대시보드{% endblock %}
-{% block page_title %}가격비교 대시보드{% endblock %}
+{% block page_title %}가격비교 대시보드{% if total_pages > 1 %} <span style="font-size:.75rem;font-weight:500;color:#94a3b8;">· {{ page }}/{{ total_pages }} 페이지 (상품 {{ total_groups }}건)</span>{% endif %}{% endblock %}
 
 {% block head %}
 <style>
@@ -39,9 +40,9 @@
 {% endblock %}
 
 {% block content %}
-{% set cnt_alert = rows | selectattr("gp_status","eq","alert") | list | length %}
-{% set cnt_warn  = rows | selectattr("gp_status","eq","warn")  | list | length %}
-{% set cnt_ok    = rows | selectattr("gp_status","eq","ok")    | list | length %}
+{# cnt_alert/cnt_warn/cnt_ok는 페이지네이션 이전 전체 결과 기준으로 서버에서
+   집계해 전달한다(라우터 참고) — 현재 페이지 행만으로 다시 계산하면 페이지를
+   넘길 때마다 숫자가 흔들려 보이기 때문. #}
 
 <!-- 요약 통계 -->
 <div class="stat-row">
@@ -124,6 +125,28 @@
   {% endif %}
 </div>
 
+{% if total_pages > 1 %}
+<div style="display:flex;align-items:center;justify-content:center;gap:.4rem;margin-top:1rem;flex-wrap:wrap;">
+  {% if page > 1 %}
+    <a href="{{ page_url(1) }}" class="pm-btn pm-btn-ghost pm-btn-sm">«</a>
+    <a href="{{ page_url(page - 1) }}" class="pm-btn pm-btn-ghost pm-btn-sm">‹ 이전</a>
+  {% endif %}
+  {% set start_p = [1, page - 2] | max %}
+  {% set end_p   = [total_pages, page + 2] | min %}
+  {% for p in range(start_p, end_p + 1) %}
+    {% if p == page %}
+      <span class="pm-btn pm-btn-primary pm-btn-sm" style="cursor:default;">{{ p }}</span>
+    {% else %}
+      <a href="{{ page_url(p) }}" class="pm-btn pm-btn-ghost pm-btn-sm">{{ p }}</a>
+    {% endif %}
+  {% endfor %}
+  {% if page < total_pages %}
+    <a href="{{ page_url(page + 1) }}" class="pm-btn pm-btn-ghost pm-btn-sm">다음 ›</a>
+    <a href="{{ page_url(total_pages) }}" class="pm-btn pm-btn-ghost pm-btn-sm">»</a>
+  {% endif %}
+</div>
+{% endif %}
+
 <script>
 const PM_PLANT = "{{ plant }}";
 const PM_ROWS  = {{ rows | tojson }};
@@ -183,6 +206,7 @@ let _sortKey = 'sales_amt', _sortDir = -1;  // 기본: 전월매출액 내림차
 
 function renderTable(){
   tbody.innerHTML = '';
+  const frag = document.createDocumentFragment();
   const sorted = [...groups].sort((a,b) => {
     let av, bv;
     if(_sortKey==='sale')      { av=a.sale;     bv=b.sale; }
@@ -222,7 +246,7 @@ function renderTable(){
       <td><a href="/portal/price-monitor/detail/${code}?plant=${PM_PLANT}"
              class="pm-btn pm-btn-primary pm-btn-sm"
              onclick="event.stopPropagation()">세부내역</a></td>`;
-    tbody.appendChild(tr);
+    frag.appendChild(tr);
 
     for(const r of g.sellers){
       const cr = document.createElement('tr');
@@ -238,7 +262,7 @@ function renderTable(){
         <td colspan="2"></td>
         <td style="font-size:.74rem;color:#94a3b8;">${r.crawl_date}</td>
         <td><span class="badge badge-gray" style="font-size:.7rem;">${r.delivery_type||'-'}</span>${r.is_free_delivery?'<span class="badge badge-ok" style="font-size:.68rem;margin-left:.2rem;">무료</span>':''}</td>`;
-      tbody.appendChild(cr);
+      frag.appendChild(cr);
     }
 
     tr.addEventListener('click',()=>{
@@ -248,6 +272,7 @@ function renderTable(){
     });
     idx++;
   }
+  tbody.appendChild(frag);
 }
 
 function sortBy(key){
