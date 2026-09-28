@@ -746,7 +746,7 @@ def read_dashboard_from_table(emp_code: str) -> dict | None:
             return None
         row = rows[0]
         brand_rows = main._safe_query(
-            f"SELECT * FROM {T_BRANDS} WHERE emp_code = '{emp_code}' ORDER BY sales_m DESC LIMIT 200",
+            f"SELECT * FROM {T_BRANDS} WHERE emp_code = '{emp_code}' ORDER BY sales_m DESC LIMIT 2000",
             raw=True) or []
 
         try:
@@ -831,7 +831,7 @@ def read_brand_report_from_table(
 
         def _q_brands():
             return main._safe_query(
-                f"SELECT * FROM {T_BRANDS} WHERE emp_code = '{emp_code}' ORDER BY sales_m DESC LIMIT 200",
+                f"SELECT * FROM {T_BRANDS} WHERE emp_code = '{emp_code}' ORDER BY sales_m DESC LIMIT 2000",
                 raw=True,
             ) or []
 

@@ -568,9 +568,9 @@ def _bulk_warm_brand_rows() -> int:
         if not emp:
             continue
         by_emp.setdefault(emp, []).append(_convert_brand_row(r))
-    # 캐시 채우기 (LIMIT 200 유지)
+    # 캐시 채우기 (전체 브랜드 유지, 200개 제한 없음)
     for emp, out in by_emp.items():
-        _cache_set(f"brands:{emp}", out[:200])
+        _cache_set(f"brands:{emp}", out)
     return len(by_emp)
 
 
@@ -587,7 +587,7 @@ def _brand_rows(emp_code: str = _DEFAULT_EMP_CODE) -> list[dict]:
         if _is_readonly_all(emp_code) and not access_control.is_admin_emp(emp_code):
             _lookup = access_control.ADMIN_EMP_CODE
         rows_pre = _main._safe_query(
-            f"SELECT * FROM {_pr.T_BRANDS} WHERE emp_code = '{_lookup}' ORDER BY sales_m DESC LIMIT 200",
+            f"SELECT * FROM {_pr.T_BRANDS} WHERE emp_code = '{_lookup}' ORDER BY sales_m DESC LIMIT 2000",
             raw=True,
         ) or []
         if rows_pre:
@@ -653,7 +653,7 @@ def _brand_rows(emp_code: str = _DEFAULT_EMP_CODE) -> list[dict]:
         LEFT JOIN my_sales ms ON a.brand_code = ms.brand_code AND a.brand_name = ms.brand_name
         WHERE a.sales <> 0
         ORDER BY a.sales DESC
-        LIMIT 200
+        LIMIT 2000
     """)
     zc8_rows: list[dict] = []
     gen_sales = gen_my_sales = 0.0
