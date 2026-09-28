@@ -66,6 +66,7 @@
         <div class="info-row"><span class="lbl">휴대폰번호</span><span class="val">{{ phone_masked or '-' }}</span></div>
       </div>
       <div class="info-caption">위 정보가 본인(사업장) 정보와 일치하는지 확인해 주세요.</div>
+      <div id="optoutData" style="display:none" data-confirm-url="{{ confirm_url }}" data-optin-url="{{ optin_url }}" data-post-body="{{ post_body }}"></div>
       {% if already %}
         <p>현재 <b>수신거부</b> 상태입니다.<br>동원홈푸드의 PB/신상품·할인 소식을 받아보시려면 아래 버튼으로 수신동의를 진행해 주세요.</p>
         <button id="optinBtn" class="btn optin" onclick="doOptin()">수신동의하기</button>
@@ -88,13 +89,14 @@
       const optinBtn = document.getElementById('optinBtn');
       const optoutBtn = document.getElementById('optoutBtn');
       const msgBox = document.getElementById('msgBox');
+      const cfg = document.getElementById('optoutData').dataset;
       optinBtn.disabled = true;
       optinBtn.textContent = '처리 중...';
       try {
-        const res = await fetch('/portal/optout/optin', {
+        const res = await fetch(cfg.optinUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: `c=${encodeURIComponent('{{ customer_code }}')}&t=${encodeURIComponent('{{ token }}')}`
+          body: cfg.postBody
         });
         const data = await res.json().catch(() => ({}));
         if (res.ok && data.ok) {
@@ -142,13 +144,14 @@
       const optinBtn = document.getElementById('optinBtn');
       const confirmBtn = document.getElementById('warnConfirmBtn');
       const msgBox = document.getElementById('msgBox');
+      const cfg = document.getElementById('optoutData').dataset;
       confirmBtn.disabled = true;
       confirmBtn.textContent = '처리 중...';
       try {
-        const res = await fetch('/portal/optout/confirm', {
+        const res = await fetch(cfg.confirmUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: `c=${encodeURIComponent('{{ customer_code }}')}&t=${encodeURIComponent('{{ token }}')}`
+          body: cfg.postBody
         });
         const data = await res.json().catch(() => ({}));
         if (res.ok && data.ok) {

@@ -166,7 +166,14 @@ def _optout_verify(customer_code: str, token: str) -> bool:
 
 
 def _optout_link(customer_code: str) -> str:
-    """DM 메시지에 삽입할 수신거부 안내 링크 (절대경로 URL)."""
+    """DM 메시지에 삽입할 수신거부 안내 링크 (절대경로 URL).
+    URL 길이를 줄이기 위해 DB에 매핑된 단축 슬러그를 사용하고, 실패 시에만 기존 방식(?c=&t=)으로 폴백한다."""
+    try:
+        slug = portal_db.get_or_create_optout_link(str(customer_code))
+    except Exception:
+        slug = ""
+    if slug:
+        return f"{_PUBLIC_BASE_URL}/portal/o/{slug}"
     token = _optout_token(customer_code)
     return f"{_PUBLIC_BASE_URL}/portal/optout?c={quote(str(customer_code))}&t={token}"
 
@@ -1019,7 +1026,7 @@ def _apply_ad_compliance(message: str, customer_code: str) -> str:
     msg = message or ""
     if not msg.lstrip().startswith("[광고]"):
         msg = f"[광고] {msg}"
-    if "무료수신거부" not in msg and "/portal/optout" not in msg:
+    if "무료수신거부" not in msg and "/portal/optout" not in msg and "/portal/o/" not in msg:
         link = _optout_link(customer_code) if customer_code else f"{_PUBLIC_BASE_URL}/portal/optout"
         msg = f"{msg}\n\n무료수신거부 : {link}"
     return msg
@@ -3212,6 +3219,9 @@ async def optout_page(request: Request, c: str = "", t: str = ""):
             already = portal_db.is_customer_optout(code, phone)
         except Exception:
             already = False
+    confirm_url = "/portal/optout/confirm"
+    optin_url = "/portal/optout/optin"
+    post_body = f"c={quote(code)}&t={quote(t)}"
     html = _jinja_env.get_template("portal_optout_confirm.html").render({
         "request": request,
         "valid": valid,
@@ -3221,6 +3231,9 @@ async def optout_page(request: Request, c: str = "", t: str = ""):
         "token": t,
         "already": already,
         "asset_v": _asset_version(),
+        "confirm_url": confirm_url,
+        "optin_url": optin_url,
+        "post_body": post_body,
     })
     return HTMLResponse(html)
 
@@ -3248,6 +3261,63 @@ async def optout_optin(request: Request):
     code = (form.get("c") or "").strip()
     token = form.get("t") or ""
     if not code or not _optout_verify(code, token):
+        raise HTTPException(status_code=400, detail="유효하지 않은 요청입니다.")
+    phone = _get_customer_mobile_phone(code)
+    portal_db.remove_dm_optout_by_customer(customer_code=code, phone=phone, deactivated_by="customer")
+    return JSONResponse({"ok": True})
+
+
+@router.get("/o/{slug}", response_class=HTMLResponse)
+async def optout_short_page(request: Request, slug: str):
+    """DM 수신거부 단축 링크(슬러그) 진입점 — 비로그인 공개 확인 페이지.
+    슬러그 자체가 DB에 매핑된 접근 권한 역할을 하므로 별도 서명토큰이 필요 없다."""
+    code = portal_db.resolve_optout_link(slug)
+    valid = bool(code)
+    name = _get_customer_name(code) if valid else ""
+    phone = ""
+    already = False
+    if valid:
+        try:
+            phone = _get_customer_mobile_phone(code)
+            already = portal_db.is_customer_optout(code, phone)
+        except Exception:
+            already = False
+    confirm_url = f"/portal/o/{quote(slug)}/confirm"
+    optin_url = f"/portal/o/{quote(slug)}/optin"
+    html = _jinja_env.get_template("portal_optout_confirm.html").render({
+        "request": request,
+        "valid": valid,
+        "customer_code": code,
+        "customer_name": name,
+        "phone_masked": _mask_phone(phone),
+        "token": "",
+        "already": already,
+        "asset_v": _asset_version(),
+        "confirm_url": confirm_url,
+        "optin_url": optin_url,
+        "post_body": "",
+    })
+    return HTMLResponse(html)
+
+
+@router.post("/o/{slug}/confirm")
+async def optout_short_confirm(slug: str):
+    """단축 링크 기반 수신거부 신청 처리."""
+    code = portal_db.resolve_optout_link(slug)
+    if not code:
+        raise HTTPException(status_code=400, detail="유효하지 않은 요청입니다.")
+    name = _get_customer_name(code)
+    phone = _get_customer_mobile_phone(code)
+    portal_db.add_dm_optout(customer_code=code, customer_name=name, phone=phone,
+                             reason="link", source="web_link_short", created_by="customer")
+    return JSONResponse({"ok": True})
+
+
+@router.post("/o/{slug}/optin")
+async def optout_short_optin(slug: str):
+    """단축 링크 기반 수신동의(수신거부 해제) 처리."""
+    code = portal_db.resolve_optout_link(slug)
+    if not code:
         raise HTTPException(status_code=400, detail="유효하지 않은 요청입니다.")
     phone = _get_customer_mobile_phone(code)
     portal_db.remove_dm_optout_by_customer(customer_code=code, phone=phone, deactivated_by="customer")

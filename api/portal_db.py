@@ -480,6 +480,17 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_dm_optout_phone ON dm_optout_list(phone);
         """)
 
+        # DM 수신거부 단축 링크 (slug → customer_code). URL 길이를 줄이기 위해
+        # 고객코드+HMAC토큰을 쿼리스트링에 노출하는 대신 짧은 랜덤 슬러그로 매핑한다.
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS dm_optout_link (
+                slug          TEXT PRIMARY KEY,
+                customer_code TEXT NOT NULL,
+                created_at    TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_dm_optout_link_code ON dm_optout_link(customer_code);
+        """)
+
 
 def record_login(emp_code: str, emp_name: str = "", team: str = "", ip: str = "", user_agent: str = "", success: bool = True, reason: str = "") -> None:
     init_db()
@@ -837,6 +848,45 @@ def remove_dm_optout_by_customer(customer_code: str = "", phone: str = "", deact
             params_full,
         )
         return cur.rowcount
+
+
+def get_or_create_optout_link(customer_code: str) -> str:
+    """DM 발송용 단축 수신거부 링크 슬러그 조회/생성 (고객코드당 슬러그 재사용, URL 단축용).
+    슬러그만 URL에 노출되므로 고객코드/서명토큰이 그대로 드러나지 않는 장점도 있다."""
+    init_db()
+    code = (customer_code or "").strip()
+    if not code:
+        return ""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT slug FROM dm_optout_link WHERE customer_code = ? LIMIT 1", (code,)
+        ).fetchone()
+        if row:
+            return row["slug"]
+        for _ in range(5):
+            slug = secrets.token_urlsafe(8)
+            try:
+                conn.execute(
+                    "INSERT INTO dm_optout_link (slug, customer_code, created_at) VALUES (?, ?, ?)",
+                    (slug, code, _now()),
+                )
+                return slug
+            except sqlite3.IntegrityError:
+                continue
+        return ""
+
+
+def resolve_optout_link(slug: str) -> str:
+    """단축 슬러그 → 고객코드 조회. 없으면 빈 문자열 반환."""
+    init_db()
+    s = (slug or "").strip()
+    if not s:
+        return ""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT customer_code FROM dm_optout_link WHERE slug = ? LIMIT 1", (s,)
+        ).fetchone()
+        return row["customer_code"] if row else ""
 
 
 def list_dm_optout(active_only: bool = True, q: str = "", limit: int = 500):
