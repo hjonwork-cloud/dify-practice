@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>수신거부 신청 | 동원홈푸드</title>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net">
+  <link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" rel="stylesheet">
+  <style>
+    *{box-sizing:border-box;}
+    body{margin:0;background:#f1f5f9;font-family:'Pretendard Variable',sans-serif;color:#1e293b;
+         min-height:100vh;display:flex;align-items:center;justify-content:center;padding:1.5rem;}
+    .card{background:#fff;border-radius:16px;box-shadow:0 8px 30px rgba(0,0,0,.08);
+          max-width:420px;width:100%;padding:2rem 1.75rem;text-align:center;}
+    .logo{font-size:.78rem;color:#64748b;font-weight:700;letter-spacing:.02em;margin-bottom:.6rem;}
+    h1{font-size:1.15rem;margin:0 0 1rem;color:#0f172a;}
+    p{font-size:.9rem;line-height:1.6;color:#475569;margin:0 0 1.25rem;}
+    .cust{display:inline-block;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
+          padding:.6rem 1rem;font-size:.9rem;font-weight:700;color:#0f172a;margin-bottom:1.25rem;}
+    .btn{display:inline-block;width:100%;padding:.85rem 1rem;border:none;border-radius:10px;
+         font-size:.95rem;font-weight:700;cursor:pointer;transition:opacity .15s;}
+    .btn.optout{background:#dc2626;color:#fff;}
+    .btn.optout:hover{opacity:.9;}
+    .btn:disabled{background:#cbd5e1;color:#64748b;cursor:not-allowed;}
+    .msg{font-size:.85rem;margin-top:1rem;padding:.7rem;border-radius:8px;display:none;}
+    .msg.ok{display:block;background:#dcfce7;color:#15803d;}
+    .msg.err{display:block;background:#fee2e2;color:#b91c1c;}
+    .notice{font-size:.72rem;color:#94a3b8;margin-top:1.5rem;line-height:1.5;}
+    .invalid-box{padding:1rem;background:#fef2f2;border-radius:10px;color:#b91c1c;font-size:.88rem;}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">동원홈푸드 · 세일즈 액션 플랫폼</div>
+    {% if not valid %}
+      <h1>유효하지 않은 링크입니다</h1>
+      <div class="invalid-box">
+        링크가 만료되었거나 잘못된 접근입니다.<br>
+        수신거부 문의는 발송 담당자에게 연락해 주세요.
+      </div>
+    {% else %}
+      <h1>광고성 정보 수신거부</h1>
+      <div class="cust">{{ customer_name_masked or '고객' }}님</div>
+      {% if already %}
+        <p>이미 수신거부가 완료된 고객입니다.<br>추가 조치가 필요하지 않습니다.</p>
+        <button class="btn" disabled>수신거부 완료됨</button>
+      {% else %}
+        <p>아래 버튼을 누르시면 이후 동원홈푸드로부터<br>광고성 문자(SMS/LMS) 발송이 중단됩니다.</p>
+        <button id="optoutBtn" class="btn optout" onclick="doOptout()">수신거부 신청</button>
+        <div id="msgBox" class="msg"></div>
+      {% endif %}
+    {% endif %}
+    <div class="notice">
+      정보통신망 이용촉진 및 정보보호 등에 관한 법률에 따라<br>
+      광고성 정보 수신거부 요청을 처리하고 있습니다.
+    </div>
+  </div>
+
+  {% if valid and not already %}
+  <script>
+    async function doOptout() {
+      const btn = document.getElementById('optoutBtn');
+      const msgBox = document.getElementById('msgBox');
+      btn.disabled = true;
+      btn.textContent = '처리 중...';
+      try {
+        const res = await fetch('/portal/optout/confirm', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: `c=${encodeURIComponent('{{ customer_code }}')}&t=${encodeURIComponent('{{ token }}')}`
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.ok) {
+          btn.textContent = '수신거부 완료됨';
+          msgBox.className = 'msg ok';
+          msgBox.textContent = '수신거부가 정상적으로 반영되었습니다.';
+        } else {
+          throw new Error(data.detail || '처리 실패');
+        }
+      } catch (e) {
+        btn.disabled = false;
+        btn.textContent = '수신거부 신청';
+        msgBox.className = 'msg err';
+        msgBox.textContent = '처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.';
+      }
+    }
+  </script>
+  {% endif %}
+</body>
+</html>

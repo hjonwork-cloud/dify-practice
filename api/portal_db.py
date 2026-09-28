@@ -461,6 +461,25 @@ def init_db() -> None:
         except Exception:
             pass
 
+        # DM 수신거부 고객 리스트 (정보통신망법 준수: 수신거부 링크/관리자 등록)
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS dm_optout_list (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                customer_code  TEXT,
+                customer_name  TEXT,
+                phone          TEXT,
+                reason         TEXT,
+                source         TEXT,
+                created_by     TEXT,
+                created_at     TEXT NOT NULL,
+                is_active      INTEGER NOT NULL DEFAULT 1,
+                deactivated_at TEXT,
+                deactivated_by TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_dm_optout_code  ON dm_optout_list(customer_code);
+            CREATE INDEX IF NOT EXISTS idx_dm_optout_phone ON dm_optout_list(phone);
+        """)
+
 
 def record_login(emp_code: str, emp_name: str = "", team: str = "", ip: str = "", user_agent: str = "", success: bool = True, reason: str = "") -> None:
     init_db()
@@ -743,6 +762,101 @@ def set_setting(key: str, value: str, updated_by: str = "") -> None:
             """,
             (key, value, updated_by, now),
         )
+
+
+def _normalize_phone(phone: str) -> str:
+    """전화번호에서 숫자만 추출 (매칭 일관성 확보용)."""
+    return "".join(ch for ch in (phone or "") if ch.isdigit())
+
+
+def add_dm_optout(customer_code: str = "", customer_name: str = "", phone: str = "",
+                  reason: str = "link", source: str = "web_link", created_by: str = "") -> None:
+    """수신거부 고객 등록. 이미 활성 등록이 있으면 정보만 갱신(중복 방지), 비활성 상태면 재활성화."""
+    init_db()
+    code = (customer_code or "").strip()
+    ph = _normalize_phone(phone)
+    if not code and not ph:
+        return
+    now = _now()
+    with _connect() as conn:
+        existing = None
+        if code:
+            existing = conn.execute(
+                "SELECT id FROM dm_optout_list WHERE customer_code = ? ORDER BY id DESC LIMIT 1",
+                (code,),
+            ).fetchone()
+        if not existing and ph:
+            existing = conn.execute(
+                "SELECT id FROM dm_optout_list WHERE phone = ? ORDER BY id DESC LIMIT 1",
+                (ph,),
+            ).fetchone()
+        if existing:
+            conn.execute(
+                """UPDATE dm_optout_list SET customer_code=?, customer_name=?, phone=?,
+                   reason=?, source=?, is_active=1, deactivated_at=NULL, deactivated_by=NULL
+                   WHERE id=?""",
+                (code, customer_name, ph, reason, source, existing["id"]),
+            )
+        else:
+            conn.execute(
+                """INSERT INTO dm_optout_list
+                (customer_code, customer_name, phone, reason, source, created_by, created_at, is_active)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 1)""",
+                (code, customer_name, ph, reason, source, created_by, now),
+            )
+
+
+def remove_dm_optout(optout_id: int, deactivated_by: str = "") -> int:
+    """수신거부 등록 해제 (soft delete). 영향받은 행 수 반환."""
+    init_db()
+    with _connect() as conn:
+        cur = conn.execute(
+            "UPDATE dm_optout_list SET is_active=0, deactivated_at=?, deactivated_by=? WHERE id=? AND is_active=1",
+            (_now(), deactivated_by, optout_id),
+        )
+        return cur.rowcount
+
+
+def list_dm_optout(active_only: bool = True, q: str = "", limit: int = 500):
+    """수신거부 고객 목록 조회 (관리자 화면용). q: 고객코드/이름/전화번호 부분검색."""
+    init_db()
+    conds, params = [], []
+    if active_only:
+        conds.append("is_active = 1")
+    if q:
+        conds.append("(customer_code LIKE ? OR customer_name LIKE ? OR phone LIKE ?)")
+        like = f"%{q}%"
+        params.extend([like, like, like])
+    where = ("WHERE " + " AND ".join(conds)) if conds else ""
+    params.append(limit)
+    with _connect() as conn:
+        rows = conn.execute(
+            f"SELECT * FROM dm_optout_list {where} ORDER BY id DESC LIMIT ?",
+            params,
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
+def is_customer_optout(customer_code: str = "", phone: str = "") -> bool:
+    """고객코드 또는 전화번호가 활성 수신거부 목록에 있는지 확인."""
+    init_db()
+    code = (customer_code or "").strip()
+    ph = _normalize_phone(phone)
+    if not code and not ph:
+        return False
+    conds, params = ["is_active = 1"], []
+    or_parts = []
+    if code:
+        or_parts.append("customer_code = ?"); params.append(code)
+    if ph:
+        or_parts.append("phone = ?"); params.append(ph)
+    conds.append("(" + " OR ".join(or_parts) + ")")
+    where = " AND ".join(conds)
+    with _connect() as conn:
+        row = conn.execute(
+            f"SELECT id FROM dm_optout_list WHERE {where} LIMIT 1", params
+        ).fetchone()
+        return row is not None
 
 
 def count_dm_failures_since(hours: int = 24) -> dict:

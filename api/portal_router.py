@@ -37,6 +37,14 @@ _SESSION_MAX_AGE = 60 * 60 * 10
 _SESSION_SECRET = os.getenv("PORTAL_SESSION_SECRET", "dongwon-portal-dev-secret-change-me")
 _DEFAULT_EMP_CODE = "20230720"
 
+# DM 발송 컴플라이언스 (정보통신망법: [광고] 표시, 수신거부 안내, 발송가능시간)
+_PUBLIC_BASE_URL = os.getenv(
+    "PORTAL_PUBLIC_BASE_URL",
+    "https://dw-fsi-platform-cgg6apc4ffaxb4d5.koreacentral-01.azurewebsites.net",
+)
+_DM_SEND_HOUR_START = 8   # 발송가능 시작시각(포함) — 오전 08:00
+_DM_SEND_HOUR_END = 20    # 발송가능 종료시각(미포함) — 오후 08:00 (20:00 이후 불가)
+
 # ── 팀 리더: 자신의 팀 전체 데이터 조회 가능 ──────────────────────────
 _TEAM_LEADERS: dict[str, str] = {
     "20115003": "외식1팀",   # 손상웅
@@ -143,6 +151,29 @@ def _b64(data: bytes) -> str:
 
 def _sign(payload: str) -> str:
     return hmac.new(_SESSION_SECRET.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def _optout_token(customer_code: str) -> str:
+    """수신거부 공개 링크용 위변조 방지 토큰 (고객코드 서명). 로그인 없이도 검증 가능."""
+    return _sign(f"optout:{customer_code}")
+
+
+def _optout_verify(customer_code: str, token: str) -> bool:
+    try:
+        return secrets.compare_digest(token or "", _optout_token(customer_code))
+    except Exception:
+        return False
+
+
+def _optout_link(customer_code: str) -> str:
+    """DM 메시지에 삽입할 수신거부 안내 링크 (절대경로 URL)."""
+    token = _optout_token(customer_code)
+    return f"{_PUBLIC_BASE_URL}/portal/optout?c={quote(str(customer_code))}&t={token}"
+
+
+def _is_within_send_window(dt) -> bool:
+    """발송가능시간(08:00~20:00, KST) 여부. dt: datetime 객체(로컬 서버시각=KST 가정)."""
+    return _DM_SEND_HOUR_START <= dt.hour < _DM_SEND_HOUR_END
 
 
 def _make_session(emp_code: str) -> str:
@@ -971,7 +1002,7 @@ def _dm_message(brand_name: str, customer: dict, brand_avg: float, products: lis
         f"- [{p.get('product_code','')}] {p.get('product_name') or p.get('product_code')}"
         for p in products[:5]
     ) or "- 추천 후보 상품 확인 필요"
-    return (
+    body = (
         f"안녕하세요, {customer.get('customer_name')} 사장님.\n\n"
         f"동원홈푸드를 이용해 주셔서 감사합니다. "
         f"동원홈푸드 영업담당자입니다.\n\n"
@@ -979,6 +1010,19 @@ def _dm_message(brand_name: str, customer: dict, brand_avg: float, products: lis
         f"추천 품목\n{product_lines}\n\n"
         "해당 상품은 다른 가맹점에서 꾸준히 사용 중인 품목으로, 메뉴 운영 안정화와 원가 개선 관점에서 검토해보시면 좋겠습니다."
     )
+    return _apply_ad_compliance(body, customer.get("customer_code") or "")
+
+
+def _apply_ad_compliance(message: str, customer_code: str) -> str:
+    """정보통신망법 준수: 메시지 앞에 [광고] 표시, 뒤에 무료수신거부 링크 안내를 강제로 부여한다.
+    이미 접두어/링크가 포함돼 있으면 중복 추가하지 않는다(클라이언트 재구성 메시지도 안전)."""
+    msg = message or ""
+    if not msg.lstrip().startswith("[광고]"):
+        msg = f"[광고] {msg}"
+    if "무료수신거부" not in msg and "/portal/optout" not in msg:
+        link = _optout_link(customer_code) if customer_code else f"{_PUBLIC_BASE_URL}/portal/optout"
+        msg = f"{msg}\n\n무료수신거부 : {link}"
+    return msg
 
 
 def _json_safe(value):
@@ -2112,6 +2156,43 @@ async def admin_test_sms_cookie(request: Request):
     return JSONResponse({"ok": True, "test": result})
 
 
+# ── 수신거부 고객 관리 (관리자) ────────────────────────────────────────────
+
+@router.get("/admin/dm-optout", response_class=HTMLResponse)
+async def admin_dm_optout_page(request: Request, q: str = ""):
+    """(관리자용) 수신거부 고객 목록 조회/검색 화면."""
+    _require_admin(request)
+    rows = portal_db.list_dm_optout(active_only=True, q=q)
+    return _render(request, "portal_admin_dm_optout.html", rows=rows, q=q)
+
+
+@router.post("/admin/dm-optout/add")
+async def admin_dm_optout_add(request: Request):
+    """(관리자용) 수신거부 고객 수동 등록."""
+    user = _require_admin(request)
+    form = await _read_form(request)
+    customer_code = (form.get("customer_code") or "").strip()
+    phone = (form.get("phone") or "").strip()
+    customer_name = (form.get("customer_name") or "").strip()
+    if not customer_code and not phone:
+        raise HTTPException(status_code=400, detail="고객코드 또는 전화번호 중 하나는 입력해야 합니다.")
+    if not customer_name and customer_code:
+        customer_name = _get_customer_name(customer_code)
+    portal_db.add_dm_optout(customer_code=customer_code, customer_name=customer_name, phone=phone,
+                             reason="admin", source="admin_manual", created_by=user.get("emp_code", ""))
+    return JSONResponse({"ok": True})
+
+
+@router.post("/admin/dm-optout/{optout_id}/remove")
+async def admin_dm_optout_remove(request: Request, optout_id: int):
+    """(관리자용) 수신거부 등록 해제 (soft delete)."""
+    user = _require_admin(request)
+    affected = portal_db.remove_dm_optout(optout_id, deactivated_by=user.get("emp_code", ""))
+    if not affected:
+        raise HTTPException(status_code=404, detail="대상을 찾을 수 없습니다.")
+    return JSONResponse({"ok": True})
+
+
 @router.get("/brand-report", response_class=HTMLResponse)
 async def brand_report_page(
     request: Request,
@@ -2282,6 +2363,7 @@ async def target_detail(request: Request, brand: str = "", customer_code: str = 
         "products": products,
         "product_names": ", ".join(str(p.get("product_name") or p.get("product_code") or "") for p in products),
         "dm_message": _dm_message(bname, customer, float(report.get("brand_avg") or 0), products),
+        "optout_link": _optout_link(code),
     }))
 
 
@@ -2314,6 +2396,7 @@ def _enrich_action_targets(report: dict, brand_name: str) -> None:
             c["reco_count"] = 0
             c["opportunity_sales_m"] = 0.0
             c["phone"] = ""
+            c["is_optout"] = False
         report["opportunity_effect_m"] = 0
         return
     import main
@@ -2473,6 +2556,10 @@ def _enrich_action_targets(report: dict, brand_name: str) -> None:
         total_expected_raw = target_total_sales_raw * max(0.0, total_all_factor - owned_factor)
         c["opportunity_sales_m"] = _money_m2(total_expected_raw)
         c["phone"] = phone_map.get(code.lstrip("0"), "")
+        try:
+            c["is_optout"] = portal_db.is_customer_optout(code, c["phone"])
+        except Exception:
+            c["is_optout"] = False
         # 브랜드 전체 기회매출 효과 합계는 report['proposal_possible_sales_m'](타겟매출 효과)와
         # 동일하게 "제안 대상"(is_target=True) 가맹점만 스코프로 집계 — 두 지표를 같은 모집단
         # 위에서 비교할 수 있게 하기 위함.
@@ -3074,6 +3161,71 @@ async def customer_phone(request: Request, customer_code: str = ""):
     return JSONResponse({"phone": _get_customer_mobile_phone(customer_code) if customer_code else ""})
 
 
+def _get_customer_name(customer_code: str) -> str:
+    """고객마스터에서 고객명(상호) 조회. 수신거부 공개 페이지 안내 문구용."""
+    if not customer_code:
+        return ""
+    try:
+        import main as _m
+        stripped = str(customer_code).lstrip("0") or str(customer_code)
+        row = _m._fetch_customer_master_by_code(stripped)
+        if not row:
+            return ""
+        return _m._clean_customer_master_value(row.get("고객명")) or ""
+    except Exception:
+        logger.exception("[OPTOUT] 고객명 조회 실패: customer_code=%s", customer_code)
+        return ""
+
+
+def _mask_name(name: str) -> str:
+    """고객명 마스킹 (비로그인 공개 페이지 노출용). 예: 홍길동 → 홍*동."""
+    if not name:
+        return ""
+    if len(name) <= 2:
+        return name[0] + "*" * (len(name) - 1)
+    return name[0] + "*" * (len(name) - 2) + name[-1]
+
+
+@router.get("/optout", response_class=HTMLResponse)
+async def optout_page(request: Request, c: str = "", t: str = ""):
+    """DM 수신거부 안내 링크로 접근하는 비로그인 공개 확인 페이지."""
+    code = (c or "").strip()
+    valid = bool(code) and _optout_verify(code, t)
+    name = _get_customer_name(code) if valid else ""
+    already = False
+    if valid:
+        try:
+            phone = _get_customer_mobile_phone(code)
+            already = portal_db.is_customer_optout(code, phone)
+        except Exception:
+            already = False
+    html = _jinja_env.get_template("portal_optout_confirm.html").render({
+        "request": request,
+        "valid": valid,
+        "customer_code": code,
+        "customer_name_masked": _mask_name(name),
+        "token": t,
+        "already": already,
+        "asset_v": _asset_version(),
+    })
+    return HTMLResponse(html)
+
+
+@router.post("/optout/confirm")
+async def optout_confirm(request: Request):
+    """수신거부 신청 처리 (비로그인 — 서명토큰으로 위변조 방지)."""
+    form = await _read_form(request)
+    code = (form.get("c") or "").strip()
+    token = form.get("t") or ""
+    if not code or not _optout_verify(code, token):
+        raise HTTPException(status_code=400, detail="유효하지 않은 요청입니다.")
+    name = _get_customer_name(code)
+    phone = _get_customer_mobile_phone(code)
+    portal_db.add_dm_optout(customer_code=code, customer_name=name, phone=phone,
+                             reason="link", source="web_link", created_by="customer")
+    return JSONResponse({"ok": True})
+
+
 class _MyPhonePayload(BaseModel):
     phone: str = ""
 
@@ -3160,7 +3312,38 @@ async def dm_send_with_price(request: Request, body: _DmSendPayload):
     # ── 실제 DM(SMS/LMS) 발송 — price_only는 DM 메시지가 없으므로 대상 아님 ──────────
     dm_attempted = body.action_type in ("dm_only", "price_and_dm")
     sms_result: dict = {}
+    _block_reason = ""
     if dm_attempted:
+        # (1) 수신거부 고객 여부 — 고객코드/전화번호 중 하나라도 활성 수신거부 목록에 있으면 차단
+        try:
+            if portal_db.is_customer_optout(body.customer_code, body.dm_phone):
+                _block_reason = "수신거부 등록 고객입니다. DM을 발송할 수 없습니다."
+        except Exception:
+            logger.exception("[DM] 수신거부 확인 실패: customer_code=%s", body.customer_code)
+        # (2) 발송가능시간(08:00~20:00, KST) — 즉시발송은 현재시각, 예약발송은 예약시각 기준
+        if not _block_reason:
+            import datetime as _dt_win
+            try:
+                if body.dm_scheduled_at:
+                    _check_dt = _dt_win.datetime.strptime(body.dm_scheduled_at[:16], "%Y-%m-%d %H:%M")
+                else:
+                    _check_dt = _dt_win.datetime.now()
+                if not _is_within_send_window(_check_dt):
+                    _block_reason = (
+                        f"발송가능시간(오전 {_DM_SEND_HOUR_START}시~오후 {_DM_SEND_HOUR_END - 12}시)이 아닙니다. "
+                        + ("예약 시각을 해당 시간대로 지정해주세요." if body.dm_scheduled_at else "발송가능시간 내에 다시 시도해주세요.")
+                    )
+            except Exception:
+                logger.exception("[DM] 발송시간 검증 실패: scheduled_at=%s", body.dm_scheduled_at)
+        # (3) [광고]/수신거부 안내 누락 시 서버가 강제 보정 (클라이언트 우회 방지)
+        if not _block_reason and body.dm_message:
+            body.dm_message = _apply_ad_compliance(body.dm_message, body.customer_code)
+
+    if _block_reason:
+        sms_result = {"success": False, "status_code": None, "message": _block_reason}
+        sap_result["sms_result"] = sms_result
+        logger.warning("[DM] 발송 차단: customer_code=%s reason=%s", body.customer_code, _block_reason)
+    elif dm_attempted:
         if body.client_sms_result is not None:
             # 브라우저 확장(SMS 발송 브릿지)이 사용자 본인의 direct.dongwon.com 세션으로
             # 이미 발송을 마친 경우 — 서버는 재발송하지 않고 그 결과를 그대로 로그에 사용한다.

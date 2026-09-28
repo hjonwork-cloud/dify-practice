@@ -143,6 +143,9 @@
         <a class="{% if '/portal/admin/users' in request.url.path %}active{% endif %}" href="/portal/admin/users">
           <span class="nav-icon">👥</span><span class="nav-label">사용자 관리</span>
         </a>
+        <a class="{% if '/portal/admin/dm-optout' in request.url.path %}active{% endif %}" href="/portal/admin/dm-optout">
+          <span class="nav-icon">🚫</span><span class="nav-label">수신거부 고객 관리</span>
+        </a>
         <a class="{% if '/portal/price-monitor' in request.url.path %}active{% endif %}" href="/portal/price-monitor/">
           <span class="nav-icon">📊</span><span class="nav-label">가격 모니터링</span>
         </a>
