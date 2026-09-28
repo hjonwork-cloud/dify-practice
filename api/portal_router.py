@@ -13,6 +13,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from decimal import Decimal
 from pathlib import Path
 from urllib.parse import parse_qs, quote
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -44,6 +45,7 @@ _PUBLIC_BASE_URL = os.getenv(
 )
 _DM_SEND_HOUR_START = 8   # 발송가능 시작시각(포함) — 오전 08:00
 _DM_SEND_HOUR_END = 20    # 발송가능 종료시각(미포함) — 오후 08:00 (20:00 이후 불가)
+_KST = ZoneInfo("Asia/Seoul")  # Azure App Service(Linux)는 컨테이너 OS가 UTC라 naive now()로는 시간대가 어긋난다.
 
 # ── 팀 리더: 자신의 팀 전체 데이터 조회 가능 ──────────────────────────
 _TEAM_LEADERS: dict[str, str] = {
@@ -179,7 +181,7 @@ def _optout_link(customer_code: str) -> str:
 
 
 def _is_within_send_window(dt) -> bool:
-    """발송가능시간(08:00~20:00, KST) 여부. dt: datetime 객체(로컬 서버시각=KST 가정)."""
+    """발송가능시간(08:00~20:00, KST) 여부. dt: datetime 객체(naive면 KST 벽시계 시각으로 간주)."""
     return _DM_SEND_HOUR_START <= dt.hour < _DM_SEND_HOUR_END
 
 
@@ -3423,9 +3425,12 @@ async def dm_send_with_price(request: Request, body: _DmSendPayload):
             import datetime as _dt_win
             try:
                 if body.dm_scheduled_at:
+                    # 예약시각은 사용자가 화면에서 직접 입력한 KST 벽시계 시각(naive)이므로 그대로 사용
                     _check_dt = _dt_win.datetime.strptime(body.dm_scheduled_at[:16], "%Y-%m-%d %H:%M")
                 else:
-                    _check_dt = _dt_win.datetime.now()
+                    # Azure App Service(Linux) 컨테이너는 OS 시간대가 UTC이므로,
+                    # naive datetime.now()를 그대로 쓰면 KST 기준 08~20시 판정이 어긋난다.
+                    _check_dt = _dt_win.datetime.now(_KST)
                 if not _is_within_send_window(_check_dt):
                     _block_reason = (
                         f"발송가능시간(오전 {_DM_SEND_HOUR_START}시~오후 {_DM_SEND_HOUR_END - 12}시)이 아닙니다. "
