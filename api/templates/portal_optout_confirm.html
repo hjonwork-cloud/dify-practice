@@ -24,7 +24,9 @@
     .info-caption{font-size:.72rem;color:#94a3b8;margin:.5rem 0 1.2rem;}
     .btn{display:inline-block;width:100%;padding:.85rem 1rem;border:none;border-radius:10px;
          font-size:.95rem;font-weight:700;cursor:pointer;transition:opacity .15s;}
-    .btn.optout{background:#dc2626;color:#fff;}
+    .btn.optin{background:#16a34a;color:#fff;}
+    .btn.optin:hover{opacity:.9;}
+    .btn.optout{background:#dc2626;color:#fff;margin-top:.6rem;}
     .btn.optout:hover{opacity:.9;}
     .btn:disabled{background:#cbd5e1;color:#64748b;cursor:not-allowed;}
     .msg{font-size:.85rem;margin-top:1rem;padding:.7rem;border-radius:8px;display:none;}
@@ -58,16 +60,18 @@
         수신거부 문의는 발송 담당자에게 연락해 주세요.
       </div>
     {% else %}
-      <h1>광고성 정보 수신거부</h1>
+      <h1>광고성 정보 수신 설정</h1>
       <div class="info-box">
-        <div class="info-row"><span class="lbl">사업장명</span><span class="val">{{ customer_name_masked or '-' }}</span></div>
+        <div class="info-row"><span class="lbl">사업장명</span><span class="val">{{ customer_name or '-' }}</span></div>
         <div class="info-row"><span class="lbl">휴대폰번호</span><span class="val">{{ phone_masked or '-' }}</span></div>
       </div>
       <div class="info-caption">위 정보가 본인(사업장) 정보와 일치하는지 확인해 주세요.</div>
       {% if already %}
-        <p>이미 수신거부가 완료된 고객입니다.<br>추가 조치가 필요하지 않습니다.</p>
-        <button class="btn" disabled>수신거부 완료됨</button>
+        <p>현재 <b>수신거부</b> 상태입니다.<br>동원홈푸드의 PB/신상품·할인 소식을 받아보시려면 아래 버튼으로 수신동의를 진행해 주세요.</p>
+        <button id="optinBtn" class="btn optin" onclick="doOptin()">수신동의하기</button>
+        <div id="msgBox" class="msg"></div>
       {% else %}
+        <button id="optinBtn" class="btn optin" onclick="doOptin()">수신동의하기</button>
         <button id="optoutBtn" class="btn optout" onclick="openWarnModal()">수신거부 신청</button>
         <div id="msgBox" class="msg"></div>
       {% endif %}
@@ -77,6 +81,39 @@
       광고성 정보 수신거부 요청을 처리하고 있습니다.
     </div>
   </div>
+
+  {% if valid %}
+  <script>
+    async function doOptin() {
+      const optinBtn = document.getElementById('optinBtn');
+      const optoutBtn = document.getElementById('optoutBtn');
+      const msgBox = document.getElementById('msgBox');
+      optinBtn.disabled = true;
+      optinBtn.textContent = '처리 중...';
+      try {
+        const res = await fetch('/portal/optout/optin', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: `c=${encodeURIComponent('{{ customer_code }}')}&t=${encodeURIComponent('{{ token }}')}`
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.ok) {
+          optinBtn.textContent = '수신동의 완료됨';
+          if (optoutBtn) optoutBtn.style.display = 'none';
+          msgBox.className = 'msg ok';
+          msgBox.textContent = '수신동의가 정상적으로 반영되었습니다. 앞으로 안내 메시지를 받으실 수 있습니다.';
+        } else {
+          throw new Error(data.detail || '처리 실패');
+        }
+      } catch (e) {
+        optinBtn.disabled = false;
+        optinBtn.textContent = '수신동의하기';
+        msgBox.className = 'msg err';
+        msgBox.textContent = '처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.';
+      }
+    }
+  </script>
+  {% endif %}
 
   {% if valid and not already %}
   <div class="modal-bg" id="warnModal">
@@ -102,6 +139,7 @@
     }
     async function doOptout() {
       const btn = document.getElementById('optoutBtn');
+      const optinBtn = document.getElementById('optinBtn');
       const confirmBtn = document.getElementById('warnConfirmBtn');
       const msgBox = document.getElementById('msgBox');
       confirmBtn.disabled = true;
@@ -117,6 +155,7 @@
           closeWarnModal();
           btn.disabled = true;
           btn.textContent = '수신거부 완료됨';
+          if (optinBtn) optinBtn.style.display = 'none';
           msgBox.className = 'msg ok';
           msgBox.textContent = '수신거부가 정상적으로 반영되었습니다.';
         } else {

@@ -817,6 +817,28 @@ def remove_dm_optout(optout_id: int, deactivated_by: str = "") -> int:
         return cur.rowcount
 
 
+def remove_dm_optout_by_customer(customer_code: str = "", phone: str = "", deactivated_by: str = "customer") -> int:
+    """고객코드/전화번호 기준 수신거부 해제 (공개 수신동의 페이지에서 사용, soft delete). 영향받은 행 수 반환."""
+    init_db()
+    code = (customer_code or "").strip()
+    ph = _normalize_phone(phone)
+    if not code and not ph:
+        return 0
+    or_parts, params = [], []
+    if code:
+        or_parts.append("customer_code = ?"); params.append(code)
+    if ph:
+        or_parts.append("phone = ?"); params.append(ph)
+    where = "is_active = 1 AND (" + " OR ".join(or_parts) + ")"
+    params_full = [_now(), deactivated_by] + params
+    with _connect() as conn:
+        cur = conn.execute(
+            f"UPDATE dm_optout_list SET is_active=0, deactivated_at=?, deactivated_by=? WHERE {where}",
+            params_full,
+        )
+        return cur.rowcount
+
+
 def list_dm_optout(active_only: bool = True, q: str = "", limit: int = 500):
     """수신거부 고객 목록 조회 (관리자 화면용). q: 고객코드/이름/전화번호 부분검색."""
     init_db()

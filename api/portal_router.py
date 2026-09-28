@@ -3216,7 +3216,7 @@ async def optout_page(request: Request, c: str = "", t: str = ""):
         "request": request,
         "valid": valid,
         "customer_code": code,
-        "customer_name_masked": _mask_name(name),
+        "customer_name": name,
         "phone_masked": _mask_phone(phone),
         "token": t,
         "already": already,
@@ -3237,6 +3237,20 @@ async def optout_confirm(request: Request):
     phone = _get_customer_mobile_phone(code)
     portal_db.add_dm_optout(customer_code=code, customer_name=name, phone=phone,
                              reason="link", source="web_link", created_by="customer")
+    return JSONResponse({"ok": True})
+
+
+@router.post("/optout/optin")
+async def optout_optin(request: Request):
+    """수신동의(수신거부 해제) 처리 (비로그인 — 서명토큰으로 위변조 방지).
+    기존에 수신거부 이력이 없어도(=이미 수신동의 상태) 정상 처리로 간주한다."""
+    form = await _read_form(request)
+    code = (form.get("c") or "").strip()
+    token = form.get("t") or ""
+    if not code or not _optout_verify(code, token):
+        raise HTTPException(status_code=400, detail="유효하지 않은 요청입니다.")
+    phone = _get_customer_mobile_phone(code)
+    portal_db.remove_dm_optout_by_customer(customer_code=code, phone=phone, deactivated_by="customer")
     return JSONResponse({"ok": True})
 
 
