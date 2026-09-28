@@ -15,8 +15,13 @@
     .logo{font-size:.78rem;color:#64748b;font-weight:700;letter-spacing:.02em;margin-bottom:.6rem;}
     h1{font-size:1.15rem;margin:0 0 1rem;color:#0f172a;}
     p{font-size:.9rem;line-height:1.6;color:#475569;margin:0 0 1.25rem;}
-    .cust{display:inline-block;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
-          padding:.6rem 1rem;font-size:.9rem;font-weight:700;color:#0f172a;margin-bottom:1.25rem;}
+    .info-box{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
+          padding:1rem 1.1rem;margin-bottom:1.25rem;text-align:left;}
+    .info-row{display:flex;justify-content:space-between;align-items:center;font-size:.88rem;padding:.3rem 0;}
+    .info-row + .info-row{border-top:1px solid #eef2f7;}
+    .info-row .lbl{color:#64748b;font-weight:600;}
+    .info-row .val{color:#0f172a;font-weight:800;}
+    .info-caption{font-size:.72rem;color:#94a3b8;margin:.5rem 0 1.2rem;}
     .btn{display:inline-block;width:100%;padding:.85rem 1rem;border:none;border-radius:10px;
          font-size:.95rem;font-weight:700;cursor:pointer;transition:opacity .15s;}
     .btn.optout{background:#dc2626;color:#fff;}
@@ -27,11 +32,25 @@
     .msg.err{display:block;background:#fee2e2;color:#b91c1c;}
     .notice{font-size:.72rem;color:#94a3b8;margin-top:1.5rem;line-height:1.5;}
     .invalid-box{padding:1rem;background:#fef2f2;border-radius:10px;color:#b91c1c;font-size:.88rem;}
+
+    .modal-bg{position:fixed;inset:0;background:rgba(15,23,42,.55);display:none;
+         align-items:center;justify-content:center;padding:1.25rem;z-index:999;}
+    .modal-bg.open{display:flex;}
+    .modal{background:#fff;border-radius:16px;max-width:380px;width:100%;padding:1.75rem 1.5rem;text-align:center;}
+    .modal .warn-icon{font-size:2rem;margin-bottom:.5rem;}
+    .modal h2{font-size:1.05rem;margin:0 0 .8rem;color:#0f172a;}
+    .modal p{font-size:.86rem;line-height:1.65;color:#475569;margin:0 0 1.4rem;}
+    .modal-btns{display:flex;gap:.6rem;}
+    .modal-btns button{flex:1;padding:.75rem;border:none;border-radius:10px;font-size:.88rem;font-weight:700;cursor:pointer;}
+    .modal-btns .cancel{background:#f1f5f9;color:#334155;}
+    .modal-btns .cancel:hover{background:#e2e8f0;}
+    .modal-btns .confirm{background:#dc2626;color:#fff;}
+    .modal-btns .confirm:hover{opacity:.9;}
   </style>
 </head>
 <body>
   <div class="card">
-    <div class="logo">동원홈푸드 · 세일즈 액션 플랫폼</div>
+    <div class="logo">동원홈푸드</div>
     {% if not valid %}
       <h1>유효하지 않은 링크입니다</h1>
       <div class="invalid-box">
@@ -40,13 +59,16 @@
       </div>
     {% else %}
       <h1>광고성 정보 수신거부</h1>
-      <div class="cust">{{ customer_name_masked or '고객' }}님</div>
+      <div class="info-box">
+        <div class="info-row"><span class="lbl">사업장명</span><span class="val">{{ customer_name_masked or '-' }}</span></div>
+        <div class="info-row"><span class="lbl">휴대폰번호</span><span class="val">{{ phone_masked or '-' }}</span></div>
+      </div>
+      <div class="info-caption">위 정보가 본인(사업장) 정보와 일치하는지 확인해 주세요.</div>
       {% if already %}
         <p>이미 수신거부가 완료된 고객입니다.<br>추가 조치가 필요하지 않습니다.</p>
         <button class="btn" disabled>수신거부 완료됨</button>
       {% else %}
-        <p>아래 버튼을 누르시면 이후 동원홈푸드로부터<br>광고성 문자(SMS/LMS) 발송이 중단됩니다.</p>
-        <button id="optoutBtn" class="btn optout" onclick="doOptout()">수신거부 신청</button>
+        <button id="optoutBtn" class="btn optout" onclick="openWarnModal()">수신거부 신청</button>
         <div id="msgBox" class="msg"></div>
       {% endif %}
     {% endif %}
@@ -57,12 +79,33 @@
   </div>
 
   {% if valid and not already %}
+  <div class="modal-bg" id="warnModal">
+    <div class="modal">
+      <div class="warn-icon">⚠️</div>
+      <h2>정말 수신거부 하시겠습니까?</h2>
+      <p>
+        수신거부 시 동원홈푸드의 PB/상품의 신규·할인 등의 소식을 놓치게 됩니다.<br><br>
+        사업장의 효율적인 운영을 위해 수신동의를 진행해주세요.
+      </p>
+      <div class="modal-btns">
+        <button class="cancel" onclick="closeWarnModal()">취소 (수신동의 유지)</button>
+        <button class="confirm" id="warnConfirmBtn" onclick="doOptout()">그래도 수신거부</button>
+      </div>
+    </div>
+  </div>
   <script>
+    function openWarnModal() {
+      document.getElementById('warnModal')?.classList.add('open');
+    }
+    function closeWarnModal() {
+      document.getElementById('warnModal')?.classList.remove('open');
+    }
     async function doOptout() {
       const btn = document.getElementById('optoutBtn');
+      const confirmBtn = document.getElementById('warnConfirmBtn');
       const msgBox = document.getElementById('msgBox');
-      btn.disabled = true;
-      btn.textContent = '처리 중...';
+      confirmBtn.disabled = true;
+      confirmBtn.textContent = '처리 중...';
       try {
         const res = await fetch('/portal/optout/confirm', {
           method: 'POST',
@@ -71,6 +114,8 @@
         });
         const data = await res.json().catch(() => ({}));
         if (res.ok && data.ok) {
+          closeWarnModal();
+          btn.disabled = true;
           btn.textContent = '수신거부 완료됨';
           msgBox.className = 'msg ok';
           msgBox.textContent = '수신거부가 정상적으로 반영되었습니다.';
@@ -78,8 +123,9 @@
           throw new Error(data.detail || '처리 실패');
         }
       } catch (e) {
-        btn.disabled = false;
-        btn.textContent = '수신거부 신청';
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = '그래도 수신거부';
+        closeWarnModal();
         msgBox.className = 'msg err';
         msgBox.textContent = '처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.';
       }

@@ -3186,12 +3186,25 @@ def _mask_name(name: str) -> str:
     return name[0] + "*" * (len(name) - 2) + name[-1]
 
 
+def _mask_phone(phone: str) -> str:
+    """전화번호 마스킹 (비로그인 공개 페이지 노출용, 본인확인용 뒷자리만 표시). 예: 010-1234-5678 → 010-****-5678."""
+    digits = "".join(ch for ch in (phone or "") if ch.isdigit())
+    if len(digits) < 7:
+        return phone or ""
+    if len(digits) == 11:
+        return f"{digits[:3]}-****-{digits[7:]}"
+    if len(digits) == 10:
+        return f"{digits[:3]}-***-{digits[6:]}"
+    return digits[:3] + "-****-" + digits[-4:]
+
+
 @router.get("/optout", response_class=HTMLResponse)
 async def optout_page(request: Request, c: str = "", t: str = ""):
     """DM 수신거부 안내 링크로 접근하는 비로그인 공개 확인 페이지."""
     code = (c or "").strip()
     valid = bool(code) and _optout_verify(code, t)
     name = _get_customer_name(code) if valid else ""
+    phone = ""
     already = False
     if valid:
         try:
@@ -3204,6 +3217,7 @@ async def optout_page(request: Request, c: str = "", t: str = ""):
         "valid": valid,
         "customer_code": code,
         "customer_name_masked": _mask_name(name),
+        "phone_masked": _mask_phone(phone),
         "token": t,
         "already": already,
         "asset_v": _asset_version(),
