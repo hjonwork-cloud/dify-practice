@@ -217,8 +217,16 @@ def send_report(report: dict) -> bool:
         return False
 
 
+# 플랫폼별 라벨/색상 메타 (baemin/foodspring/todaysales)
+_PF_META = {
+    "baemin":     {"label": "배민상회", "accent": "#3b82f6", "accent_dark": "#1e40af", "icon": "🟦"},
+    "foodspring": {"label": "식봄",     "accent": "#10b981", "accent_dark": "#065f46", "icon": "🟩"},
+    "todaysales": {"label": "오늘얼마", "accent": "#f97316", "accent_dark": "#c2410c", "icon": "🟧"},
+}
+
+
 def _build_platform_html(report: dict, platform: str) -> str:
-    """배민 or 식봄 전용 리포트 HTML 생성."""
+    """플랫폼(배민/식봄/오늘얼마) 전용 리포트 HTML 생성."""
     crawl_date   = report.get("crawl_date", "")
     total        = report.get("total_saved", 0)
     duration_sec = report.get("duration_sec", 0)
@@ -227,11 +235,11 @@ def _build_platform_html(report: dict, platform: str) -> str:
     seller_rows  = report.get("seller_summary", [])
     now_str      = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-    is_baemin   = (platform == "baemin")
-    pf_label    = "배민상회" if is_baemin else "식봄"
-    accent      = "#3b82f6" if is_baemin else "#10b981"
-    accent_dark = "#1e40af" if is_baemin else "#065f46"
-    pf_icon     = "🟦" if is_baemin else "🟩"
+    meta        = _PF_META.get(platform, _PF_META["foodspring"])
+    pf_label    = meta["label"]
+    accent      = meta["accent"]
+    accent_dark = meta["accent_dark"]
+    pf_icon     = meta["icon"]
     status      = "✅ 성공" if not failed else f"⚠️ 일부 실패 ({len(failed)}개)"
     status_color = "#10b981" if not failed else "#f59e0b"
 
@@ -324,7 +332,7 @@ def _send(report: dict, platform: str) -> bool:
     from_addr = _env("SMTP_FROM") or user
     use_tls   = _env("SMTP_TLS", "true").lower() != "false"
 
-    pf_label  = "배민상회" if platform == "baemin" else "식봄"
+    pf_label  = _PF_META.get(platform, _PF_META["foodspring"])["label"]
     crawl_date = report.get("crawl_date", "")
     total      = report.get("total_saved", 0)
     subject    = f"[가격모니터링] {crawl_date} {pf_label} 크롤링 완료 — {total:,}건"
@@ -359,3 +367,8 @@ def send_baemin_report(report: dict) -> bool:
 def send_foodspring_report(report: dict) -> bool:
     """식봄 전용 크롤링 완료 메일 발송."""
     return _send(report, "foodspring")
+
+
+def send_todaysales_report(report: dict) -> bool:
+    """오늘얼마 전용 크롤링 완료 메일 발송."""
+    return _send(report, "todaysales")

@@ -79,6 +79,7 @@
       <option value="">전체 플랫폼</option>
       <option value="baemin"     {% if platform=='baemin'     %}selected{% endif %}>배민상회</option>
       <option value="foodspring" {% if platform=='foodspring' %}selected{% endif %}>식봄</option>
+      <option value="todaysales" {% if platform=='todaysales' %}selected{% endif %}>오늘얼마</option>
     </select>
     <label style="display:flex;align-items:center;gap:.35rem;font-size:.84rem;cursor:pointer;">
       <input type="checkbox" name="alert_only" value="1"
@@ -187,10 +188,13 @@ function gpBadge(st,pct){
   const ic =st==='alert'?'🔴':st==='warn'?'🟡':'🟢';
   return `<span class="${cls}">${ic} ${(+pct).toFixed(1)}%</span>`;
 }
+const PF_BADGE_MAP = {
+  baemin:     '<span class="badge badge-baemin">배민상회</span>',
+  foodspring: '<span class="badge badge-foodspring">식봄</span>',
+  todaysales: '<span class="badge badge-todaysales">오늘얼마</span>',
+};
 function pfBadge(p){
-  return p==='baemin'
-    ? '<span class="badge badge-baemin">배민상회</span>'
-    : '<span class="badge badge-foodspring">식봄</span>';
+  return PF_BADGE_MAP[p] || `<span class="badge badge-gray">${p}</span>`;
 }
 
 const tbody = document.getElementById('groupTbody');

@@ -23,6 +23,7 @@
 .plat-badge { font-size:11px; padding:2px 8px; border-radius:20px; font-weight:600; white-space:nowrap; }
 .badge-baemin { background:#fff5d4; color:#b45309; }
 .badge-food { background:#d1fae5; color:#065f46; }
+.badge-todaysales { background:#ffedd5; color:#c2410c; }
 .plat-info { flex:1; min-width:0; }
 .plat-name { font-size:14px; font-weight:600; color:#111; margin-bottom:4px; }
 .plat-meta { font-size:12px; color:#6b7280; display:flex; gap:12px; flex-wrap:wrap; }
@@ -188,6 +189,7 @@
       <option value="">-- 플랫폼 선택 --</option>
       <option value="baemin" {% if platform=='baemin' %}selected{% endif %}>배민상회</option>
       <option value="foodspring" {% if platform=='foodspring' %}selected{% endif %}>식봄</option>
+      <option value="todaysales" {% if platform=='todaysales' %}selected{% endif %}>오늘얼마</option>
     </select>
     <select id="selSeller">
       <option value="">-- 셀러 선택 --</option>
@@ -389,7 +391,7 @@ async function loadPlatforms() {
       // 실제 platform 값으로 드롭다운 재구성
       const current = sel.value || currentPlatform;
       // 기존 하드코딩 옵션 레이블 매핑
-      const labelMap = { baemin: '배민상회', foodspring: '식봄' };
+      const labelMap = { baemin: '배민상회', foodspring: '식봄', todaysales: '오늘얼마' };
       sel.innerHTML = '<option value="">-- 플랫폼 선택 --</option>';
       d.platforms.forEach(p => {
         const o = document.createElement('option');
@@ -815,8 +817,10 @@ function _buildCardHtml(item) {
   const dispName = item.display_name && item.display_name !== item.product_name
     ? `${escHtml(item.display_name)} <small style="color:#9ca3af;text-decoration:line-through">${escHtml(item.product_name)}</small>`
     : escHtml(item.product_name);
-  const platLabel = p => p === 'baemin' ? '배민상회' : '식봄';
-  const platClass = p => p === 'baemin' ? 'badge-baemin' : 'badge-food';
+  const PLAT_LABEL_WS = { baemin: '배민상회', foodspring: '식봄', todaysales: '오늘얼마' };
+  const PLAT_CLASS_WS = { baemin: 'badge-baemin', foodspring: 'badge-food', todaysales: 'badge-todaysales' };
+  const platLabel = p => PLAT_LABEL_WS[p] || p;
+  const platClass = p => PLAT_CLASS_WS[p] || 'badge-gray';
 
   function _plantBadgesHtml(statusList) {
     if (!statusList || !statusList.length) return '';
@@ -1158,7 +1162,7 @@ function renderModalPlatList(query) {
     document.getElementById('modalPlatList').innerHTML = '<p style="color:#9ca3af;font-size:13px;text-align:center;padding:20px">유사 상품 없음</p>';
     return;
   }
-  const platLabelOf = p => p === 'baemin' ? '배민' : '식봄';
+  const platLabelOf = p => ({ baemin: '배민', foodspring: '식봄', todaysales: '오늘얼마' }[p] || p);
   let html = '';
   filtered.forEach(r => {
     const checked   = modalChecked.has(r.product_key);

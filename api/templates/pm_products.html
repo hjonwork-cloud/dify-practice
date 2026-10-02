@@ -75,6 +75,7 @@
           <th style="text-align:right;cursor:pointer;" onclick="location.href='?plant={{ plant }}{% if keyword %}&keyword={{ keyword }}{% endif %}{% if map_filter %}&map_filter={{ map_filter }}{% endif %}{% if category %}&category={{ category }}{% endif %}{% if status_filter %}&status_filter={{ status_filter }}{% endif %}&sort=qty_desc'">전월수량{% if sort=='qty_desc' %} ↓{% endif %}</th>
           <th>배민</th>
           <th>식봄</th>
+          <th>오늘얼마</th>
           <th></th>
         </tr>
       </thead>
@@ -116,6 +117,13 @@
           <td style="text-align:center;">
             {% if r.mapping_foodspring > 0 %}
               <span class="badge badge-foodspring">{{ r.mapping_foodspring }}개</span>
+            {% else %}
+              <span style="color:#cbd5e1;font-size:.78rem;">-</span>
+            {% endif %}
+          </td>
+          <td style="text-align:center;">
+            {% if r.mapping_todaysales > 0 %}
+              <span class="badge badge-todaysales">{{ r.mapping_todaysales }}개</span>
             {% else %}
               <span style="color:#cbd5e1;font-size:.78rem;">-</span>
             {% endif %}
@@ -187,6 +195,7 @@
         <option value="">전체 플랫폼</option>
         <option value="baemin">배민상회</option>
         <option value="foodspring">식봄</option>
+        <option value="todaysales">오늘얼마</option>
       </select>
       <button class="pm-btn pm-btn-primary" onclick="searchSuggest()">검색</button>
     </div>
@@ -382,9 +391,12 @@ async function searchSuggest() {
     </tr></thead><tbody>`;
   rows.forEach(r => {
     const key = r.product_key || `${r.platform}::${r.platform_product_code}`;
-    const pfl = r.platform === 'baemin'
-      ? '<span class="badge badge-baemin" style="font-size:.72rem;">배민</span>'
-      : '<span class="badge badge-foodspring" style="font-size:.72rem;">식봄</span>';
+    const PFL_MAP = {
+      baemin:     '<span class="badge badge-baemin" style="font-size:.72rem;">배민</span>',
+      foodspring: '<span class="badge badge-foodspring" style="font-size:.72rem;">식봄</span>',
+      todaysales: '<span class="badge badge-todaysales" style="font-size:.72rem;">오늘얼마</span>',
+    };
+    const pfl = PFL_MAP[r.platform] || `<span class="badge badge-gray" style="font-size:.72rem;">${r.platform}</span>`;
     const price = r.price_sale ? Number(r.price_sale).toLocaleString() + '원' : '-';
     const netPrice = r.net_price ? Number(r.net_price).toLocaleString() + '원' : '-';
     const sim = r.similarity_score ?? 0;

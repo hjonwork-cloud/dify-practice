@@ -691,7 +691,7 @@ const PAGE_SIZE = 10;    // 한 페이지에 보여줄 매핑 상품 수
 let _simResults = [];
 let _plant    = 'ALL';
 
-const PLAT_LABEL = { baemin: '배민상회', foodspring: '식봄' };
+const PLAT_LABEL = { baemin: '배민상회', foodspring: '식봄', todaysales: '오늘얼마' };
 
 async function loadData() {
   const p = new URLSearchParams(location.search);
@@ -1289,7 +1289,7 @@ function openMapModal(sku) {
   _mapSku = sku;
   _mapSelectedOur = null;
   document.getElementById('mapModalOverlay').classList.remove('hidden');
-  const PLAT_LABEL2 = { baemin: '배민상회', foodspring: '식봄' };
+  const PLAT_LABEL2 = { baemin: '배민상회', foodspring: '식봄', todaysales: '오늘얼마' };
   document.getElementById('mapPlatCard').innerHTML = `
     <div class="pc-name">${escHtml(sku.product_name || '')}</div>
     <div class="pc-meta">

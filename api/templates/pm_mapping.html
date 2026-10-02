@@ -70,6 +70,7 @@
           <option value="">전체</option>
           <option value="baemin">배민상회</option>
           <option value="foodspring">식봄</option>
+          <option value="todaysales">오늘얼마</option>
         </select>
       </div>
     </div>
@@ -196,8 +197,8 @@ document.getElementById('platformFilter').onchange=()=>{
   if(kw) searchPlat(kw);
 };
 
-const PLAT_LABEL={'baemin':'배민상회','foodspring':'식봄'};
-const PLAT_COLOR={'baemin':'badge-baemin','foodspring':'badge-foodspring'};
+const PLAT_LABEL={'baemin':'배민상회','foodspring':'식봄','todaysales':'오늘얼마'};
+const PLAT_COLOR={'baemin':'badge-baemin','foodspring':'badge-foodspring','todaysales':'badge-todaysales'};
 
 function renderPlatResults(data){
   const el=document.getElementById('platResults');

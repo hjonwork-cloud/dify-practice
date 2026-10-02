@@ -22,7 +22,7 @@
 .gpl-empty,.gpl-loading{text-align:center;padding:2.5rem;color:#94a3b8;font-size:.88rem;}
 .gpl-detail{display:none;}
 .badge{display:inline-block;padding:.15rem .5rem;border-radius:99px;font-size:.72rem;font-weight:700;}
-.badge-baemin{background:#fff0e8;color:#d4380d;} .badge-foodspring{background:#e6f4ff;color:#0958d9;}
+.badge-baemin{background:#fff0e8;color:#d4380d;} .badge-foodspring{background:#e6f4ff;color:#0958d9;} .badge-todaysales{background:#fff7ed;color:#c2410c;}
 .back-link{display:inline-flex;align-items:center;gap:.3rem;color:#1677ff;font-weight:700;font-size:.85rem;text-decoration:none;margin-bottom:.8rem;cursor:pointer;}
 .gpl-head-row{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;flex-wrap:wrap;}
 .gpl-detail-frame-wrap{position:relative;background:#f8fafc;border-radius:12px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.07);}
@@ -89,6 +89,7 @@
         <option value="">전체 플랫폼</option>
         <option value="baemin">배민상회</option>
         <option value="foodspring">식봄</option>
+        <option value="todaysales">오늘얼마</option>
       </select>
       <label style="font-size:.8rem;color:#64748b;font-weight:600;">셀러</label>
       <select id="ext-seller-filter" onchange="renderExtTable()"
@@ -258,9 +259,12 @@ function renderExtTable(){
       <th style="padding:.4rem .5rem;text-align:left;">셀러</th>
     </tr></thead><tbody>`;
   rows.forEach(r => {
-    const pfl = r.platform === 'baemin'
-      ? '<span class="badge badge-baemin" style="font-size:.72rem;">배민상회</span>'
-      : '<span class="badge badge-foodspring" style="font-size:.72rem;">식봄</span>';
+    const PFL_MAP = {
+      baemin:     '<span class="badge badge-baemin" style="font-size:.72rem;">배민상회</span>',
+      foodspring: '<span class="badge badge-foodspring" style="font-size:.72rem;">식봄</span>',
+      todaysales: '<span class="badge badge-todaysales" style="font-size:.72rem;">오늘얼마</span>',
+    };
+    const pfl = PFL_MAP[r.platform] || `<span class="badge badge-gray" style="font-size:.72rem;">${r.platform}</span>`;
     const price = r.price_sale ? Math.round(r.price_sale/vatDiv).toLocaleString()+'원' : '-';
     const net   = r.net_price ? Math.round(r.net_price/vatDiv).toLocaleString()+'원' : '-';
     html += `<tr style="border-bottom:1px solid #f1f5f9;">

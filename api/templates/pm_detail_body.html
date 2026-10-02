@@ -208,6 +208,10 @@
         <h4>🟩 식봄</h4>
         <div class="chart-wrap-sm"><canvas id="chartA_food"></canvas></div>
       </div>
+      <div class="split-panel">
+        <h4>🟧 오늘얼마</h4>
+        <div class="chart-wrap-sm"><canvas id="chartA_todaysales"></canvas></div>
+      </div>
     </div>
   </div>
 
@@ -265,7 +269,7 @@
             data-fee="{{ r.fee_pct or '' }}"
             data-gp="{{ r.gp_pct or '' }}"
             data-delivery="{{ r.delivery_type or '' }}">
-          <td>{% if r.platform=='baemin' %}<span class="badge badge-baemin">배민상회</span>{% else %}<span class="badge badge-foodspring">식봄</span>{% endif %}</td>
+          <td>{% if r.platform=='baemin' %}<span class="badge badge-baemin">배민상회</span>{% elif r.platform=='todaysales' %}<span class="badge badge-todaysales">오늘얼마</span>{% else %}<span class="badge badge-foodspring">식봄</span>{% endif %}</td>
           <td style="font-weight:600;font-size:.83rem;">{{ r.platform_seller_name or '—' }}</td>
           <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.79rem;" title="{{ r.product_name }}">{{ r.product_name or '—' }}
             {% if r.tag == 'substitute' %}<span class="badge" style="background:#fffbeb;color:#d97706;font-size:.65rem;margin-left:.2rem;">🔄 대체</span>
@@ -395,7 +399,7 @@ function buildA(){
   const dates = curDates();
   const platSrc = FEE_MODE==='net' ? DS_PLAT_NET : DS_PLAT_GROSS;
   const platCur = curDatasets(platSrc);
-  [['baemin','chartA_baemin','배민'],['foodspring','chartA_food','식봄']].forEach(([pf,id,label])=>{
+  [['baemin','chartA_baemin','배민'],['foodspring','chartA_food','식봄'],['todaysales','chartA_todaysales','오늘얼마']].forEach(([pf,id,label])=>{
     const pfDs = platCur.filter(d=>d.label.startsWith(label));
     const ds = [...pfDs];
     if(FEE_MODE==='net'){

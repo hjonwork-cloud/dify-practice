@@ -40,6 +40,8 @@
       <div>
         {% if m.platform=='baemin' %}
           <span class="badge badge-baemin">배민상회</span>
+        {% elif m.platform=='todaysales' %}
+          <span class="badge badge-todaysales">오늘얼마</span>
         {% else %}
           <span class="badge badge-foodspring">식봄</span>
         {% endif %}
@@ -66,6 +68,7 @@
       <option value="">전체</option>
       <option value="baemin">배민상회</option>
       <option value="foodspring">식봄</option>
+      <option value="todaysales">오늘얼마</option>
     </select>
   </div>
   <div class="search-results-sm" id="addSearchResults"></div>
@@ -86,8 +89,8 @@
 <script>
 const PLANT='{{ plant }}';
 const PRODUCT_CODE='{{ product_code }}';
-const PLAT_LABEL={'baemin':'배민상회','foodspring':'식봄'};
-const PLAT_COLOR={'baemin':'badge-baemin','foodspring':'badge-foodspring'};
+const PLAT_LABEL={'baemin':'배민상회','foodspring':'식봄','todaysales':'오늘얼마'};
+const PLAT_COLOR={'baemin':'badge-baemin','foodspring':'badge-foodspring','todaysales':'badge-todaysales'};
 
 let deleteKeys=[];
 let addItems=[];

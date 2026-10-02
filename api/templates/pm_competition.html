@@ -279,6 +279,7 @@
     <option value="">전체</option>
     <option value="baemin">배민상회</option>
     <option value="foodspring">식봄</option>
+    <option value="todaysales">오늘얼마</option>
   </select>
   <span id="filterCount" style="font-size:.78rem; color:#9ca3af; margin-left:.25rem;"></span>
   <div style="margin-left:auto; display:flex; gap:.5rem;">
@@ -308,8 +309,8 @@ let _openSellers = new Set();
 let _sortCol = 'win_rate';  // 현재 정렬 컬럼
 let _sortDir = 'asc';       // 'asc' | 'desc'
 
-const PLAT_LABEL = { baemin: '배민상회', foodspring: '식봄' };
-const PLAT_BADGE_CLASS = { baemin: 'badge-baemin', foodspring: 'badge-foodspring' };
+const PLAT_LABEL = { baemin: '배민상회', foodspring: '식봄', todaysales: '오늘얼마' };
+const PLAT_BADGE_CLASS = { baemin: 'badge-baemin', foodspring: 'badge-foodspring', todaysales: 'badge-todaysales' };
 
 // 컬럼 정의: { id, label, field, numeric }
 const COLS = [

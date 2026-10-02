@@ -435,6 +435,25 @@ def init_db() -> None:
                 (1913,'가온 신선팜','direct',1),
                 (1725,'에그랑에프엔비','direct',1),
                 (3384,'하늘농원','direct',1);
+
+            -- 오늘얼마(todaysales) 셀러 관리 테이블
+            -- deliveries/policies API에서 deliveryTypeCd=DIRECT(직배송)만 수집 대상으로 시딩
+            -- (테스트/더미성 계정은 추후 데이터 적재 확인 후 is_active=0으로 비활성화 예정)
+            CREATE TABLE IF NOT EXISTS price_todaysales_sellers (
+                seller_id    INTEGER PRIMARY KEY,
+                seller_name  TEXT,
+                is_active    INTEGER DEFAULT 1,
+                updated_at   TEXT DEFAULT (datetime('now','localtime'))
+            );
+            INSERT OR IGNORE INTO price_todaysales_sellers(seller_id,seller_name,is_active) VALUES
+                (10047991,'대상(주)_부산(직배송)',1),
+                (10045896,'현대그린푸드 식자재',1),
+                (10047857,'삼성아이티브이',1),
+                (10045852,'대상(주)_수도권(직배송)',1),
+                (10047992,'대상(주)_대전(직배송)',1),
+                (10047995,'푸드팡_부산(직배송)',1),
+                (10045790,'삼성웰스토리',1),
+                (10048003,'다봄푸드(직배송)',1);
         """)
         # price_map_product_link: tag/multiplier 컬럼 마이그레이션
         for col, typedef in [
@@ -1605,6 +1624,30 @@ def pm_toggle_foodspring_seller(seller_id: int, is_active: int) -> None:
     with _connect() as conn:
         conn.execute(
             "UPDATE price_foodspring_sellers SET is_active=?, updated_at=datetime('now','localtime') WHERE seller_id=?",
+            (is_active, seller_id),
+        )
+
+
+def pm_list_todaysales_sellers(active_only: bool = True):
+    """오늘얼마 셀러 목록 반환."""
+    init_db()
+    with _connect() as conn:
+        if active_only:
+            rows = conn.execute(
+                "SELECT * FROM price_todaysales_sellers WHERE is_active=1 ORDER BY seller_id"
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM price_todaysales_sellers ORDER BY seller_id"
+            ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def pm_toggle_todaysales_seller(seller_id: int, is_active: int) -> None:
+    init_db()
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE price_todaysales_sellers SET is_active=?, updated_at=datetime('now','localtime') WHERE seller_id=?",
             (is_active, seller_id),
         )
 

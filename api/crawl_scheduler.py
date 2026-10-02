@@ -63,6 +63,7 @@ def _parse_crawl_output(stdout: str, duration_sec: float) -> dict:
     total = 0
     baemin_count = 0
     food_count = 0
+    todaysales_count = 0
     seller_summary = []
     failed_sellers = []
 
@@ -97,6 +98,21 @@ def _parse_crawl_output(stdout: str, duration_sec: float) -> dict:
             seller_summary.append({"platform": "foodspring", "seller_id": sid,
                                    "seller_name": name, "count": cnt})
 
+        # "  ✓ 오늘얼마 셀러명(id): 500건 저장" or "  ✓ 오늘얼마 id: 500건 저장"
+        m = re.search(r'✓ 오늘얼마 (.+?)\(?(\w+)\)?:\s*(\d+)건', line)
+        if not m:
+            m = re.search(r'✓ 오늘얼마 (\S+):\s*(\d+)건', line)
+            if m:
+                cnt = int(m.group(2))
+                todaysales_count += cnt
+                seller_summary.append({"platform": "todaysales", "seller_id": m.group(1),
+                                       "seller_name": m.group(1), "count": cnt})
+        else:
+            name, sid, cnt = m.group(1).strip(), m.group(2), int(m.group(3))
+            todaysales_count += cnt
+            seller_summary.append({"platform": "todaysales", "seller_id": sid,
+                                   "seller_name": name, "count": cnt})
+
         if '✗' in line and '저장 실패' in line:
             failed_sellers.append(line.strip().lstrip('✗').strip())
         m = re.search(r'총 ([\d,]+)건 저장', line)
@@ -104,7 +120,7 @@ def _parse_crawl_output(stdout: str, duration_sec: float) -> dict:
             total = int(m.group(1).replace(',', ''))
 
     if total == 0:
-        total = baemin_count + food_count
+        total = baemin_count + food_count + todaysales_count
 
     seller_summary.sort(key=lambda x: x["count"], reverse=True)
     return {
@@ -112,6 +128,7 @@ def _parse_crawl_output(stdout: str, duration_sec: float) -> dict:
         "total_saved":    total,
         "baemin_count":   baemin_count,
         "food_count":     food_count,
+        "todaysales_count": todaysales_count,
         "seller_summary": seller_summary,
         "failed_sellers": failed_sellers,
         "duration_sec":   round(duration_sec, 1),
@@ -127,7 +144,7 @@ def _run_crawl():
     t0    = time.time()
     try:
         result = subprocess.run(
-            [_PYTHON, _CRAWL_SCRIPT, "--food"],  # 서버: 식봄만 (배민은 로컬 PC에서 실행)
+            [_PYTHON, _CRAWL_SCRIPT, "--food", "--todaysales"],  # 서버: 식봄+오늘얼마 (배민은 로컬 PC에서 실행)
             env=env,
             capture_output=True,
             text=True,
@@ -141,22 +158,24 @@ def _run_crawl():
             tail  = "\n".join(lines[-5:]) if lines else "(출력 없음)"
             logger.info(f"[scheduler] 크롤러 완료 ({duration:.0f}s)\n{tail}")
 
-            # 리포트 파싱 & 메일 발송 (식봄 전용)
+            # 리포트 파싱 & 메일 발송 (식봄 + 오늘얼마)
             try:
-                from crawl_mailer import send_foodspring_report
+                from crawl_mailer import send_foodspring_report, send_todaysales_report
                 report = _parse_crawl_output(result.stdout, duration)
                 send_foodspring_report(report)
+                send_todaysales_report(report)
             except Exception as e:
                 logger.warning(f"[scheduler] 메일 발송 실패: {e}")
         else:
             stderr_tail = result.stderr[-1000:] if result.stderr else "(stderr 없음)"
             logger.error(f"[scheduler] 크롤러 실패 (code={result.returncode})\n{stderr_tail}")
             try:
-                from crawl_mailer import send_foodspring_report
+                from crawl_mailer import send_foodspring_report, send_todaysales_report
                 report = _parse_crawl_output(result.stdout or "", duration)
                 report["failed_sellers"].append(f"크롤러 비정상 종료 (code={result.returncode})")
                 report["stderr"] = stderr_tail
                 send_foodspring_report(report)
+                send_todaysales_report(report)
             except Exception:
                 pass
 

@@ -624,6 +624,16 @@ _FEE_CJ       = 0.048   # CJ프레시웨이 예외: 식봄 최대주주로 우�
 # CJ프레시웨이 예외 셀러 (식봄 플랫폼 한정)
 _CJ_SELLER_NAMES = {"CJ프레시웨이", "cj프레시웨이", "CJ 프레시웨이"}
 
+# 플랫폼 표시 라벨 (짧은 버전 / 전체 버전) · 차트 색상
+PF_LABEL_SHORT = {"baemin": "배민", "foodspring": "식봄", "todaysales": "오늘얼마"}
+PF_LABEL_FULL  = {"baemin": "배민상회", "foodspring": "식봄", "todaysales": "오늘얼마"}
+PF_KEYS = ["baemin", "foodspring", "todaysales"]
+PF_CHART_COLORS = {
+    "baemin":     {"최저": "#1d4ed8", "평균": "#3b82f6", "최고": "#93c5fd"},
+    "foodspring": {"최저": "#065f46", "평균": "#10b981", "최고": "#6ee7b7"},
+    "todaysales": {"최저": "#c2410c", "평균": "#f97316", "최고": "#fdba74"},
+}
+
 
 def _get_fee(delivery_type: str = "직배송", platform: str = "", seller_name: str = "") -> float:
     """수수료율 반환. CJ프레시웨이(식봄)는 4.8% 우대 적용."""
@@ -852,7 +862,7 @@ async def pm_products(
     for m in all_mappings:
         c = m["our_product_code"]
         if c not in mapping_count:
-            mapping_count[c] = {"baemin": 0, "foodspring": 0, "total": 0}
+            mapping_count[c] = {"baemin": 0, "foodspring": 0, "todaysales": 0, "total": 0}
         mapping_count[c][m["platform"]] = mapping_count[c].get(m["platform"], 0) + 1
         mapping_count[c]["total"] += 1
 
@@ -884,7 +894,7 @@ async def pm_products(
         if status_filter == "stopped" and not is_stopped:
             continue
         # 매핑 필터
-        mc = mapping_count.get(code, {"baemin": 0, "foodspring": 0, "total": 0})
+        mc = mapping_count.get(code, {"baemin": 0, "foodspring": 0, "todaysales": 0, "total": 0})
         if map_filter == "mapped" and mc["total"] == 0:
             continue
         if map_filter == "unmapped" and mc["total"] > 0:
@@ -897,6 +907,7 @@ async def pm_products(
             **p,
             "mapping_baemin":     mc["baemin"],
             "mapping_foodspring": mc["foodspring"],
+            "mapping_todaysales": mc["todaysales"],
             "mapping_total":      mc["total"],
             "is_stopped":         is_stopped,
             "prev_sales_amt":     ps.get("prev_sales_amt"),
@@ -1516,7 +1527,7 @@ def _build_pm_detail_ctx(product_code: str, plant: str) -> dict:
                 date_price_net[d] = r.get("min_price_net")
         data = [date_price.get(d) for d in chart_dates]
         data_net = [date_price_net.get(d) for d in chart_dates]
-        label = f"{'배민' if pf=='baemin' else '식봄'} {sn}"
+        label = f"{PF_LABEL_SHORT.get(pf, pf)} {sn}"
         color = COLORS[i % len(COLORS)]
         chart_datasets.append({"label": label, "data": data,
                                 "borderColor": color,
@@ -1527,15 +1538,12 @@ def _build_pm_detail_ctx(product_code: str, plant: str) -> dict:
                                 "backgroundColor": "transparent",
                                 "tension": 0.3, "spanGaps": True})
 
-    # 플랫폼 집계 차트 (배민 vs 식봄: 최저/평균/최고)
-    _pf_colors = {
-        "baemin":     {"최저": "#1d4ed8", "평균": "#3b82f6", "최고": "#93c5fd"},
-        "foodspring": {"최저": "#065f46", "평균": "#10b981", "최고": "#6ee7b7"},
-    }
+    # 플랫폼 집계 차트 (배민 vs 식봄 vs 오늘얼마: 최저/평균/최고)
+    _pf_colors = PF_CHART_COLORS
     chart_datasets_platform = []
     chart_datasets_platform_net = []
-    for pf_key in ["baemin", "foodspring"]:
-        pf_label = "배민상회" if pf_key == "baemin" else "식봄"
+    for pf_key in PF_KEYS:
+        pf_label = PF_LABEL_FULL.get(pf_key, pf_key)
         pf_rows  = [r for r in history_rows if r["platform"] == pf_key]
         if not pf_rows:
             continue
@@ -1775,21 +1783,18 @@ async def api_gp_lookup_detail(request: Request, product_code: str, plant: str =
             our_gp_pct = None
 
     # 최저/최고가 셀러 식별 (배수 적용된 환산가 기준으로 비교)
-    min_seller = next((f"{'배민' if r['platform']=='baemin' else '식봄'} {r['platform_seller_name']}"
+    min_seller = next((f"{PF_LABEL_SHORT.get(r['platform'], r['platform'])} {r['platform_seller_name']}"
                         for r in today_rows if r.get("price_sale_adj") == market_min), None) if market_min else None
-    max_seller = next((f"{'배민' if r['platform']=='baemin' else '식봄'} {r['platform_seller_name']}"
+    max_seller = next((f"{PF_LABEL_SHORT.get(r['platform'], r['platform'])} {r['platform_seller_name']}"
                         for r in today_rows if r.get("price_sale_adj") == market_max), None) if market_max else None
 
     import json as _json
     chart_dates = sorted({str(r["crawl_date"]) for r in history_rows})
-    _pf_colors = {
-        "baemin":     {"최저": "#1d4ed8", "평균": "#3b82f6", "최고": "#93c5fd"},
-        "foodspring": {"최저": "#065f46", "평균": "#10b981", "최고": "#6ee7b7"},
-    }
+    _pf_colors = PF_CHART_COLORS
     from collections import defaultdict as _defaultdict
     chart_datasets = []
-    for pf_key in ["baemin", "foodspring"]:
-        pf_label = "배민상회" if pf_key == "baemin" else "식봄"
+    for pf_key in PF_KEYS:
+        pf_label = PF_LABEL_FULL.get(pf_key, pf_key)
         pf_rows  = [r for r in history_rows if r["platform"] == pf_key]
         if not pf_rows:
             continue

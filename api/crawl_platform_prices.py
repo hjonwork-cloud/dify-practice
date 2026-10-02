@@ -1,12 +1,13 @@
 """
-플랫폼 가격 통합 크롤러 - 배민상회 + 식봄
+플랫폼 가격 통합 크롤러 - 배민상회 + 식봄 + 오늘얼마
 수집 결과를 Databricks silver.dim_platform_products 테이블에 저장.
 
 실행:
-  python crawl_platform_prices.py            # 전체 수집
-  python crawl_platform_prices.py --test     # 셀러 1개, 1페이지만 (검증용)
-  python crawl_platform_prices.py --baemin   # 배민상회만
-  python crawl_platform_prices.py --food     # 식봄만
+  python crawl_platform_prices.py              # 전체 수집
+  python crawl_platform_prices.py --test       # 셀러 1개, 1페이지만 (검증용)
+  python crawl_platform_prices.py --baemin     # 배민상회만
+  python crawl_platform_prices.py --food       # 식봄만
+  python crawl_platform_prices.py --todaysales # 오늘얼마만
 """
 
 import sys, os, time, datetime, json, argparse, re
@@ -536,6 +537,140 @@ def crawl_foodspring(test_mode=False) -> list[dict]:
 
 
 # ══════════════════════════════════════════════════════════════════════════
+# 오늘얼마 크롤러 (NHN Commerce / e-ncp SaaS 백엔드)
+# ══════════════════════════════════════════════════════════════════════════
+TODAYSALES_SEARCH_URL = "https://shop-api.e-ncp.com/products/search"
+TODAYSALES_CATEGORY_NO = "1270080"   # "오늘얼마 마켓" 최상위 카테고리
+TODAYSALES_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "Accept": "application/json",
+    "Referer": "https://market.todaysales.co.kr/",
+    "Origin": "https://market.todaysales.co.kr",
+    "clientid": "f/+zEnBJHLSUBU9GCqKXpg==",
+    "version": "1.0",
+    "platform": "PC",
+}
+TODAYSALES_PAGE_SIZE = 100
+
+
+def _get_todaysales_sellers() -> list[dict]:
+    """DB에서 활성 오늘얼마 셀러 목록 반환. DB 없으면 기본값 사용."""
+    if _DB_AVAILABLE:
+        try:
+            rows = _portal_db.pm_list_todaysales_sellers(active_only=True)
+            sellers = [{"id": str(r["seller_id"]), "name": r["seller_name"]}
+                       for r in rows]
+            if sellers:
+                return sellers
+        except Exception as e:
+            print(f"  ⚠ DB 오늘얼마 셀러 조회 실패: {e}")
+    # 폴백: 기본 셀러 목록 (deliveries/policies API에서 DIRECT 확인된 셀러)
+    return [
+        {"id": "10047991", "name": "대상(주)_부산(직배송)"},
+        {"id": "10045896", "name": "현대그린푸드 식자재"},
+        {"id": "10047857", "name": "삼성아이티브이"},
+        {"id": "10045852", "name": "대상(주)_수도권(직배송)"},
+        {"id": "10047992", "name": "대상(주)_대전(직배송)"},
+        {"id": "10047995", "name": "푸드팡_부산(직배송)"},
+        {"id": "10045790", "name": "삼성웰스토리"},
+        {"id": "10048003", "name": "다봄푸드(직배송)"},
+    ]
+
+
+def _todaysales_fetch_page(seller_id: str, page_number: int) -> dict | None:
+    try:
+        resp = requests.get(
+            TODAYSALES_SEARCH_URL,
+            headers=TODAYSALES_HEADERS,
+            params={
+                "hasTotalCount": "true",
+                "order.by": "POPULAR",
+                "order.direction": "DESC",
+                "partnerNo": seller_id,
+                "pageNumber": page_number,
+                "pageSize": TODAYSALES_PAGE_SIZE,
+                "categoryNos": TODAYSALES_CATEGORY_NO,
+            },
+            timeout=15,
+        )
+        print(f"  [오늘얼마 HTTP] seller={seller_id} page={page_number} status={resp.status_code}")
+        resp.raise_for_status()
+        return resp.json()
+    except Exception as e:
+        print(f"  ⚠ 오늘얼마 요청 실패 (seller={seller_id} page={page_number}): {type(e).__name__}: {e}")
+        return None
+
+
+def _todaysales_item_to_record(item: dict, seller_id: str, seller_name: str) -> dict:
+    sale_price = item.get("salePrice") or 0
+    discount_amt = item.get("immediateDiscountAmt") or 0
+    try:
+        price_sale = float(sale_price) - float(discount_amt)
+    except Exception:
+        price_sale = sale_price
+    discount_rate = None
+    try:
+        if sale_price:
+            discount_rate = round(float(discount_amt) / float(sale_price) * 100, 2)
+    except Exception:
+        discount_rate = None
+    delivery_info = item.get("deliveryConditionInfo") or {}
+    product_id = str(item.get("productNo", ""))
+    return {
+        "platform":             "todaysales",
+        "platform_seller_id":   seller_id,
+        "platform_seller_name": item.get("partnerName") or seller_name,
+        "product_key":          f"todaysales_{seller_id}_{product_id}",
+        "product_name":         item.get("productName", ""),
+        "spec":                 item.get("productManagementCd", "") or "",
+        "price_original":       sale_price or None,
+        "price_sale":           price_sale or None,
+        "discount_rate":        discount_rate,
+        "unit_price_desc":      delivery_info.get("summary", "") or "",
+        "delivery_type":        "직배송",
+        "is_free_delivery":     bool(item.get("deliveryConditionType") == "FREE"),
+    }
+
+
+def crawl_todaysales(test_mode=False) -> list[dict]:
+    """오늘얼마 크롤링. deliveries/policies API에서 DIRECT(직배송)로 확인된 셀러만 수집."""
+    records = []
+    sellers = _get_todaysales_sellers()
+    if test_mode:
+        sellers = sellers[:1]
+    print(f"오늘얼마 셀러 {len(sellers)}개 수집 시작")
+
+    for s in sellers:
+        print(f"\n[오늘얼마] {s['name']} (id={s['id']})")
+        first = _todaysales_fetch_page(s["id"], 1)
+        if not first:
+            print("  ✗ 첫 페이지 실패, 건너뜀")
+            continue
+        page_count = first.get("pageCount", 1) if not test_mode else 1
+        seller_count = 0
+        print(f"  총 {first.get('totalCount', 0)}개 / {page_count}페이지")
+
+        for page_no in range(1, page_count + 1):
+            if page_no == 1:
+                items = first.get("items", [])
+            else:
+                time.sleep(0.5)
+                data = _todaysales_fetch_page(s["id"], page_no)
+                if not data:
+                    break
+                items = data.get("items", [])
+
+            for item in items:
+                records.append(_todaysales_item_to_record(item, s["id"], s["name"]))
+                seller_count += 1
+
+            print(f"  page {page_no}: 누적 {seller_count}개")
+
+    print(f"\n✓ 오늘얼마 수집 완료: {len(records)}건")
+    return records
+
+
+# ══════════════════════════════════════════════════════════════════════════
 # 메인
 # ══════════════════════════════════════════════════════════════════════════
 def _crawl_baemin_per_seller(test_mode: bool):
@@ -659,13 +794,47 @@ def _crawl_food_per_seller(test_mode: bool, only_ids: set | None = None):
         yield seller_id, seller_name, seller_records
 
 
+def _crawl_todaysales_per_seller(test_mode: bool, only_ids: set | None = None):
+    """오늘얼마 셀러별 (seller_id, records) 제너레이터.
+    only_ids: 수집할 seller_id 집합 (None이면 전체)"""
+    sellers = _get_todaysales_sellers()
+    if test_mode:
+        sellers = sellers[:1]
+    if only_ids:
+        sellers = [s for s in sellers if s["id"] in only_ids]
+    print(f"오늘얼마 셀러 {len(sellers)}개 수집 시작")
+    for s in sellers:
+        print(f"\n[오늘얼마] {s['name']} (id={s['id']})")
+        first = _todaysales_fetch_page(s["id"], 1)
+        if not first:
+            print("  ✗ 첫 페이지 실패, 건너뜀")
+            continue
+        page_count = first.get("pageCount", 1) if not test_mode else 1
+        seller_records = []
+        print(f"  총 {first.get('totalCount', 0)}개 / {page_count}페이지")
+        for page_no in range(1, page_count + 1):
+            if page_no == 1:
+                items = first.get("items", [])
+            else:
+                time.sleep(0.5)
+                data = _todaysales_fetch_page(s["id"], page_no)
+                if not data:
+                    break
+                items = data.get("items", [])
+            for item in items:
+                seller_records.append(_todaysales_item_to_record(item, s["id"], s["name"]))
+            print(f"  page {page_no}: 누적 {len(seller_records)}개")
+        yield s["id"], s["name"], seller_records
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--test",    action="store_true", help="셀러 1개, 1페이지만")
     parser.add_argument("--baemin",  action="store_true", help="배민상회만")
     parser.add_argument("--food",    action="store_true", help="식봄만")
+    parser.add_argument("--todaysales", action="store_true", help="오늘얼마만")
     parser.add_argument("--seller",  type=str, default="",
-                        help="특정 셀러만 재수집 (쉼표구분, 예: foodspring/1388,foodspring/5081)")
+                        help="특정 셀러만 재수집 (쉼표구분, 예: foodspring/1388,todaysales/10048003)")
     parser.add_argument("--cleanup", action="store_true",
                         help="기존 배민 택배(NORMAL_DELIVERY/택배배송) 데이터 삭제만 실행")
     parser.add_argument("--delete-date", type=str, default="",
@@ -741,10 +910,13 @@ def main():
             _exec(conn, f"DELETE FROM {T_SILVER} WHERE crawl_date='{today}' AND platform='{pf}' AND platform_seller_id IN ({ids_str})")
             print(f"  ✓ {pf} 셀러 {sids} 기존 데이터 삭제")
     else:
-        if not args.food:
+        _any_platform_flag = args.baemin or args.food or args.todaysales
+        if (not _any_platform_flag) or args.baemin:
             _exec(conn, f"DELETE FROM {T_SILVER} WHERE crawl_date='{today}' AND platform='baemin'")
-        if not args.baemin:
+        if (not _any_platform_flag) or args.food:
             _exec(conn, f"DELETE FROM {T_SILVER} WHERE crawl_date='{today}' AND platform='foodspring'")
+        if (not _any_platform_flag) or args.todaysales:
+            _exec(conn, f"DELETE FROM {T_SILVER} WHERE crawl_date='{today}' AND platform='todaysales'")
     print("  ✓ 삭제 완료")
 
     # 셀러별 크롤링 + 즉시 저장 (메모리에 쌓지 않음)
@@ -752,8 +924,10 @@ def main():
     failed_sellers = []
     seller_summary: list[dict] = []
 
-    run_baemin = (not args.food) and (not seller_filter or "baemin" in seller_filter)
-    run_food   = (not args.baemin) and (not seller_filter or "foodspring" in seller_filter)
+    _any_platform_flag = args.baemin or args.food or args.todaysales
+    run_baemin     = (not _any_platform_flag or args.baemin)     and (not seller_filter or "baemin" in seller_filter)
+    run_food       = (not _any_platform_flag or args.food)       and (not seller_filter or "foodspring" in seller_filter)
+    run_todaysales = (not _any_platform_flag or args.todaysales) and (not seller_filter or "todaysales" in seller_filter)
 
     if run_baemin:
         baemin_ids = seller_filter.get("baemin")
@@ -787,6 +961,22 @@ def main():
                 print(f"  ✗ 식봄 {seller_name}({seller_id}) 저장 실패: {e}")
                 failed_sellers.append(f"foodspring/{seller_name}")
 
+    if run_todaysales:
+        todaysales_ids = seller_filter.get("todaysales")
+        for seller_id, seller_name, records in _crawl_todaysales_per_seller(test_mode=args.test, only_ids=todaysales_ids):
+            if todaysales_ids and seller_id not in todaysales_ids:
+                continue
+            if not records:
+                continue
+            try:
+                _batch_insert(conn, records, today)
+                total_saved += len(records)
+                seller_summary.append({"platform": "todaysales", "seller_id": seller_id, "seller_name": seller_name, "count": len(records)})
+                print(f"  ✓ 오늘얼마 {seller_name}({seller_id}): {len(records)}건 저장 (누적 {total_saved}건)")
+            except Exception as e:
+                print(f"  ✗ 오늘얼마 {seller_name}({seller_id}) 저장 실패: {e}")
+                failed_sellers.append(f"todaysales/{seller_name}")
+
     conn.close()
 
     print(f"\n{'='*60}")
@@ -804,6 +994,7 @@ def main():
         "total_saved": total_saved,
         "baemin_count": sum(s["count"] for s in seller_summary if s["platform"] == "baemin"),
         "food_count": sum(s["count"] for s in seller_summary if s["platform"] == "foodspring"),
+        "todaysales_count": sum(s["count"] for s in seller_summary if s["platform"] == "todaysales"),
         "seller_summary": seller_summary,
         "failed_sellers": failed_sellers,
     }
