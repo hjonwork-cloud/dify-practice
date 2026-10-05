@@ -102,6 +102,15 @@
 .btn-bulk-approve:hover { background:#047857; }
 .btn-bulk-approve:disabled { background:#9ca3af; cursor:not-allowed; }
 
+/* 선택 상품 일괄 매핑 (카드별 제안 선택 → 1:1 매핑) */
+.suggest-card.card-selected { border-color:#4f46e5; box-shadow:0 0 0 2px #c7d2fe; }
+.select-bulk-bar { display:none; position:fixed; left:0; right:0; bottom:0; z-index:500; align-items:center; gap:14px; padding:12px 24px; background:#eef2ff; border-top:2px solid #818cf8; box-shadow:0 -4px 16px rgba(79,70,229,.15); flex-wrap:wrap; }
+.select-bulk-bar.visible { display:flex; }
+#selectBulkMsg { font-size:13px; font-weight:700; color:#3730a3; }
+.btn-select-bulk-map { background:#4f46e5; color:#fff; }
+.btn-select-bulk-map:hover:not(:disabled) { background:#4338ca; }
+.btn-select-bulk-map:disabled { background:#9ca3af; cursor:not-allowed; }
+
 .btn-our-change { padding:4px 10px; border-radius:6px; font-size:12px; font-weight:600; border:1px solid #d1d5db; background:#f9fafb; color:#374151; cursor:pointer; white-space:nowrap; }
 .btn-our-change:hover { border-color:#4f46e5; color:#4f46e5; background:#eef2ff; }
 
@@ -280,6 +289,15 @@
   <button style="padding:7px 14px;border-radius:8px;font-size:13px;border:1px solid #d1d5db;background:#fff;cursor:pointer" onclick="hideBulkBar()">닫기</button>
 </div>
 
+<!-- ══ 선택 상품 일괄 매핑 바 (카드마다 3개 제안 중 1개 클릭 선택 → 1:1 확정) ══ -->
+<div class="select-bulk-bar" id="selectBulkBar">
+  <span id="selectBulkMsg">0건 선택됨</span>
+  <span style="font-size:12px;color:#6366f1">각 카드에서 제안 상품을 클릭해 선택하세요</span>
+  <span style="flex:1"></span>
+  <button class="btn-bulk" style="background:#fff;border:1px solid #d1d5db;color:#374151" onclick="clearSelectedMap()">선택 해제</button>
+  <button class="btn-bulk btn-select-bulk-map" id="btnSelectBulkMap" onclick="bulkMapSelected()" disabled>📦 선택 상품 일괄 매핑하기 (<span id="selectBulkCount">0</span>)</button>
+</div>
+
 <div id="wsContent">
   <div class="ws-empty">플랫폼과 셀러를 선택 후 AI 매핑 분석 버튼을 눌러주세요.</div>
 </div>
@@ -357,6 +375,7 @@ let suggestItems    = [];
 let filteredItems   = [];
 let currentFilter   = 'all';
 let currentSort     = 'score'; // 'score' | 'sales'
+let selectedMap     = new Map(); // product_key → {sugIdx, our_product_code, product_name} — 선택 상품 일괄 매핑용
 
 // 팝업 상태
 let modalPlatItems     = [];   // 현재 팝업에 표시되는 유사 플랫폼 상품
@@ -559,6 +578,8 @@ async function runAISuggest() {
   };
   showLoading('AI 유사도 분석 시작 중...');
   document.getElementById('kpiBar').style.display = 'none';
+  selectedMap.clear();
+  updateSelectBulkBar();
 
   try {
     // ① Databricks 웨어하우스 웜업 (꺼진 경우 여기서 기동)
@@ -797,6 +818,8 @@ async function bulkApproveHigh() {
   // 목록에서 매핑 완료 항목 제거 후 재렌더
   const approvedKeys = new Set(highItems.map(i => i.product_key));
   suggestItems = suggestItems.filter(i => !approvedKeys.has(i.product_key));
+  approvedKeys.forEach(k => selectedMap.delete(k));
+  updateSelectBulkBar();
   renderResultPanel(suggestItems, parseInt(document.getElementById('statTotal').textContent)||0);
   setFilter(currentFilter);
 }
@@ -809,6 +832,7 @@ let _pageLoaded = 0;
 function _buildCardHtml(item) {
   const top    = item.suggestions[0] || {};
   const score  = top.score || 0;
+  const selInfo = selectedMap.get(item.product_key); // 선택 상품 일괄 매핑 대기열 선택 상태 복원용
   const scoreClass = score >= 80 ? 'high' : score >= 50 ? 'mid' : 'low';
   const netDisp = item.net_price ? item.net_price.toLocaleString()+'원' : '-';
   const saleDisp = item.price_sale ? item.price_sale.toLocaleString()+'원' : '-';
@@ -832,7 +856,7 @@ function _buildCardHtml(item) {
     }).join('') + '</span>';
   }
 
-  let h = `<div class="suggest-card" data-key="${escHtml(item.product_key)}">
+  let h = `<div class="suggest-card${selInfo ? ' card-selected' : ''}" data-key="${escHtml(item.product_key)}">
     <div class="suggest-card-header">
       <span class="plat-badge ${platClass(currentPlatform)}">${platLabel(currentPlatform)}</span>
       <div class="plat-info">
@@ -859,7 +883,8 @@ function _buildCardHtml(item) {
       const saleV  = s.our_sale_price ? s.our_sale_price.toLocaleString()+'원' : '-';
       const buyV   = s.buy_price      ? s.buy_price.toLocaleString()+'원'      : '-';
       const salesV = s.prev_sales_amt > 0 ? Math.round(s.prev_sales_amt/10000)+'만원' : '-';
-      h += `<div class="sug-item" data-pkey="${escHtml(item.product_key)}" data-si="${si}" onclick="selectSuggest(this.dataset.pkey, +this.dataset.si)" id="sug-${escHtml(item.product_key)}-${si}">
+      const isSelChip = selInfo && selInfo.sugIdx === si;
+      h += `<div class="sug-item${isSelChip ? ' selected' : ''}" data-pkey="${escHtml(item.product_key)}" data-si="${si}" onclick="selectSuggest(this.dataset.pkey, +this.dataset.si)" id="sug-${escHtml(item.product_key)}-${si}">
         <span class="sug-rank">#${si+1}</span>
         <div class="sug-code">${escHtml(s.our_product_code)}${_plantBadgesHtml(s.plant_batch_status)}</div>
         <div class="sug-name">${escHtml(s.product_name)}</div>
@@ -1021,13 +1046,108 @@ function selectOurProductDirect(code, name) {
   selectOurChange(code, name, 0, 0, 0);
 }
 
-// 카드 내 제안 선택 하이라이트
+// 카드 내 제안 선택 하이라이트 + "선택 상품 일괄 매핑" 대기열(selectedMap) 토글
 function selectSuggest(productKey, sugIdx) {
   const card = document.querySelector(`.suggest-card[data-key="${CSS.escape(productKey)}"]`);
   if (!card) return;
-  card.querySelectorAll('.sug-item').forEach((el, i) => {
-    el.classList.toggle('selected', i === sugIdx);
+  const already = selectedMap.get(productKey);
+  if (already && already.sugIdx === sugIdx) {
+    // 같은 칩 재클릭 → 선택 해제
+    selectedMap.delete(productKey);
+    card.querySelectorAll('.sug-item').forEach(el => el.classList.remove('selected'));
+    card.classList.remove('card-selected');
+  } else {
+    const item = suggestItems.find(i => i.product_key === productKey);
+    const sug  = item?.suggestions?.[sugIdx];
+    if (!item || !sug) return;
+    selectedMap.set(productKey, {
+      sugIdx,
+      our_product_code: sug.our_product_code,
+      product_name:     sug.product_name,
+    });
+    card.querySelectorAll('.sug-item').forEach((el, i) => {
+      el.classList.toggle('selected', i === sugIdx);
+    });
+    card.classList.add('card-selected');
+  }
+  updateSelectBulkBar();
+}
+
+// ══ 선택 상품 일괄 매핑 (카드마다 3개 제안 중 클릭으로 고른 1개를 모아 1:1 확정) ══
+function updateSelectBulkBar() {
+  const bar = document.getElementById('selectBulkBar');
+  const cnt = selectedMap.size;
+  document.getElementById('selectBulkCount').textContent = cnt;
+  document.getElementById('selectBulkMsg').textContent = `${cnt}건 선택됨`;
+  document.getElementById('btnSelectBulkMap').disabled = cnt === 0;
+  bar.classList.toggle('visible', cnt > 0);
+}
+
+function clearSelectedMap() {
+  selectedMap.forEach((_, pk) => {
+    const card = document.querySelector(`.suggest-card[data-key="${CSS.escape(pk)}"]`);
+    if (card) {
+      card.classList.remove('card-selected');
+      card.querySelectorAll('.sug-item').forEach(el => el.classList.remove('selected'));
+    }
   });
+  selectedMap.clear();
+  updateSelectBulkBar();
+}
+
+async function bulkMapSelected() {
+  if (selectedMap.size === 0) return;
+  const count = selectedMap.size;
+  if (!confirm(`선택한 ${count}건을 각각 고른 우리 상품으로 1:1 일괄 매핑 확정하시겠습니까?`)) return;
+
+  const btn = document.getElementById('btnSelectBulkMap');
+  const origHtml = btn.innerHTML;
+  btn.disabled = true;
+  btn.textContent = '⏳ 처리 중...';
+
+  const items = [];
+  selectedMap.forEach((sel, pk) => {
+    const item = suggestItems.find(i => i.product_key === pk);
+    if (!item) return;
+    items.push({
+      product_key:         pk,
+      platform:            currentPlatform,
+      platform_seller_id:  currentSellerId || '',
+      platform_product_id: '',
+      product_name:        item.product_name || '',
+      seller_name:         item.seller_name || currentSeller,
+      our_product_code:    sel.our_product_code,
+    });
+  });
+
+  let successCount = 0, failCount = 0;
+  try {
+    const r = await fetch('/portal/price-monitor/api/mapping/bulk-add-selected', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ plant: currentPlant, tag: 'normal', items }),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      successCount = d.added || 0;
+      failCount = (d.total || items.length) - successCount;
+    } else {
+      failCount = items.length;
+    }
+  } catch(e) { failCount = items.length; }
+
+  showToast(`✅ ${successCount}건 매핑 완료${failCount>0?' / ⚠️ '+failCount+'건 실패':''}`);
+
+  // 매핑 완료 항목 목록에서 제거 후 재렌더
+  const mappedKeys = new Set(selectedMap.keys());
+  suggestItems = suggestItems.filter(i => !mappedKeys.has(i.product_key));
+  selectedMap.clear();
+  updateSelectBulkBar();
+  renderResultPanel(suggestItems, parseInt(document.getElementById('statTotal').textContent)||0);
+  setFilter(currentFilter);
+
+  btn.disabled = false;
+  btn.innerHTML = origHtml;
 }
 
 // ══ 개선필요 플래그 ══
@@ -1364,8 +1484,10 @@ async function confirmMapping() {
       // 해당 카드를 목록에서 제거 (completed)
       const cardEl = document.querySelector(`.suggest-card[data-key="${CSS.escape(modalPlatKey)}"]`);
       if (cardEl) cardEl.remove();
-      // suggestItems에서도 제거
+      // suggestItems / selectedMap에서도 제거
       suggestItems = suggestItems.filter(i => i.product_key !== modalPlatKey);
+      selectedMap.delete(modalPlatKey);
+      updateSelectBulkBar();
     } else {
       alert('오류: ' + (d.error || '알 수 없는 오류'));
     }
