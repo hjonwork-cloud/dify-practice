@@ -16,6 +16,16 @@ import portal_db
 import logging
 logger = logging.getLogger(__name__)
 
+# ── Phase 3/4: ML 매핑 랭킹 모델 (선택적) ───────────────────────────────────
+# lightgbm/rapidfuzz 미설치 또는 모델 아티팩트 없음 환경(프로덕션 초기 배포 등)에서도
+# 앱이 절대 깨지지 않도록 optional-import 처리. model_inference 자체가 lazy-load라서
+# 이 시점의 import는 가벼움(실제 lightgbm import는 최초 score_pair/is_available 호출 시).
+try:
+    from ml_mapping import model_inference as _mm_infer
+except Exception as _mm_imp_e:
+    _mm_infer = None
+    logger.info(f"[pm-ai] ml_mapping 모듈 로드 불가 (휴리스틱만 사용): {_mm_imp_e}")
+
 router = APIRouter(prefix="/portal/price-monitor", tags=["price-monitor"])
 
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
@@ -3086,6 +3096,58 @@ def _score_mapping(platform_name: str, platform_price: float | None,
     return round(max(0.0, min(100.0, score)), 1)
 
 
+# ── Phase 3: 섀도우 로그 (heuristic vs ML 비교, 사용자 응답에는 영향 없음) ─────
+_SHADOW_LOG_DIR = (_DISK_CACHE_DIR / "ml_shadow_logs") if _DISK_CACHE_DIR else None
+if _SHADOW_LOG_DIR:
+    try:
+        _SHADOW_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        _SHADOW_LOG_DIR = None
+_shadow_log_lock = threading.Lock()
+_PM_AI_USE_ML_SCORE = os.getenv("PM_AI_USE_ML_SCORE", "0") == "1"  # Phase 4 스위치 (기본 OFF)
+
+
+def _shadow_log_comparison(product_key: str, platform: str, seller_name: str,
+                            clean_pname: str, scored: list) -> None:
+    """candidates(scored, heuristic score 내림차순 정렬됨)에서
+    heuristic top-1 vs ML top-1(_ml_score 보유 항목 중)을 비교해 JSONL로 기록.
+    ML 점수가 하나도 없으면(모델 미가용) 기록하지 않는다.
+    파일: ml_shadow_logs/ml_shadow_YYYYMMDD.jsonl (append-only, 날짜별 분리)."""
+    if not _SHADOW_LOG_DIR or not scored:
+        return
+    with_ml = [s for s in scored if s.get("_ml_score") is not None]
+    if not with_ml:
+        return
+    heuristic_top1 = scored[0]  # scored는 이미 heuristic score 기준 정렬됨
+    ml_top1 = max(with_ml, key=lambda s: s["_ml_score"])
+    agree = heuristic_top1.get("our_product_code") == ml_top1.get("our_product_code")
+    record = {
+        "ts":               time.time(),
+        "product_key":      product_key,
+        "platform":         platform,
+        "seller_name":      seller_name,
+        "platform_name":    clean_pname,
+        "heuristic_top1_code": heuristic_top1.get("our_product_code"),
+        "heuristic_top1_name": heuristic_top1.get("product_name"),
+        "heuristic_score":  heuristic_top1.get("score"),
+        "ml_top1_code":     ml_top1.get("our_product_code"),
+        "ml_top1_name":     ml_top1.get("product_name"),
+        "ml_score":         ml_top1.get("_ml_score"),
+        "agree":            agree,
+        "n_candidates":     len(scored),
+    }
+    import json as _json_shadow
+    import datetime as _dt_shadow
+    fname = f"ml_shadow_{_dt_shadow.date.today():%Y%m%d}.jsonl"
+    fpath = _SHADOW_LOG_DIR / fname
+    try:
+        with _shadow_log_lock:
+            with open(fpath, "a", encoding="utf-8") as f:
+                f.write(_json_shadow.dumps(record, ensure_ascii=False) + "\n")
+    except Exception as e:
+        logger.debug(f"[pm-ai][shadow-log] 파일 기록 실패: {e}")
+
+
 def _build_pattern_map(all_mappings, our_products):
     """기존 매핑에서 (플랫폼상품명 토큰 → 우리상품코드) 패턴 추출.
     반환: {our_product_code → pattern_strength(0~1)}"""
@@ -3643,6 +3705,38 @@ def _do_ai_suggest(request, platform, seller_name, plant, limit, _job_id=None):
         scored.sort(key=lambda x: (-x["score"], x["_is_n"]))
         for s in scored:
             s.pop("_is_n", None)
+
+        # ── Phase 3: ML 섀도우 스코어링 (휴리스틱 20점 게이트 통과 후보에만 적용,
+        #    사용자에게 노출되는 랭킹/결과에는 영향 없음 — 비교 로그 전용) ──────
+        if scored and _mm_infer is not None:
+            try:
+                if _mm_infer.is_available():
+                    for s in scored:
+                        _p_meta = _our_prod_map.get(s["our_product_code"])
+                        s["_ml_score"] = _mm_infer.score_pair(
+                            clean_pname, s.get("product_name", ""),
+                            platform_price=p_price,
+                            our_sale_price=s.get("our_sale_price"),
+                            our_buy_price=s.get("buy_price"),
+                            our_prod=_p_meta,
+                        )
+            except Exception as _ml_e:
+                logger.debug(f"[pm-ai][shadow-ml] 후보 스코어링 실패: {_ml_e}")
+
+            if os.getenv("PM_AI_SHADOW_LOG", "1") == "1":
+                try:
+                    _shadow_log_comparison(pkey, platform, sname, clean_pname, scored)
+                except Exception as _log_e:
+                    logger.debug(f"[pm-ai][shadow-log] 기록 실패: {_log_e}")
+
+            # ── Phase 4: PM_AI_USE_ML_SCORE=1 → ML 점수 기준 재정렬 (운영 전환) ──
+            if _PM_AI_USE_ML_SCORE and any(s.get("_ml_score") is not None for s in scored):
+                scored.sort(key=lambda x: (-(x.get("_ml_score") if x.get("_ml_score") is not None else -1),))
+
+        # ml_score는 내부 로그/디버깅 전용 — 사용자 응답(top3)에는 노출하지 않는다
+        for s in scored:
+            s.pop("_ml_score", None)
+
         top3 = scored[:3]
 
         return {
@@ -4060,6 +4154,66 @@ async def api_mapping_bulk_add(request: Request):
 
     ok_count = sum(1 for r in results if r["ok"])
     return JSONResponse({"ok": True, "added": ok_count, "results": results})
+
+
+# ── API: 선택 매핑 일괄 확정 (워크스페이스 카드별 제안 선택 → 1:1 일괄 매핑) ──
+# bulk-add와 차이점: our_product_code가 항목마다 다를 수 있음(각 카드에서
+# 3개 제안 중 사용자가 고른 서로 다른 우리 상품을 한 번에 1:1로 확정).
+
+@router.post("/api/mapping/bulk-add-selected")
+async def api_mapping_bulk_add_selected(request: Request):
+    """매핑 워크스페이스에서 카드마다 선택한 제안(최대 3개 중 1개)을 모아
+    한 번에 1:1 매핑 확정.
+
+    body: {
+      plant: str,
+      tag: str,   -- 기본 'normal'
+      items: [{
+        product_key, platform, platform_seller_id, platform_product_id,
+        product_name, seller_name, our_product_code
+      }]
+    }
+    """
+    _require_pm_access(request)
+    session = _get_session(request)
+    body = await request.json()
+
+    plant = (body.get("plant") or "ALL").strip() or "ALL"
+    tag   = body.get("tag", "normal")
+    items = body.get("items", [])
+    if not items:
+        return JSONResponse({"ok": False, "error": "items 필요"}, status_code=400)
+    if plant not in PLANTS and plant != "ALL":
+        return JSONResponse({"ok": False, "error": "허용되지 않은 플랜트"}, status_code=400)
+
+    results = []
+    for item in items:
+        pk  = (item.get("product_key") or "").strip()
+        pf  = (item.get("platform") or "").strip()
+        opc = (item.get("our_product_code") or "").strip()
+        if not pk or not pf or not opc:
+            results.append({"product_key": pk, "ok": False, "error": "필수값 누락"})
+            continue
+        try:
+            mid = portal_db.pm_add_mapping(
+                our_product_code=opc,
+                plant=plant,
+                product_key=pk,
+                platform=pf,
+                platform_seller_id=str(item.get("platform_seller_id") or ""),
+                platform_product_id=str(item.get("platform_product_id") or ""),
+                product_name=item.get("product_name", ""),
+                seller_name=item.get("seller_name", ""),
+                created_by=session.get("emp_code", ""),
+                tag=tag,
+                multiplier=1.0,
+            )
+            results.append({"product_key": pk, "mapping_id": mid, "ok": True})
+        except Exception as e:
+            results.append({"product_key": pk, "ok": False, "error": str(e)})
+
+    ok_count = sum(1 for r in results if r["ok"])
+    return JSONResponse({"ok": True, "added": ok_count, "total": len(items), "results": results})
 
 
 # ── POC 매칭 벤치마크 ────────────────────────────────────────────────────────

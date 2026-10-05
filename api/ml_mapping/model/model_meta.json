@@ -1,0 +1,29 @@
+{
+  "feature_cols": [
+    "jaccard",
+    "overlap_coef",
+    "n_common_tokens",
+    "n_kw_matched",
+    "fuzz_ratio",
+    "fuzz_token_sort",
+    "fuzz_token_set",
+    "fuzz_partial",
+    "vol_same_unit",
+    "vol_ratio",
+    "price_ratio",
+    "has_price_data",
+    "temp_match",
+    "name_len_diff",
+    "plat_name_len",
+    "our_name_len"
+  ],
+  "trained_at": "2026-10-05T20:15:25.555012",
+  "n_train": 28072,
+  "n_test": 7029,
+  "test_auc": 0.9299,
+  "test_ap": 0.852,
+  "ml_top1_acc": 0.8573,
+  "ml_top3_recall": 0.9828,
+  "heuristic_top1_acc": 0.7782,
+  "heuristic_top3_recall": 0.9209
+}

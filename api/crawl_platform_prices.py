@@ -986,6 +986,17 @@ def main():
     print(f"{'='*60}")
 
     # 요약 JSON 저장 (메일 스크립트용)
+    # ── 파일명에 플랫폼 suffix 부여 ──────────────────────────────────────
+    # 기존에는 날짜만으로 키("summary_YYYY-MM-DD.json")가 결정되어, 같은 날
+    # 식봄/오늘얼마를 "별도 프로세스로 순차 실행"하면 나중에 끝난 플랫폼의
+    # summary 파일이 먼저 끝난 플랫폼의 summary를 덮어써 버리는 문제가 있었다
+    # (crawl_scheduler.py가 플랫폼별로 독립 subprocess를 실행하도록 바뀌면서
+    # 이 충돌이 실제로 "식봄 완료 메일 누락"의 원인이 될 수 있어 분리함).
+    # 단일 플랫폼 플래그로 실행된 경우에만 suffix를 붙이고, 플래그 없이
+    # 전체 실행(레거시 동작)인 경우 기존 파일명을 그대로 유지한다.
+    _flags_on = [f for f, on in (("baemin", run_baemin), ("food", run_food),
+                                  ("todaysales", run_todaysales)) if on]
+    _suffix = f"_{_flags_on[0]}" if len(_flags_on) == 1 else ""
     import json as _json
     log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs")
     os.makedirs(log_dir, exist_ok=True)
@@ -998,7 +1009,7 @@ def main():
         "seller_summary": seller_summary,
         "failed_sellers": failed_sellers,
     }
-    summary_path = os.path.join(log_dir, f"summary_{today}.json")
+    summary_path = os.path.join(log_dir, f"summary{_suffix}_{today}.json")
     with open(summary_path, "w", encoding="utf-8") as f:
         _json.dump(summary, f, ensure_ascii=False, indent=2)
     print(f"요약 저장: {summary_path}")
