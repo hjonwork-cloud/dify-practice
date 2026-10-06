@@ -62,6 +62,81 @@
 .matnr-detail-table tr:last-child td{border-bottom:none;}
 .matnr-detail-table tr:hover td{background:#f1f5f9;}
 .matnr-detail-table .matnr-code{font-family:monospace;color:#1d4ed8;font-weight:600;}
+
+/* 탭 스위처 */
+.kpi-tabbar{display:flex;gap:.4rem;margin-bottom:1.1rem;border-bottom:2px solid #e5e7eb;}
+.kpi-tab-btn{appearance:none;border:none;background:none;padding:.55rem 1.1rem;font-size:.88rem;
+  font-weight:600;color:#6b7280;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px;
+  transition:color .15s;}
+.kpi-tab-btn:hover{color:#1e293b;}
+.kpi-tab-btn.active{color:#16a34a;border-bottom-color:#16a34a;}
+.kpi-tab-panel{display:none;}
+.kpi-tab-panel.active{display:block;}
+
+/* KPI 카드 */
+.kpi-card-row{display:flex;gap:.9rem;flex-wrap:wrap;margin-bottom:1.1rem;}
+.kpi-card{flex:1 1 150px;background:#fff;border:1px solid #e5e7eb;border-radius:.7rem;padding:.9rem 1.1rem;min-width:150px;}
+.kpi-card .kv{font-size:1.4rem;font-weight:700;color:#111;letter-spacing:-.5px;}
+.kpi-card .kl{font-size:.75rem;color:#6b7280;margin-top:.15rem;}
+.kpi-rate-card{flex:1 1 260px;min-width:260px;}
+.kpi-rate-card .kpi-rate-top{display:flex;align-items:baseline;justify-content:space-between;}
+.kpi-rate-card .kpi-rate-big{font-size:1.6rem;font-weight:800;}
+.kpi-rate-card .kpi-rate-big.ok{color:#16a34a;}
+.kpi-rate-card .kpi-rate-big.warn{color:#d97706;}
+.kpi-rate-card .kpi-rate-big.bad{color:#dc2626;}
+.kpi-progress-track{height:10px;background:#f1f5f9;border-radius:999px;overflow:hidden;margin:.45rem 0 .55rem;}
+.kpi-progress-fill{height:100%;border-radius:999px;background:linear-gradient(90deg,#16a34a,#22d3ee);transition:width .4s;}
+.kpi-breakdown{font-size:.72rem;color:#6b7280;max-height:132px;overflow-y:auto;}
+.kpi-breakdown-row{display:flex;justify-content:space-between;gap:.5rem;padding:.12rem 0;border-bottom:1px dashed #f1f5f9;}
+.kpi-breakdown-row:last-child{border-bottom:none;}
+.kpi-breakdown-row b{color:#374151;white-space:nowrap;}
+.kpi-breakdown-row .ach-yes{color:#16a34a;font-weight:700;}
+.kpi-breakdown-row .ach-no{color:#9ca3af;}
+
+/* 기간 선택 */
+.kpi-period-bar{display:flex;align-items:center;gap:.5rem;margin-bottom:.9rem;font-size:.85rem;color:#374151;flex-wrap:wrap;}
+.kpi-period-bar select{font-size:.82rem;padding:.3rem .5rem;border:1px solid #d1d5db;border-radius:.35rem;background:#fff;}
+
+/* 관리자 필터 바 */
+.kpi-admin-filter{display:flex;gap:.6rem;flex-wrap:wrap;align-items:center;margin-bottom:1rem;font-size:.85rem;}
+.kpi-admin-filter label{display:flex;align-items:center;gap:.35rem;}
+.kpi-admin-filter select{font-size:.82rem;padding:.3rem .5rem;border:1px solid #d1d5db;border-radius:.35rem;background:#fff;}
+
+/* 관리자 담당자 테이블 */
+.kpi-admin-table{width:100%;border-collapse:collapse;font-size:.8rem;}
+.kpi-admin-table th{background:#1e293b;color:#fff;padding:.45rem .6rem;text-align:left;white-space:nowrap;font-weight:600;}
+.kpi-admin-table td{padding:.42rem .6rem;border-bottom:1px solid #f3f4f6;}
+.kpi-admin-table tr:hover td{background:#f9fafb;}
+.kpi-rate-pill{display:inline-block;padding:.08rem .45rem;border-radius:.3rem;font-size:.74rem;font-weight:700;}
+.kpi-rate-pill.ok{background:#dcfce7;color:#166534;}
+.kpi-rate-pill.warn{background:#fef3c7;color:#92400e;}
+.kpi-rate-pill.bad{background:#fee2e2;color:#991b1b;}
+
+/* 캘린더 */
+.kpi-calendar-wrap{background:#fff;border:1px solid #e5e7eb;border-radius:.7rem;padding:1rem 1.1rem;margin-top:1rem;}
+.kpi-cal-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:.7rem;}
+.kpi-cal-head .ttl{font-size:.92rem;font-weight:700;color:#1e293b;}
+.kpi-cal-nav button{border:1px solid #d1d5db;background:#fff;border-radius:.35rem;padding:.25rem .6rem;
+  cursor:pointer;font-size:.8rem;color:#374151;}
+.kpi-cal-nav button:disabled{opacity:.35;cursor:not-allowed;}
+.kpi-cal-nav button:not(:disabled):hover{background:#f3f4f6;}
+.kpi-cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;}
+.kpi-cal-dow{text-align:center;font-size:.72rem;color:#9ca3af;font-weight:600;padding:.2rem 0;}
+.kpi-cal-cell{aspect-ratio:1/1;min-height:46px;border-radius:.4rem;background:#f9fafb;border:1px solid #f1f5f9;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:.76rem;color:#9ca3af;
+  cursor:default;position:relative;}
+.kpi-cal-cell.empty{background:transparent;border:none;}
+.kpi-cal-cell.has-act{background:#ecfdf5;border-color:#a7f3d0;color:#065f46;cursor:pointer;font-weight:600;}
+.kpi-cal-cell.has-act:hover{background:#d1fae5;}
+.kpi-cal-cell.today{box-shadow:inset 0 0 0 2px #2563eb;}
+.kpi-cal-cell .d{font-size:.78rem;}
+.kpi-cal-cell .c{font-size:.65rem;margin-top:1px;color:#16a34a;font-weight:700;}
+.kpi-cal-cell.selected{background:#2563eb;color:#fff;}
+.kpi-cal-cell.selected .c{color:#bfdbfe;}
+.kpi-day-detail{margin-top:.8rem;}
+.kpi-day-detail table{width:100%;border-collapse:collapse;font-size:.78rem;}
+.kpi-day-detail th{background:#f1f5f9;color:#475569;padding:.35rem .5rem;text-align:left;font-weight:600;}
+.kpi-day-detail td{padding:.35rem .5rem;border-bottom:1px solid #f3f4f6;}
 </style>
 
 <div class="portal-heading">
@@ -69,6 +144,15 @@
     <p>판가설정 후 DM 발송 이후, 해당 가맹점의 매출·GP 누적 실적입니다.</p></div>
 </div>
 
+<div class="kpi-tabbar" id="kpiTabbar">
+  <button type="button" class="kpi-tab-btn" data-tab="results">📋 액션 실적 상세</button>
+  <button type="button" class="kpi-tab-btn" data-tab="kpi-self">🎯 담당자 KPI</button>
+  {% if is_kpi_manager %}
+  <button type="button" class="kpi-tab-btn" data-tab="kpi-admin">🗂 관리자 KPI</button>
+  {% endif %}
+</div>
+
+<div class="kpi-tab-panel" id="panel-results" data-panel="results">
 <!-- 필터 바 -->
 <form method="get" action="/portal/brand-report/results" class="results-filter-bar">
   <label>브랜드
@@ -565,5 +649,309 @@
   </div>
 </div>
 {% endif %}
+</div><!-- /panel-results -->
+
+<!-- ═══ 담당자 KPI ═══ -->
+<div class="kpi-tab-panel" id="panel-kpi-self" data-panel="kpi-self">
+  {% if self_kpi %}
+  <div class="kpi-period-bar">
+    <span>집계기간:</span>
+    <select id="kpiSelfPeriod" onchange="kpiChangePeriod(this.value)">
+      <option value="" {% if not sel_action_ym %}selected{% endif %}>전체 누적</option>
+      <option value="202610" {% if sel_action_ym == '202610' %}selected{% endif %}>10월</option>
+      <option value="202611" {% if sel_action_ym == '202611' %}selected{% endif %}>11월</option>
+      <option value="202612" {% if sel_action_ym == '202612' %}selected{% endif %}>12월</option>
+    </select>
+    <span style="color:#9ca3af;font-size:.78rem;">※ 활동 달성률은 항상 운영 시작일부터 오늘까지 누적 기준입니다.</span>
+  </div>
+
+  <div class="kpi-card-row">
+    <div class="kpi-card"><div class="kv">{{ self_kpi.total_count }}</div><div class="kl">총 액션건수</div></div>
+    <div class="kpi-card"><div class="kv">{{ '{:,}'.format(self_kpi.total_sales_m) }}백만</div><div class="kl">누적 매출</div></div>
+    <div class="kpi-card"><div class="kv">{{ '{:,}'.format(self_kpi.total_gp_m) }}백만</div><div class="kl">누적 GP</div></div>
+
+    <div class="kpi-card kpi-rate-card">
+      <div class="kpi-rate-top">
+        <span class="kl">활동 달성률 <span style="color:#9ca3af;">({{ self_kpi.activity.current_week }}주차 진행중)</span></span>
+        <span class="kpi-rate-big {% if self_kpi.activity.rate >= 80 %}ok{% elif self_kpi.activity.rate >= 50 %}warn{% else %}bad{% endif %}">{{ self_kpi.activity.rate }}%</span>
+      </div>
+      <div class="kpi-progress-track"><div class="kpi-progress-fill" style="width:{{ self_kpi.activity.rate }}%;"></div></div>
+      <div class="kpi-breakdown">
+        {% for w in self_kpi.activity.weeks[-6:] %}
+        <div class="kpi-breakdown-row"><span>{{ w.label }}</span><b>{{ w.count }}/{{ w.target }}건 <span class="{% if w.rate >= 100 %}ach-yes{% else %}ach-no{% endif %}">({{ w.rate }}%)</span></b></div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="kpi-card kpi-rate-card">
+      <div class="kpi-rate-top">
+        <span class="kl">성과 달성률 <span style="color:#9ca3af;">(범용상품 추가매출)</span></span>
+        <span class="kpi-rate-big {% if self_kpi.performance.rate >= 100 %}ok{% elif self_kpi.performance.rate >= 50 %}warn{% else %}bad{% endif %}">{{ self_kpi.performance.rate }}%</span>
+      </div>
+      <div class="kpi-progress-track"><div class="kpi-progress-fill" style="width:{{ self_kpi.performance.rate if self_kpi.performance.rate <= 100 else 100 }}%;"></div></div>
+      <div class="kpi-breakdown">
+        {% for m in self_kpi.performance.months %}
+        <div class="kpi-breakdown-row"><span>{{ m.month }}월</span><b>{{ m.amount_m }}/{{ m.target_m }}백만 <span class="{% if m.achieved %}ach-yes{% else %}ach-no{% endif %}">{{ '달성' if m.achieved else '미달성' }}</span></b></div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <div class="kpi-calendar-wrap" id="kpiCalSelf" data-mode="self"></div>
+  {% else %}
+  <div class="empty-state"><b>KPI 데이터를 불러올 수 없습니다</b>잠시 후 다시 시도해 주세요.</div>
+  {% endif %}
+</div><!-- /panel-kpi-self -->
+
+{% if is_kpi_manager %}
+<!-- ═══ 관리자 KPI ═══ -->
+<div class="kpi-tab-panel" id="panel-kpi-admin" data-panel="kpi-admin">
+  <div class="kpi-admin-filter">
+    <label>부서
+      <select id="kpiAdminDept" onchange="kpiAdminFilterChanged()">
+        <option value="">전체</option>
+        {% for d in kpi_departments %}<option value="{{ d }}">{{ d }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>담당자
+      <select id="kpiAdminEmp" onchange="kpiAdminFilterChanged()">
+        <option value="">전체</option>
+        {% for e in kpi_employees %}<option value="{{ e.emp_code }}" data-team="{{ e.team }}">{{ e.name }} ({{ e.team }})</option>{% endfor %}
+      </select>
+    </label>
+    <label>기간
+      <select id="kpiAdminPeriod" onchange="kpiAdminFilterChanged()">
+        <option value="all">전체 누적</option>
+        <option value="10">10월</option>
+        <option value="11">11월</option>
+        <option value="12">12월</option>
+      </select>
+    </label>
+  </div>
+
+  <div class="results-table-wrap">
+    <table class="kpi-admin-table" id="kpiAdminTable">
+      <thead><tr>
+        <th>담당자</th><th>부서</th><th style="text-align:right;">총액션건수</th>
+        <th style="text-align:right;">누적매출(백만)</th><th style="text-align:right;">누적GP(백만)</th>
+        <th style="text-align:right;">활동달성률</th><th style="text-align:right;">성과달성률</th>
+      </tr></thead>
+      <tbody id="kpiAdminTbody">
+        <tr><td colspan="7" style="text-align:center;color:#9ca3af;padding:1.2rem;">⏳ 불러오는 중...</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="kpi-calendar-wrap" id="kpiCalAdmin" data-mode="admin"></div>
+</div><!-- /panel-kpi-admin -->
+{% endif %}
+
+<script>
+(function(){
+  // ---- 탭 전환 ----
+  var TAB_KEY = 'resultsActiveTab';
+  function showTab(name){
+    document.querySelectorAll('.kpi-tab-panel').forEach(function(p){ p.classList.toggle('active', p.dataset.panel === name); });
+    document.querySelectorAll('.kpi-tab-btn').forEach(function(b){ b.classList.toggle('active', b.dataset.tab === name); });
+    try { localStorage.setItem(TAB_KEY, name); } catch(e){}
+    if (name === 'kpi-self' && !kpiCalState.self.loaded) kpiInitCalendar('self');
+    if (name === 'kpi-admin' && !kpiCalState.admin.loaded) { kpiAdminFilterChanged(); kpiInitCalendar('admin'); }
+  }
+  document.querySelectorAll('.kpi-tab-btn').forEach(function(b){
+    b.addEventListener('click', function(){ showTab(b.dataset.tab); });
+  });
+  document.addEventListener('DOMContentLoaded', function(){
+    var saved = null;
+    try { saved = localStorage.getItem(TAB_KEY); } catch(e){}
+    var avail = Array.from(document.querySelectorAll('.kpi-tab-btn')).map(function(b){ return b.dataset.tab; });
+    showTab((saved && avail.indexOf(saved) >= 0) ? saved : 'results');
+  });
+
+  // ---- 담당자 KPI 집계기간 선택 (페이지 재조회) ----
+  window.kpiChangePeriod = function(val){
+    try { localStorage.setItem(TAB_KEY, 'kpi-self'); } catch(e){}
+    var url = new URL(window.location.href);
+    if (val) url.searchParams.set('action_ym', val); else url.searchParams.delete('action_ym');
+    window.location.href = url.toString();
+  };
+
+  // ---- 캘린더 ----
+  var today = new Date();
+  var todayYM = today.getFullYear() * 100 + (today.getMonth() + 1);
+  var minYM = (function(){
+    var d = new Date(today.getFullYear(), today.getMonth() - 6, 1);
+    return d.getFullYear() * 100 + (d.getMonth() + 1);
+  })();
+  var kpiCalState = {
+    self:  { ym: todayYM, loaded: false },
+    admin: { ym: todayYM, loaded: false },
+  };
+  var DOW = ['일','월','화','수','목','금','토'];
+
+  function ymToParts(ym){ return { y: Math.floor(ym / 100), m: ym % 100 }; }
+  function ymStr(ym){ var p = ymToParts(ym); return p.y + String(p.m).padStart(2, '0'); }
+  function addMonth(ym, delta){
+    var p = ymToParts(ym);
+    var d = new Date(p.y, p.m - 1 + delta, 1);
+    return d.getFullYear() * 100 + (d.getMonth() + 1);
+  }
+
+  function kpiScopeParams(mode){
+    if (mode === 'self') return '';
+    var deptEl = document.getElementById('kpiAdminDept');
+    var empEl  = document.getElementById('kpiAdminEmp');
+    var dept = deptEl ? deptEl.value : '';
+    var emp  = empEl ? empEl.value : '';
+    var p = '';
+    if (dept) p += '&dept=' + encodeURIComponent(dept);
+    if (emp)  p += '&emp='  + encodeURIComponent(emp);
+    return p;
+  }
+
+  window.kpiInitCalendar = function(mode){
+    kpiCalState[mode].loaded = true;
+    kpiCalState[mode].ym = todayYM;
+    kpiRenderCalendarShell(mode);
+    kpiLoadCalendarMonth(mode);
+  };
+
+  function kpiRenderCalendarShell(mode){
+    var wrap = document.getElementById(mode === 'self' ? 'kpiCalSelf' : 'kpiCalAdmin');
+    if (!wrap) return;
+    wrap.innerHTML =
+      '<div class="kpi-cal-head">' +
+        '<div class="kpi-cal-nav"><button type="button" id="kpiCalPrev-' + mode + '">◀</button></div>' +
+        '<div class="ttl" id="kpiCalTitle-' + mode + '"></div>' +
+        '<div class="kpi-cal-nav"><button type="button" id="kpiCalNext-' + mode + '">▶</button></div>' +
+      '</div>' +
+      '<div class="kpi-cal-grid" id="kpiCalGrid-' + mode + '"></div>' +
+      '<div class="kpi-day-detail" id="kpiDayDetail-' + mode + '"><span style="color:#9ca3af;font-size:.78rem;">▸ 날짜를 클릭하면 해당일 활동 상세가 표시됩니다.</span></div>';
+    document.getElementById('kpiCalPrev-' + mode).onclick = function(){ kpiNavCalendar(mode, -1); };
+    document.getElementById('kpiCalNext-' + mode).onclick = function(){ kpiNavCalendar(mode, 1); };
+  }
+
+  function kpiNavCalendar(mode, delta){
+    var next = addMonth(kpiCalState[mode].ym, delta);
+    if (next < minYM || next > todayYM) return;
+    kpiCalState[mode].ym = next;
+    kpiLoadCalendarMonth(mode);
+  }
+
+  function kpiLoadCalendarMonth(mode){
+    var ym = kpiCalState[mode].ym;
+    var grid = document.getElementById('kpiCalGrid-' + mode);
+    var title = document.getElementById('kpiCalTitle-' + mode);
+    var p = ymToParts(ym);
+    if (title) title.textContent = p.y + '년 ' + p.m + '월';
+    if (grid) grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:#9ca3af;padding:1rem;font-size:.8rem;">⏳ 불러오는 중...</div>';
+    fetch('/portal/kpi-data?mode=calendar&ym=' + ymStr(ym) + kpiScopeParams(mode), {credentials: 'same-origin'})
+      .then(function(r){ return r.json(); })
+      .then(function(data){ kpiRenderCalendarGrid(mode, ym, data.days || {}); })
+      .catch(function(){ if (grid) grid.innerHTML = '<div style="grid-column:1/-1;color:#ef4444;font-size:.78rem;">불러오기 실패</div>'; });
+  }
+
+  function kpiRenderCalendarGrid(mode, ym, days){
+    var grid = document.getElementById('kpiCalGrid-' + mode);
+    var prevBtn = document.getElementById('kpiCalPrev-' + mode);
+    var nextBtn = document.getElementById('kpiCalNext-' + mode);
+    if (prevBtn) prevBtn.disabled = addMonth(ym, -1) < minYM;
+    if (nextBtn) nextBtn.disabled = addMonth(ym, 1) > todayYM;
+    if (!grid) return;
+    var p = ymToParts(ym);
+    var firstDow = new Date(p.y, p.m - 1, 1).getDay();
+    var lastDate = new Date(p.y, p.m, 0).getDate();
+    var isCurMonth = (ym === todayYM);
+    var html = DOW.map(function(d){ return '<div class="kpi-cal-dow">' + d + '</div>'; }).join('');
+    for (var i = 0; i < firstDow; i++) html += '<div class="kpi-cal-cell empty"></div>';
+    for (var d2 = 1; d2 <= lastDate; d2++) {
+      var dstr = p.y + '-' + String(p.m).padStart(2, '0') + '-' + String(d2).padStart(2, '0');
+      var cnt = days[dstr] || 0;
+      var isToday = isCurMonth && d2 === today.getDate();
+      var isFuture = isCurMonth && d2 > today.getDate();
+      var cls = 'kpi-cal-cell' + (cnt > 0 ? ' has-act' : '') + (isToday ? ' today' : '');
+      var dayKey = dstr.replace(/-/g, '');
+      html += '<div class="' + cls + '"' + (cnt > 0 && !isFuture ? ' onclick="kpiShowDayDetail(this,\'' + mode + '\',\'' + dayKey + '\')"' : '') + '>' +
+        '<span class="d">' + d2 + '</span>' + (cnt > 0 ? '<span class="c">' + cnt + '건</span>' : '') + '</div>';
+    }
+    grid.innerHTML = html;
+  }
+
+  window.kpiShowDayDetail = function(el, mode, dayStr){
+    document.querySelectorAll('#kpiCalGrid-' + mode + ' .kpi-cal-cell').forEach(function(c){ c.classList.remove('selected'); });
+    if (el) el.classList.add('selected');
+    var box = document.getElementById('kpiDayDetail-' + mode);
+    if (box) box.innerHTML = '<span style="color:#9ca3af;font-size:.78rem;">⏳ 불러오는 중...</span>';
+    fetch('/portal/kpi-data?mode=day_detail&day=' + dayStr + kpiScopeParams(mode), {credentials: 'same-origin'})
+      .then(function(r){ return r.json(); })
+      .then(function(data){
+        if (!box) return;
+        var items = data.items || [];
+        if (!items.length) { box.innerHTML = '<span style="color:#9ca3af;font-size:.78rem;">해당일 활동 내역이 없습니다.</span>'; return; }
+        var html = '<table><thead><tr><th>시각</th><th>담당자</th><th>가맹점</th><th>브랜드</th><th>구분</th></tr></thead><tbody>';
+        items.forEach(function(it){
+          html += '<tr><td>' + (it.created_at || '').slice(11, 19) + '</td><td>' + (it.emp_name || '') + '</td>' +
+            '<td>' + (it.customer_name || '') + '</td><td>' + (it.brand_name || '') + '</td>' +
+            '<td>' + (it.action_type || '') + '</td></tr>';
+        });
+        html += '</tbody></table>';
+        box.innerHTML = html;
+      })
+      .catch(function(){ if (box) box.innerHTML = '<span style="color:#ef4444;font-size:.78rem;">불러오기 실패</span>'; });
+  };
+
+  // ---- 관리자 KPI 테이블/필터 ----
+  window.kpiAdminFilterChanged = function(){
+    var deptSel = document.getElementById('kpiAdminDept');
+    var empSel  = document.getElementById('kpiAdminEmp');
+    // 부서 선택 시 담당자 드롭다운을 해당 부서로 제한
+    if (deptSel && empSel) {
+      var dept = deptSel.value;
+      Array.from(empSel.options).forEach(function(opt){
+        if (!opt.value) { opt.hidden = false; return; }
+        opt.hidden = !!dept && opt.dataset.team !== dept;
+      });
+      if (empSel.selectedOptions[0] && empSel.selectedOptions[0].hidden) empSel.value = '';
+    }
+    kpiLoadAdminTable();
+    kpiCalState.admin.ym = todayYM;
+    kpiLoadCalendarMonth('admin');
+  };
+
+  function kpiRateClass(rate){ return rate >= 80 ? 'ok' : rate >= 50 ? 'warn' : 'bad'; }
+
+  function kpiLoadAdminTable(){
+    var deptEl = document.getElementById('kpiAdminDept');
+    var empEl  = document.getElementById('kpiAdminEmp');
+    var periodEl = document.getElementById('kpiAdminPeriod');
+    var dept = deptEl ? deptEl.value : '';
+    var emp  = empEl ? empEl.value : '';
+    var period = periodEl ? periodEl.value : 'all';
+    var tbody = document.getElementById('kpiAdminTbody');
+    if (tbody) tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#9ca3af;padding:1.2rem;">⏳ 불러오는 중...</td></tr>';
+    var qs = 'mode=admin_table&period=' + encodeURIComponent(period);
+    if (dept) qs += '&dept=' + encodeURIComponent(dept);
+    if (emp)  qs += '&emp='  + encodeURIComponent(emp);
+    fetch('/portal/kpi-data?' + qs, {credentials: 'same-origin'})
+      .then(function(r){ return r.json(); })
+      .then(function(data){
+        var rows = data.rows || [];
+        if (!tbody) return;
+        if (!rows.length) { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#9ca3af;padding:1.2rem;">데이터가 없습니다.</td></tr>'; return; }
+        var html = '';
+        rows.forEach(function(r){
+          html += '<tr><td><b>' + r.emp_name + '</b></td><td style="color:#6b7280;font-size:.76rem;">' + r.team + '</td>' +
+            '<td style="text-align:right;">' + r.total_count + '</td>' +
+            '<td style="text-align:right;">' + r.total_sales_m.toLocaleString() + '</td>' +
+            '<td style="text-align:right;">' + r.total_gp_m.toLocaleString() + '</td>' +
+            '<td style="text-align:right;"><span class="kpi-rate-pill ' + kpiRateClass(r.activity_rate) + '">' + r.activity_rate + '%</span></td>' +
+            '<td style="text-align:right;"><span class="kpi-rate-pill ' + kpiRateClass(r.performance_rate) + '">' + r.performance_rate + '%</span></td>' +
+            '</tr>';
+        });
+        tbody.innerHTML = html;
+      })
+      .catch(function(){ if (tbody) tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#ef4444;padding:1rem;">불러오기 실패</td></tr>'; });
+  }
+})();
+</script>
 
 {% endblock %}

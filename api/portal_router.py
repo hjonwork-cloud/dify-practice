@@ -10,6 +10,7 @@ import secrets
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from urllib.parse import parse_qs, quote
@@ -2648,6 +2649,94 @@ async def brand_report_action_page(
     return _render(request, "portal_brand_report_action.html", report=report)
 
 
+# ═══════════════════════════════════════════════════════════════════════
+# KPI 운영 (범용상품 제안 솔루션, 2026-10~12월 3개월 한시 운영)
+# ═══════════════════════════════════════════════════════════════════════
+# 공식 시행일(2026-10-12, 월요일)을 KPI 1주차 시작으로 삼는다. 사전활동 기간
+# (10/7~10/11, 공식 시행 전 예비 활동)은 불이익 없이 1주차 실적에 합산한다.
+_KPI_PRELAUNCH_START = date(2026, 10, 7)
+_KPI_LAUNCH_DATE      = date(2026, 10, 12)   # 1주차 시작 (월요일)
+_KPI_OP_END           = date(2026, 12, 31)   # 운영 종료일
+_KPI_WEEKLY_TARGET    = 3                    # 활동(DM발송+판가설정) 주당 목표 건수
+_KPI_MONTHLY_GENERIC_TARGET_M = 1            # 범용상품 추가매출 월 목표(백만원)
+_KPI_MONTHS = ("10", "11", "12")             # 운영 대상 월 (2026년)
+
+
+def _kpi_week_index(d: date) -> int:
+    """주어진 날짜가 속한 KPI 주차(1부터). 운영 시작 전이면 0."""
+    if d < _KPI_PRELAUNCH_START:
+        return 0
+    if d < _KPI_LAUNCH_DATE:
+        return 1  # 사전활동 기간 → 1주차에 합산
+    return ((d - _KPI_LAUNCH_DATE).days // 7) + 1
+
+
+def _kpi_week_label(wi: int) -> str:
+    if wi == 1:
+        start, end = _KPI_PRELAUNCH_START, _KPI_LAUNCH_DATE + timedelta(days=6)
+    else:
+        start = _KPI_LAUNCH_DATE + timedelta(days=(wi - 1) * 7)
+        end = start + timedelta(days=6)
+    end = min(end, _KPI_OP_END)
+    return f"{wi}주차 ({start.strftime('%m/%d')}~{end.strftime('%m/%d')})"
+
+
+def _kpi_activity_summary(logs: list[dict], as_of: date) -> dict:
+    """logs: portal_db.list_dm_logs_in_range() 결과(활동 1건=1row). 주차별 달성률 평균으로 전체 활동 달성률 산출."""
+    as_of = min(max(as_of, _KPI_PRELAUNCH_START), _KPI_OP_END)
+    cur_week = max(_kpi_week_index(as_of), 1)
+    weekly_counts: dict[int, int] = {}
+    for r in logs:
+        try:
+            d = datetime.strptime(str(r.get("created_at") or "")[:10], "%Y-%m-%d").date()
+        except Exception:
+            continue
+        wi = _kpi_week_index(d)
+        if wi <= 0:
+            continue
+        weekly_counts[wi] = weekly_counts.get(wi, 0) + 1
+    weeks, rates = [], []
+    for wi in range(1, cur_week + 1):
+        cnt = weekly_counts.get(wi, 0)
+        rate = min(100, round(cnt / _KPI_WEEKLY_TARGET * 100))
+        weeks.append({"week": wi, "count": cnt, "target": _KPI_WEEKLY_TARGET, "rate": rate, "label": _kpi_week_label(wi)})
+        rates.append(rate)
+    overall = round(sum(rates) / len(rates)) if rates else 0
+    return {"weeks": weeks, "rate": overall, "current_week": cur_week, "total_count": sum(weekly_counts.values())}
+
+
+def _kpi_generic_by_month(rows: list[dict]) -> dict[str, int]:
+    out = {"10": 0, "11": 0, "12": 0}
+    for r in rows:
+        out["10"] += int(r.get("generic_sales_m10") or 0)
+        out["11"] += int(r.get("generic_sales_m11") or 0)
+        out["12"] += int(r.get("generic_sales_m12") or 0)
+    return out
+
+
+def _kpi_performance_summary(generic_by_month: dict[str, int]) -> dict:
+    target = _KPI_MONTHLY_GENERIC_TARGET_M
+    months, best, achieved_any = [], 0, False
+    for mm in _KPI_MONTHS:
+        amt = generic_by_month.get(mm, 0)
+        ok = amt >= target
+        achieved_any = achieved_any or ok
+        best = max(best, amt)
+        months.append({"month": mm, "amount_m": amt, "target_m": target, "achieved": ok})
+    rate = 100 if achieved_any else (round(best / target * 100) if target else 0)
+    return {"months": months, "rate": rate, "best_m": best, "target_m": target}
+
+
+def _kpi_scope(user: dict) -> tuple[str | None, str | None]:
+    """(emp_code 필터, team_like 필터) 반환 — 둘 다 None이면 사업부 전체."""
+    emp_code = user["emp_code"]
+    if user.get("is_admin") or _is_readonly_all(emp_code):
+        return None, None
+    if emp_code in _TEAM_LEADERS:
+        return None, _TEAM_LEADERS[emp_code]
+    return emp_code, None
+
+
 @router.get("/brand-report/results", response_class=HTMLResponse)
 async def brand_report_results_page(
     request: Request,
@@ -2696,14 +2785,180 @@ async def brand_report_results_page(
         dm_logs = portal_db.list_dm_logs(emp_code=user["emp_code"], brand_code=brand_code or None, action_ym=action_ym or None)
     except Exception:
         dm_logs = []
+
+    # ── KPI 운영(2026-10~12월) 컨텍스트: 담당자 KPI(전원) + 관리자 KPI(팀장/관리자만) ──
+    is_kpi_manager = user.get("is_admin", False) or _is_readonly_all(emp_code) or emp_code in _TEAM_LEADERS
+    today_kst = datetime.now(_KST).date()
+    try:
+        self_logs = portal_db.list_dm_logs_in_range(
+            _KPI_PRELAUNCH_START.isoformat(), today_kst.isoformat(), emp_code=emp_code)
+        self_rows = [r for r in rows if str(r.get("emp_code") or "") == emp_code]
+        self_kpi = {
+            "activity": _kpi_activity_summary(self_logs, today_kst),
+            "performance": _kpi_performance_summary(_kpi_generic_by_month(self_rows)),
+            "total_count": sum(1 for r in self_rows),
+            "total_sales_m": sum(r.get("sales_after_m") or 0 for r in self_rows),
+            "total_gp_m": sum(r.get("gp_after_m") or 0 for r in self_rows),
+        }
+    except Exception as _kpi_err:
+        logger.warning(f"[results page] self KPI 계산 실패: {_kpi_err}")
+        self_kpi = None
+    kpi_departments: list[str] = []
+    kpi_employees: list[dict] = []
+    if is_kpi_manager:
+        try:
+            wl = _employee_whitelist()
+            _my_team = _TEAM_LEADERS.get(emp_code, "")  # 팀장이면 자신의 팀으로만 드롭다운 제한
+            if _my_team:
+                wl = {k: v for k, v in wl.items() if _my_team in (v.get("team") or "")}
+            kpi_employees = sorted(
+                ({"emp_code": k, "name": v.get("name") or k, "team": v.get("team") or ""} for k, v in wl.items()),
+                key=lambda x: (x["team"], x["name"]),
+            )
+            kpi_departments = sorted({e["team"] for e in kpi_employees if e["team"]})
+        except Exception:
+            kpi_departments, kpi_employees = [], []
     try:
         return _render(request, "portal_brand_report_results.html",
                        rows=rows, brands=brands, summary=summary,
                        sel_brand_code=brand_code, sel_action_ym=action_ym,
-                       dm_logs=dm_logs)
+                       dm_logs=dm_logs,
+                       is_kpi_manager=is_kpi_manager, self_kpi=self_kpi,
+                       kpi_departments=kpi_departments, kpi_employees=kpi_employees,
+                       kpi_launch_date=_KPI_LAUNCH_DATE.isoformat(),
+                       kpi_prelaunch_start=_KPI_PRELAUNCH_START.isoformat(),
+                       kpi_op_end=_KPI_OP_END.isoformat())
     except Exception as e:
         logger.error(f"[results page] render error: {e}", exc_info=True)
         return HTMLResponse(f"<pre style='color:red'>렌더링 오류:\n{_tb.format_exc()}</pre>", status_code=500)
+
+
+def _kpi_resolve_scope(user: dict, dept: str = "", emp: str = "") -> tuple[str | None, str | None]:
+    """관리자/팀장이 dept·emp 드롭다운으로 좁힌 (emp_code, team_like) 조회 범위를 계산.
+    - emp 지정 시: 해당 1인 (단, 자신의 권한 범위 밖이면 무시)
+    - dept 지정 시: 해당 팀 전체 (단, 팀장은 자신의 팀 밖을 볼 수 없음)
+    - 둘 다 없으면: 사용자의 기본 스코프(_kpi_scope) 적용
+    """
+    emp_code = user["emp_code"]
+    is_mgr = user.get("is_admin", False) or _is_readonly_all(emp_code) or emp_code in _TEAM_LEADERS
+    if not is_mgr:
+        return emp_code, None  # 일반 사용자는 본인 스코프 고정
+    base_team = _TEAM_LEADERS.get(emp_code, "")  # 팀장이면 자신의 팀, 아니면 빈값(전체 허용)
+    if emp:
+        return emp, None
+    if dept:
+        if base_team and base_team != dept:
+            return None, base_team  # 팀장이 다른 팀을 요청하면 자기 팀으로 제한
+        return None, dept
+    return (None, base_team) if base_team else (None, None)
+
+
+@router.get("/kpi-data")
+async def kpi_data(
+    request: Request,
+    mode: str = "admin_table",   # admin_table | calendar | day_detail
+    dept: str = "",
+    emp: str = "",
+    period: str = "all",         # all | 10 | 11 | 12
+    ym: str = "",                # calendar: YYYYMM (기본: 이번달)
+    day: str = "",               # day_detail: YYYYMMDD
+):
+    """KPI 대시보드용 JSON 데이터 (관리자 테이블 / 캘린더 / 특정일 활동 상세)."""
+    user = _require_user(request)
+    emp_code = user["emp_code"]
+    today_kst = datetime.now(_KST).date()
+    scope_emp, scope_team = _kpi_resolve_scope(user, dept=dept, emp=emp)
+
+    if mode == "day_detail":
+        try:
+            d = datetime.strptime(day, "%Y%m%d").date()
+        except Exception:
+            return JSONResponse({"error": "day 파라미터 형식 오류 (YYYYMMDD)"}, status_code=400)
+        logs = portal_db.list_dm_logs_in_range(d.isoformat(), d.isoformat(), emp_code=scope_emp, team_like=scope_team)
+        items = [{
+            "emp_code": r.get("emp_code"), "emp_name": r.get("emp_name"),
+            "customer_name": r.get("customer_name"), "brand_name": r.get("brand_name"),
+            "action_type": r.get("action_type"), "created_at": r.get("created_at"),
+        } for r in logs]
+        return JSONResponse({"date": day, "count": len(items), "items": items})
+
+    if mode == "calendar":
+        if ym and len(ym) == 6 and ym.isdigit():
+            y, m = int(ym[:4]), int(ym[4:])
+        else:
+            y, m = today_kst.year, today_kst.month
+        month_start = date(y, m, 1)
+        next_month = date(y + 1, 1, 1) if m == 12 else date(y, m + 1, 1)
+        month_end = min(next_month - timedelta(days=1), today_kst)
+        if month_start > today_kst:
+            return JSONResponse({"ym": f"{y:04d}{m:02d}", "days": {}, "can_go_next": False})
+        logs = portal_db.list_dm_logs_in_range(month_start.isoformat(), month_end.isoformat(),
+                                               emp_code=scope_emp, team_like=scope_team)
+        days: dict[str, int] = {}
+        for r in logs:
+            dkey = str(r.get("created_at") or "")[:10]
+            if dkey:
+                days[dkey] = days.get(dkey, 0) + 1
+        can_go_next = next_month <= today_kst.replace(day=1) or (y, m) < (today_kst.year, today_kst.month)
+        return JSONResponse({"ym": f"{y:04d}{m:02d}", "days": days, "can_go_next": can_go_next})
+
+    # mode == "admin_table" (관리자/팀장 전용)
+    is_mgr = user.get("is_admin", False) or _is_readonly_all(emp_code) or emp_code in _TEAM_LEADERS
+    if not is_mgr:
+        raise HTTPException(status_code=403, detail="관리자/팀장 권한이 필요합니다.")
+    from portal_refresh import read_action_results
+    if scope_emp:
+        scope_where = f"emp_code = '{scope_emp}'"
+    elif scope_team:
+        import main as _main_m3
+        scope_where = (f"emp_code IN (SELECT DISTINCT `영업사원` FROM {_main_m3.T_MAIN}"
+                       f" WHERE `지점명` LIKE '%{scope_team}%')")
+    else:
+        scope_where = "1=1"
+    try:
+        rows = read_action_results(emp_code, scope_where=scope_where)
+    except Exception:
+        rows = []
+    date_from = _KPI_PRELAUNCH_START
+    date_to = today_kst
+    if period in ("10", "11", "12"):
+        y0 = 2026
+        m0 = int(period)
+        date_from = max(date(y0, m0, 1), _KPI_PRELAUNCH_START)
+        date_to = min((date(y0, m0 + 1, 1) - timedelta(days=1)) if m0 < 12 else date(y0, 12, 31), today_kst)
+    try:
+        wl = _employee_whitelist()
+    except Exception:
+        wl = {}
+    by_emp: dict[str, list[dict]] = {}
+    for r in rows:
+        by_emp.setdefault(str(r.get("emp_code") or ""), []).append(r)
+    out_rows = []
+    for ecode, erows in by_emp.items():
+        if not ecode:
+            continue
+        info = wl.get(ecode, {})
+        try:
+            logs = portal_db.list_dm_logs_in_range(date_from.isoformat(), date_to.isoformat(), emp_code=ecode)
+        except Exception:
+            logs = []
+        act = _kpi_activity_summary(logs, date_to)
+        perf = _kpi_performance_summary(_kpi_generic_by_month(erows))
+        out_rows.append({
+            "emp_code": ecode,
+            "emp_name": info.get("name") or ecode,
+            "team": info.get("team") or "",
+            "total_count": len(erows),
+            "total_sales_m": sum(r.get("sales_after_m") or 0 for r in erows),
+            "total_gp_m": sum(r.get("gp_after_m") or 0 for r in erows),
+            "activity_rate": act["rate"],
+            "activity_count": act["total_count"],
+            "performance_rate": perf["rate"],
+            "performance_best_m": perf["best_m"],
+        })
+    out_rows.sort(key=lambda x: (x["team"], -x["performance_rate"]))
+    return JSONResponse({"period": period, "date_from": date_from.isoformat(), "date_to": date_to.isoformat(),
+                         "rows": out_rows})
 
 
 @router.get("/action-results")

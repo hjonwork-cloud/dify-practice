@@ -607,6 +607,31 @@ def list_dm_logs(limit: int = 200, emp_code: str | None = None,
         return [dict(row) for row in rows]
 
 
+def list_dm_logs_in_range(date_from: str, date_to: str, emp_code: str | None = None,
+                          team_like: str | None = None, limit: int = 20000) -> list[dict]:
+    """KPI 집계용: 기간(YYYY-MM-DD, date_to는 포함) 내 발송/판가설정 활동 로그 조회.
+    - emp_code 지정 시 본인만, team_like 지정 시 해당 팀 전체(LIKE), 둘 다 없으면 전체(사업부).
+    - 각 row = 활동(액션) 1건 (DM발송 또는 판가설정 호출 1회) — KPI 활동 달성률/캘린더 집계용.
+    """
+    init_db()
+    conds = ["created_at >= ?", "created_at <= ?"]
+    params: list = [f"{date_from} 00:00:00", f"{date_to} 23:59:59"]
+    if emp_code:
+        conds.append("emp_code = ?"); params.append(emp_code)
+    if team_like:
+        conds.append("team LIKE ?"); params.append(f"%{team_like}%")
+    where = " AND ".join(conds)
+    params.append(limit)
+    with _connect() as conn:
+        rows = conn.execute(
+            f"""SELECT emp_code, emp_name, team, brand_code, brand_name,
+                       customer_code, customer_name, action_type, created_at
+                FROM dm_send_logs WHERE {where} ORDER BY created_at ASC LIMIT ?""",
+            params,
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
 def list_action_logs(limit: int = 200):
     init_db()
     with _connect() as conn:
