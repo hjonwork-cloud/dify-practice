@@ -184,7 +184,6 @@
   <div class="rs-badge green"><b>{{ '{:,}'.format(summary.total_sales_after_m) }}백만</b><span>누적 매출</span></div>
   <div class="rs-badge blue"><b>{{ '{:,}'.format(summary.total_gp_after_m) }}백만</b><span>누적 GP</span></div>
   <div class="rs-badge amber"><b>{{ summary.avg_gp_rate }}%</b><span>평균 GP율</span></div>
-  <div class="rs-badge"><b>{{ '{:,}'.format(summary.total_generic_after_m) }}백만</b><span>범용 추가매출</span></div>
 </div>
 
 {% if rows %}
@@ -205,9 +204,8 @@
           <th onclick="sortTable(8)" style="text-align:right;">이후누적매출(백만)</th>
           <th onclick="sortTable(9)" style="text-align:right;">이후GP(백만)</th>
           <th onclick="sortTable(10)" style="text-align:right;">GP율(%)</th>
-          <th onclick="sortTable(11)" style="text-align:right;">범용추가(백만)</th>
-          <th onclick="sortTable(12)" style="text-align:center;">샘플출고</th>
-          <th onclick="sortTable(13)" style="text-align:center;">DM전환(건)</th>
+          <th onclick="sortTable(11)" style="text-align:center;">샘플출고</th>
+          <th onclick="sortTable(12)" style="text-align:center;">DM전환(건)</th>
           {% if user and user.is_admin %}<th style="text-align:center;width:52px;">삭제</th>{% endif %}
         </tr>
       </thead>
@@ -248,7 +246,6 @@
             {% set gp = r.gp_rate_after | default(0) %}
             <span class="gp-chip {% if gp >= 20 %}up{% elif gp >= 10 %}mid{% else %}down{% endif %}">{{ gp }}%</span>
           </td>
-          <td style="text-align:right;">{{ '{:,}'.format(r.generic_sales_after_m | default(0)) }}</td>
           <td style="text-align:center;">
             {% if (r.sample_count | default(0)) > 0 %}
               <span title="수량 {{ r.sample_qty | default(0) }}개" style="color:#16a34a;font-weight:600;">✅ {{ r.sample_count }}건</span>
@@ -271,7 +268,7 @@
         </tr>
         <!-- 펼침 세부 행 -->
         <tr class="detail-row" id="detail-{{ rid }}">
-          <td colspan="{% if user and user.is_admin %}15{% else %}14{% endif %}">
+          <td colspan="{% if user and user.is_admin %}14{% else %}13{% endif %}">
             <div style="font-size:.78rem;color:#374151;">
               <b style="color:#1e293b;">📦 DM 발송 품목 상세</b>
               <div id="detail-table-{{ rid }}" style="margin-top:.4rem;">
@@ -411,7 +408,7 @@
           var mainRow = document.querySelector('[data-rid="' + rid + '"]');
           if (mainRow) {
             var tds = mainRow.querySelectorAll('td');
-            var convertedTd = tds[13];  // index 13 = DM전환(건) — 관리자 삭제 td(14)와 혼동 방지
+            var convertedTd = tds[12];  // index 12 = DM전환(건) — 관리자 삭제 td(13)와 혼동 방지
             if (convertedTd) {
               convertedTd.innerHTML = convertedCount > 0
                 ? '<span style="color:#2563eb;font-weight:600;">' + convertedCount + '건</span>'

@@ -2773,12 +2773,10 @@ async def brand_report_results_page(
         brands = []
     total_sales   = sum(r.get("sales_after_m") or 0 for r in rows)
     total_gp      = sum(r.get("gp_after_m") or 0 for r in rows)
-    total_generic = sum(r.get("generic_sales_after_m") or 0 for r in rows)
     summary = {
         "count":                 len(rows),
         "total_sales_after_m":   total_sales,
         "total_gp_after_m":      total_gp,
-        "total_generic_after_m": total_generic,
         "avg_gp_rate":           round(total_gp / total_sales * 100, 1) if total_sales else 0,
     }
     try:
@@ -2991,14 +2989,12 @@ async def action_results(
         rows = []
     total_sales = sum(r.get("sales_after_m", 0) for r in rows)
     total_gp    = sum(r.get("gp_after_m", 0) for r in rows)
-    total_generic = sum(r.get("generic_sales_after_m", 0) for r in rows)
     return JSONResponse(_json_safe({
         "rows": rows,
         "summary": {
             "count":             len(rows),
             "total_sales_after_m":   total_sales,
             "total_gp_after_m":      total_gp,
-            "total_generic_after_m": total_generic,
         },
     }))
 
