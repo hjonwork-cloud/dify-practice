@@ -64,9 +64,14 @@
    - 개인정보처리방침 URL: `https://<포털>/portal/sms-extension/privacy`
    - 권한 사유: direct.dongwon.com 세션 예열(tabs/scripting/webNavigation), Referer 보정(declarativeNetRequest),
      세션 진단(cookies/webRequest) — 심사 반려 시 진단용 권한(cookies, webRequest, declarativeNetRequestFeedback) 제거 검토
-3. 심사 통과 후 발급된 ID를 App Service 환경변수에 입력 → 재시작하면 포털 팝업이 자동으로 '원클릭 설치' 모드로 전환
-   - `SMS_EXT_CWS_ID=<웹 스토어 ID>` / `SMS_EXT_EDGE_ID=<Edge 스토어 ID>`(선택)
+3. **심사 "제출 완료" ≠ "게시 완료"다.** 대시보드 상태가 "검토 중"인 동안은 ID가 있어도 아직 사용자가
+   접근 가능한 공개 페이지가 아니므로, 원클릭 버튼을 켜면 클릭 시 오류 화면을 보게 된다. 그래서 ID 등록과
+   버튼 노출을 분리했다 — App Service 환경변수에 ID를 미리 넣어둬도 아래 스위치가 꺼져 있으면 포털은
+   계속 ZIP(설치 파일) 안내만 보여준다:
+   - `SMS_EXT_CWS_ID=<웹 스토어 ID>` / `SMS_EXT_EDGE_ID=<Edge 스토어 ID>`(선택, 미리 넣어둬도 무방)
    - `SMS_EXT_MIN_VERSION=<요구 버전>`(선택: 스토어 심사 대기 중 저장소 버전이 앞설 때 '업데이트 필요' 오표시 방지)
+   - `SMS_EXT_STORE_ENABLED=1` ← **대시보드 상태가 "게시됨/Published"로 바뀐 걸 직접 확인한 뒤에만** 추가.
+     이 값이 없으면 위 ID가 설정돼 있어도 원클릭 버튼은 계속 숨겨지고 ZIP 설치 안내만 노출된다.
 4. 포털은 스토어본/개발자 모드본 ID를 모두 ping 해서 응답하는 쪽을 사용하므로 기존 ZIP 설치자도 그대로 동작합니다.
    스토어본은 새 버전이 **자동 업데이트**되고, 개발자 모드 경고 팝업도 뜨지 않습니다.
 

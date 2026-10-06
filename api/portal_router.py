@@ -3463,6 +3463,9 @@ _SMS_EXT_DEV_ID = "bndgknhcmfakobpppgndlpdloalmkbne"
 def _sms_ext_config() -> dict:
     cws_id = os.getenv("SMS_EXT_CWS_ID", "").strip()     # Chrome 웹 스토어 ID (Chrome + Edge 공용)
     edge_id = os.getenv("SMS_EXT_EDGE_ID", "").strip()   # Edge 추가 기능 스토어 ID (선택)
+    # 스토어 심사 중에는 ID를 미리 넣어둬도 원클릭 버튼이 뜨지 않도록 하는 별도 마스터 스위치.
+    # 심사 완료(실제 공개)가 확정된 뒤에만 SMS_EXT_STORE_ENABLED=1 로 켠다 — ID 등록과 노출 시점을 분리.
+    store_enabled = os.getenv("SMS_EXT_STORE_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
     ids: list[str] = []
     for i in (cws_id, edge_id, _SMS_EXT_DEV_ID):
         if i and i not in ids:
@@ -3473,8 +3476,8 @@ def _sms_ext_config() -> dict:
         "version": version,
         # 스토어 심사·자동업데이트 반영 전에는 저장소 버전보다 낮을 수 있으므로 최소 요구버전을 별도로 지정 가능
         "min_version": os.getenv("SMS_EXT_MIN_VERSION", "").strip() or version,
-        "cws_url": f"https://chromewebstore.google.com/detail/{cws_id}" if cws_id else "",
-        "edge_url": f"https://microsoftedge.microsoft.com/addons/detail/{edge_id}" if edge_id else "",
+        "cws_url": f"https://chromewebstore.google.com/detail/{cws_id}" if (cws_id and store_enabled) else "",
+        "edge_url": f"https://microsoftedge.microsoft.com/addons/detail/{edge_id}" if (edge_id and store_enabled) else "",
     }
 
 
