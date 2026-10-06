@@ -139,6 +139,14 @@
 .dm-modal-send{background:linear-gradient(135deg,#065666,#0891b2);color:#fff;border:none;border-radius:999px;padding:.55rem 1.5rem;font-size:.85rem;font-weight:800;cursor:pointer;box-shadow:0 4px 12px rgba(8,145,178,.35);}
 .dm-modal-send:hover{transform:translateY(-1px);}
 .dm-modal-note{font-size:.72rem;color:#9ca3af;margin-top:.75rem;line-height:1.6;}
+/* ── [광고]/수신거부 잠금 영역 (정보통신망법 — 편집·삭제 불가) ── */
+.dm-locked-wrap{display:flex;flex-direction:column;}
+.dm-locked{display:flex;align-items:center;gap:.4rem;background:#f1f5f9;border:1px solid #cbd5e1;color:#334155;
+  font-size:.8rem;font-weight:800;padding:.4rem .65rem;user-select:none;cursor:not-allowed;word-break:break-all;line-height:1.45;}
+.dm-locked-top{border-radius:.4rem .4rem 0 0;border-bottom:1px dashed #cbd5e1;}
+.dm-locked-bottom{border-radius:0 0 .4rem .4rem;border-top:1px dashed #cbd5e1;font-weight:600;}
+.dm-locked .dm-lock-tag{margin-left:auto;font-size:.68rem;font-weight:700;color:#64748b;background:#e2e8f0;border-radius:999px;padding:.05rem .45rem;white-space:nowrap;}
+.dm-locked-wrap textarea{border-radius:0!important;margin:0!important;display:block;border-top:none!important;border-bottom:none!important;}
 </style>
 
 {% if not report.brand %}
@@ -183,9 +191,9 @@
   </div>
   <div class="acb-kpi">
     <strong>{{ '{:,}'.format(report.opportunity_effect_m) }}백만</strong>
-    <span class="acb-kpi-label">제안효과(기회매출)
+    <span class="acb-kpi-label">기회매출(전체 가맹점)
       <span class="help-tip" tabindex="0">?
-        <span class="help-tip-box"><b>기회매출액</b>: 가맹점이 아직 사용하지 않는 추천상품을, 다른 가맹점들의 평균 사용 수준만큼 도입했을 때 기대할 수 있는 추가 매출액입니다. (상품별 타매장 사용률 × 판매량 기준 계산)</span>
+        <span class="help-tip-box"><b>기회매출액</b>: 가맹점이 아직 사용하지 않는 추천상품을, 다른 가맹점들의 평균 사용 수준만큼 도입했을 때 기대할 수 있는 추가 매출액입니다. (상품별 타매장 사용률 × 판매량 기준 계산)<br>제안 대상 여부와 관계없이 <b>전체 가맹점</b> 합계이며, 이 중 제안 대상 가맹점은 {{ '{:,}'.format(report.opportunity_effect_target_m or 0) }}백만입니다.</span>
       </span>
     </span>
   </div>
@@ -444,9 +452,8 @@
         `동일 브랜드 내 다른 가맹점에서 사용 빈도가 높은 상품 중 아직 주문이 없는 품목이 있어 추천드립니다.\n\n` +
         `추천 품목\n${productLines}\n\n` +
         `해당 상품은 다른 가맹점에서 꾸준히 사용 중인 품목으로, 메뉴 운영 안정화와 원가 개선 관점에서 검토해보시면 좋겠습니다.`;
-      // 정보통신망법 준수: [광고] 표시 + 수신거부 안내 (서버 _apply_ad_compliance()와 동일 규칙)
-      if (!newMsg.trimStart().startsWith('[광고]')) newMsg = `[광고] ${newMsg}`;
-      if (optoutLink) newMsg = `${newMsg}\n\n무료수신거부 : ${optoutLink}`;
+      // [광고] 표시 / 수신거부 안내는 편집 불가 잠금 영역으로 별도 표시되고,
+      // 발송 시 서버(/portal/dm-prepare)가 정규 문구로 다시 조립한다 → textarea에는 본문만 둔다.
       const dm1 = document.getElementById(`dmText_${uid}`);
       const dm2 = document.getElementById(`priceDmText_${uid}`);
       if (dm1) dm1.value = newMsg;
@@ -529,7 +536,7 @@
     } else {
       actionFooter.innerHTML = `
       <div class="action-section-title" style="margin-top:.6rem;">DM 메시지</div>
-      <textarea class="dm-preview-area" id="priceDmText_${uid}" rows="10">${dmMsg}</textarea>
+      ${_dmLockedEditorHtml(`priceDmText_${uid}`, 'dm-preview-area', _dmStripCompliance(dmMsg), optoutLink, 10)}
       ${isOptout ? `<div style="margin:.4rem 0;padding:.5rem .8rem;background:#fee2e2;border:1px solid #fecaca;border-radius:.4rem;font-size:.8rem;color:#b91c1c;">🚫 수신거부 등록 고객입니다. DM 발송이 불가합니다.</div>` : ''}
       <div class="price-btn-row" style="justify-content:space-between;">
         <div class="price-btn-row" style="margin:0;">
@@ -564,7 +571,7 @@
       if (isOptout) { alert('수신거부 등록 고객입니다. DM을 발송할 수 없습니다.'); return; }
       if (!guardConfirmed(uid)) return;
       window._openDmModal({
-        uid, custCode, custName, custPhone,
+        uid, custCode, custName, custPhone, optoutLink,
         title: `💬 DM 발송 확인 — ${custName}`,
         message: document.getElementById(`priceDmText_${uid}`)?.value || '',
         onConfirm: (ctx) => window.sendDmFromPricePanel(uid, custCode, custName, brandCode, brandName, btn, ctx),
@@ -574,7 +581,7 @@
       if (isOptout) { alert('수신거부 등록 고객입니다. DM을 발송할 수 없습니다.'); return; }
       if (!guardConfirmed(uid)) return;
       window._openDmModal({
-        uid, custCode, custName, custPhone,
+        uid, custCode, custName, custPhone, optoutLink,
         title: `💰 판가 등록 + DM 발송 확인 — ${custName}`,
         message: document.getElementById(`priceDmText_${uid}`)?.value || '',
         onConfirm: (ctx) => window.sendPriceDm(uid, custCode, custName, brandCode, brandName, plantCode, btn, ctx),
@@ -617,6 +624,55 @@
     return true;
   }
 
+  // ─── [광고]/수신거부 컴플라이언스 (서버 _strip_ad_compliance/_apply_ad_compliance와 동일 규칙) ───
+  const DM_AD_PREFIX = '[광고]';
+  function _dmStripCompliance(msg) {
+    let s = String(msg || '').replace(/\r\n?/g, '\n');
+    s = s.replace(/^\s*(?:[\[\(（【]\s*광\s*고\s*[\]\)）】]\s*)+/, '');
+    return s.split('\n').filter(l => !/수\s*신\s*거\s*부|\/portal\/optout|\/portal\/o\//.test(l)).join('\n').trim();
+  }
+  function _dmComposeCompliant(body, link) {
+    return `${DM_AD_PREFIX} ${_dmStripCompliance(body)}\n\n무료수신거부 : ${link || ''}`;
+  }
+  function _escHtml(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+  /** 잠금 접두어([광고]) + 편집 가능 본문 + 잠금 수신거부 안내 */
+  function _dmLockedEditorHtml(id, cls, body, link, rows) {
+    return `<div class="dm-locked-wrap">
+      <div class="dm-locked dm-locked-top" title="정보통신망법에 따라 필수 표시 — 수정·삭제 불가">🔒 ${DM_AD_PREFIX}<span class="dm-lock-tag">필수 · 수정불가</span></div>
+      <textarea class="${cls}" id="${id}" rows="${rows || 10}">${_escHtml(body)}</textarea>
+      <div class="dm-locked dm-locked-bottom" data-optout-footer title="정보통신망법에 따라 필수 표시 — 수정·삭제 불가">🔒 무료수신거부 : ${_escHtml(link || '(발송 시 자동 삽입)')}<span class="dm-lock-tag">필수 · 수정불가</span></div>
+    </div>`;
+  }
+  // 본문 입력란에 [광고]/수신거부 문구를 직접 붙여넣으면 중복되지 않도록 즉시 제거
+  document.addEventListener('change', (e) => {
+    const t = e.target;
+    if (t && t.tagName === 'TEXTAREA' && t.closest('.dm-locked-wrap')) {
+      const cleaned = _dmStripCompliance(t.value);
+      if (cleaned !== t.value.trim()) t.value = cleaned;
+    }
+  });
+
+  /** 발송 직전 서버 검증 + 최종 문구 확정 (수신거부/발송시간 차단, [광고]·수신거부 링크 강제) */
+  async function _prepareDm(custCode, message, ctx) {
+    try {
+      const res = await fetch('/portal/dm-prepare', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customer_code: custCode, dm_message: message,
+          dm_phone: ctx?.receiver || '', dm_scheduled_at: ctx?.scheduledAt || '',
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) return { ok: false, error: data.error || data.detail || `검증 실패 (${res.status})` };
+      return data;
+    } catch (e) {
+      return { ok: false, error: '네트워크 오류로 발송 검증에 실패했습니다.' };
+    }
+  }
+
   // ─── DM 발송 확인 팝업 (수신자/발신자/문자내용/예약발송) ─────────
   let _dmModalCtx = null;
   const DM_SEND_HOUR_START = 8;   // 발송가능 시작(포함) — 오전 08:00
@@ -638,7 +694,8 @@
     const el = document.getElementById('dmModalMessage');
     const lenEl = document.getElementById('dmModalMsgLen');
     if (!el || !lenEl) return;
-    const len = (el.value || '').length;
+    // 잠금 영역([광고] + 수신거부 안내)까지 포함한 실제 발송 길이
+    const len = _dmComposeCompliant(el.value || '', _dmModalCtx?.optoutLink || '').length;
     lenEl.textContent = len;
     const typeEl = document.getElementById('dmModalMsgType');
     if (typeEl) typeEl.textContent = len > 80 ? '장문(LMS)' : '단문(SMS)';
@@ -658,7 +715,9 @@
     const custEl = document.getElementById('dmModalCustName');
     if (custEl) custEl.value = opts.custName || '';
     const msgEl = document.getElementById('dmModalMessage');
-    if (msgEl) msgEl.value = opts.message || '';
+    if (msgEl) msgEl.value = _dmStripCompliance(opts.message || '');
+    const footEl = document.getElementById('dmModalOptoutFooterText');
+    if (footEl) footEl.textContent = `무료수신거부 : ${opts.optoutLink || '(발송 시 자동 삽입)'}`;
     _dmModalUpdateLen();
     const recvEl = document.getElementById('dmModalReceiver');
     if (recvEl) {
@@ -694,7 +753,10 @@
   };
   window._confirmDmModalSend = function() {
     if (!_dmModalCtx) return;
-    const message  = document.getElementById('dmModalMessage')?.value || '';
+    const bodyText = _dmStripCompliance(document.getElementById('dmModalMessage')?.value || '');
+    if (!bodyText) { alert('문자 내용을 입력하세요.'); return; }
+    // [광고] + 본문 + 무료수신거부 링크 (최종 문구는 발송 직전 서버가 한 번 더 확정)
+    const message  = _dmComposeCompliant(bodyText, _dmModalCtx.optoutLink || '');
     const receiver = (document.getElementById('dmModalReceiver')?.value || '').trim();
     const callback = (document.getElementById('dmModalCallback')?.value || '').trim();
     const mode = document.querySelector('input[name="dmSendMode"]:checked')?.value || 'now';
@@ -717,7 +779,7 @@
       }
     }
     const dmTextEl = document.getElementById(`priceDmText_${_dmModalCtx.uid}`);
-    if (dmTextEl) dmTextEl.value = message;
+    if (dmTextEl) dmTextEl.value = bodyText;
     const ctx = { message, receiver, callback, scheduledAt, mode };
     const onConfirm = _dmModalCtx.onConfirm;
     window._closeDmModal();
@@ -881,9 +943,15 @@
   // ─── SMS 발송 브릿지(브라우저 확장) 연동 ─────────────────
   // 확장이 설치돼 있으면(개인 PC에 이미 로그인된 direct.dongwon.com 세션을 그대로 사용해서)
   // 브라우저에서 직접 발송하고, 없으면 null을 반환해 기존 서버 경유 발송(공유 쿠키)으로 자동 폴백한다.
+  // 확장 ID는 설치 경로(웹 스토어 / Edge 스토어 / 개발자 모드)마다 다르므로 portal_base.html 의
+  // window.DWHF_SMS_EXT.resolveId() 로 실제 응답하는 ID를 찾는다. (없으면 개발자 모드 고정 ID)
   const SMS_EXT_ID = 'bndgknhcmfakobpppgndlpdloalmkbne';
+  async function _resolveExtId() {
+    try { if (window.DWHF_SMS_EXT && window.DWHF_SMS_EXT.resolveId) return await window.DWHF_SMS_EXT.resolveId(); } catch (e) {}
+    return SMS_EXT_ID;
+  }
 
-  function _extMessage(msg, timeoutMs = 8000) {
+  function _extMessage(msg, timeoutMs = 8000, extId = SMS_EXT_ID) {
     return new Promise((resolve) => {
       if (!(window.chrome && chrome.runtime && chrome.runtime.sendMessage)) {
         resolve({ ok: false, error: 'no_extension_api' }); return;
@@ -891,7 +959,7 @@
       let done = false;
       const timer = setTimeout(() => { if (!done) { done = true; resolve({ ok: false, error: 'timeout' }); } }, timeoutMs);
       try {
-        chrome.runtime.sendMessage(SMS_EXT_ID, msg, (response) => {
+        chrome.runtime.sendMessage(extId, msg, (response) => {
           if (done) return;
           done = true; clearTimeout(timer);
           if (chrome.runtime.lastError) {
@@ -909,7 +977,8 @@
 
   /** 확장 설치 확인 후 있으면 현재 로그인 세션으로 직접 발송, 없으면 null(서버 폴백 신호) 반환 */
   async function _trySendSmsViaExtension({ phone, message, callback, scheduledAt }) {
-    const ping = await _extMessage({ type: 'ping' });
+    const extId = await _resolveExtId();
+    const ping = await _extMessage({ type: 'ping' }, 8000, extId);
     if (!ping || !ping.ok) return null; // 확장 미설치/미응답 → 서버 경유로 폴백
     // ⚠️ 그룹웨어 SSO 세션이 없는 사용자는 확장 프로그램이 띄운 팝업에서 직접
     // 로그인을 해야 할 수 있다(최대 90초 대기, background.js의
@@ -918,7 +987,7 @@
     const send = await _extMessage({
       type: 'send_sms', phone, message, callback,
       msgType: (message || '').length > 80 ? '2' : '1', scheduledAt: scheduledAt || '',
-    }, 100000);
+    }, 100000, extId);
     if (!send || !send.ok) {
       return { success: false, status_code: null, message: (send && send.error) || '확장 프로그램 오류' };
     }
@@ -953,10 +1022,18 @@
 
   // ─── DM만 발송 (판가 패널에서) ──────────────────────
   window.sendDmFromPricePanel = async function(uid, custCode, custName, brandCode, brandName, btn, ctx) {
-    const message  = (ctx && ctx.message) || document.getElementById(`priceDmText_${uid}`)?.value || '';
+    const draft    = (ctx && ctx.message) || document.getElementById(`priceDmText_${uid}`)?.value || '';
     const resultEl = document.getElementById(`priceResult_${uid}`);
     btn.disabled = true; btn.textContent = '발송 중...'; resultEl.style.display = 'none';
     try {
+      // 서버가 차단 사유 검증 + [광고]/수신거부 링크가 포함된 최종 문구 확정 → 그 문구만 발송
+      const prep = await _prepareDm(custCode, draft, ctx);
+      if (!prep.ok) {
+        resultEl.textContent = '❌ ' + prep.error; resultEl.className = 'send-result err';
+        resultEl.style.display = ''; btn.disabled = false; btn.textContent = '💬 DM만 발송';
+        return;
+      }
+      const message = prep.message;
       const clientSmsResult = await _trySendSmsViaExtension({
         phone: ctx?.receiver || '', message, callback: ctx?.callback || '', scheduledAt: ctx?.scheduledAt || '',
       });
@@ -982,14 +1059,23 @@
 
   // ─── 판가 등록 + DM 발송 ──────────────────────────
   window.sendPriceDm = async function(uid, custCode, custName, brandCode, brandName, plantCode, btn, ctx) {
-    const message  = (ctx && ctx.message) || document.getElementById(`priceDmText_${uid}`)?.value || '';
+    const draft    = (ctx && ctx.message) || document.getElementById(`priceDmText_${uid}`)?.value || '';
     const resultEl = document.getElementById(`priceResult_${uid}`);
     const priceItems = _collectPriceItems(uid, plantCode, custCode);
     if (!priceItems.length) {
       resultEl.textContent = '❌ 설정판가를 1건 이상 입력하세요.';
       resultEl.className = 'send-result err'; resultEl.style.display = ''; return;
     }
-    btn.disabled = true; btn.textContent = 'SAP 등록 중...'; resultEl.style.display = 'none';
+    btn.disabled = true; btn.textContent = '발송 검증 중...'; resultEl.style.display = 'none';
+    // SAP 등록 전에 DM 차단 사유(수신거부/발송시간)를 먼저 확인하고 최종 문구를 확정한다
+    const prep = await _prepareDm(custCode, draft, ctx);
+    if (!prep.ok) {
+      resultEl.textContent = '❌ ' + prep.error; resultEl.className = 'send-result err';
+      resultEl.style.display = ''; btn.disabled = false; btn.textContent = '💰 판가 등록 + DM 발송';
+      return;
+    }
+    const message = prep.message;
+    btn.textContent = 'SAP 등록 중...';
     let sapResult;
     try {
       sapResult = await _callSap(priceItems);
@@ -1416,16 +1502,21 @@
     </div>
 
     <div class="dm-modal-row dm-modal-msg-row">
-      <label>문자 내용</label>
-      <textarea id="dmModalMessage" rows="14"></textarea>
+      <label>문자 내용 <span style="font-weight:500;color:#64748b;">(🔒 표시 영역은 정보통신망법상 필수 문구로 수정·삭제할 수 없습니다)</span></label>
+      <div class="dm-locked-wrap">
+        <div class="dm-locked dm-locked-top" title="정보통신망법에 따라 필수 표시 — 수정·삭제 불가">🔒 [광고]<span class="dm-lock-tag">필수 · 수정불가</span></div>
+        <textarea id="dmModalMessage" rows="12"></textarea>
+        <div class="dm-locked dm-locked-bottom" title="정보통신망법에 따라 필수 표시 — 수정·삭제 불가">🔒 <span id="dmModalOptoutFooterText">무료수신거부 :</span><span class="dm-lock-tag">필수 · 수정불가</span></div>
+      </div>
       <div class="dm-modal-msg-meta">
-        <span><span id="dmModalMsgLen">0</span>자 · <span id="dmModalMsgType">단문(SMS)</span></span>
+        <span><span id="dmModalMsgLen">0</span>자 · <span id="dmModalMsgType">단문(SMS)</span> <span style="color:#9ca3af;">([광고]·수신거부 포함)</span></span>
         <span>발송 이력에 그대로 기록됩니다</span>
       </div>
     </div>
 
     <p class="dm-modal-note">
-      ※ 현재는 실제 SMS 발송 연동 전 단계로, 위 내용은 발송 이력에 기록만 됩니다.
+      ※ 발송 직전 서버가 수신거부·발송가능시간을 확인하고 [광고] 표시와 고객별 수신거부 링크를 자동으로 확정합니다.
+      SMS 발송 브릿지(확장 프로그램)가 설치된 PC에서는 본인 Direct 로그인 세션으로 발송됩니다.
     </p>
 
     <div class="dm-modal-footer">

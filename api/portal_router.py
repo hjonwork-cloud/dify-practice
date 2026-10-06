@@ -374,6 +374,8 @@ def _render(request: Request, name: str, **context) -> HTMLResponse:
         "request": request,
         "user": _current_user(request),
         "asset_v": _asset_version(),
+        "sms_ext_version": _sms_ext_version(),
+        "sms_ext": _sms_ext_config(),
         **context,
     })
     return HTMLResponse(html)
@@ -1022,16 +1024,56 @@ def _dm_message(brand_name: str, customer: dict, brand_avg: float, products: lis
     return _apply_ad_compliance(body, customer.get("customer_code") or "")
 
 
+import re as _re_ad
+
+_AD_PREFIX = "[광고]"
+_AD_PREFIX_RE = _re_ad.compile(r"^\s*(?:[\[\(（【]\s*광\s*고\s*[\]\)）】]\s*)+")
+_OPTOUT_LINE_RE = _re_ad.compile(r"수\s*신\s*거\s*부|/portal/optout|/portal/o/")
+
+
+def _strip_ad_compliance(message: str) -> str:
+    """메시지에서 [광고] 접두어와 수신거부 안내 줄을 모두 제거해 '본문'만 남긴다.
+    (사용자가 임의로 수정·일부 삭제한 [광고]/수신거부 문구도 전부 걷어내고 서버가 정규 문구로 다시 붙이기 위함)"""
+    msg = str(message or "").replace("\r\n", "\n").replace("\r", "\n")
+    msg = _AD_PREFIX_RE.sub("", msg, count=1)
+    lines = [ln for ln in msg.split("\n") if not _OPTOUT_LINE_RE.search(ln)]
+    return "\n".join(lines).strip()
+
+
 def _apply_ad_compliance(message: str, customer_code: str) -> str:
-    """정보통신망법 준수: 메시지 앞에 [광고] 표시, 뒤에 무료수신거부 링크 안내를 강제로 부여한다.
-    이미 접두어/링크가 포함돼 있으면 중복 추가하지 않는다(클라이언트 재구성 메시지도 안전)."""
-    msg = message or ""
-    if not msg.lstrip().startswith("[광고]"):
-        msg = f"[광고] {msg}"
-    if "무료수신거부" not in msg and "/portal/optout" not in msg and "/portal/o/" not in msg:
-        link = _optout_link(customer_code) if customer_code else f"{_PUBLIC_BASE_URL}/portal/optout"
-        msg = f"{msg}\n\n무료수신거부 : {link}"
-    return msg
+    """정보통신망법 준수: 메시지 앞 [광고] 표시 + 맨 끝 무료수신거부 링크를 '항상' 정규 형식으로 부여한다.
+
+    기존에는 '무료수신거부' 글자만 남아 있으면 URL이 지워져도 통과되는 허점이 있었으므로,
+    사용자 입력에 들어있는 [광고]/수신거부 문구는 모두 제거한 뒤 해당 고객의 정확한 수신거부 링크로
+    다시 조립한다. 멱등(idempotent)이라 여러 번 적용해도 결과가 같다."""
+    body = _strip_ad_compliance(message)
+    link = _optout_link(customer_code) if customer_code else f"{_PUBLIC_BASE_URL}/portal/optout"
+    return f"{_AD_PREFIX} {body}\n\n무료수신거부 : {link}"
+
+
+def _dm_block_reason(customer_code: str, phone: str, scheduled_at: str) -> str:
+    """DM 발송 차단 사유 (수신거부 고객 / 발송가능시간 외). 없으면 빈 문자열."""
+    try:
+        if portal_db.is_customer_optout(customer_code, phone):
+            return "수신거부 등록 고객입니다. DM을 발송할 수 없습니다."
+    except Exception:
+        logger.exception("[DM] 수신거부 확인 실패: customer_code=%s", customer_code)
+    import datetime as _dt_win
+    try:
+        if scheduled_at:
+            # 예약시각은 사용자가 화면에서 직접 입력한 KST 벽시계 시각(naive)이므로 그대로 사용
+            _check_dt = _dt_win.datetime.strptime(scheduled_at[:16], "%Y-%m-%d %H:%M")
+        else:
+            # Azure App Service(Linux) 컨테이너는 OS 시간대가 UTC이므로 KST 기준으로 판정
+            _check_dt = _dt_win.datetime.now(_KST)
+        if not _is_within_send_window(_check_dt):
+            return (
+                f"발송가능시간(오전 {_DM_SEND_HOUR_START}시~오후 {_DM_SEND_HOUR_END - 12}시)이 아닙니다. "
+                + ("예약 시각을 해당 시간대로 지정해주세요." if scheduled_at else "발송가능시간 내에 다시 시도해주세요.")
+            )
+    except Exception:
+        logger.exception("[DM] 발송시간 검증 실패: scheduled_at=%s", scheduled_at)
+    return ""
 
 
 def _json_safe(value):
@@ -2390,12 +2432,14 @@ def _enrich_action_targets(report: dict, brand_name: str) -> None:
                              팝업의 수신번호 기본값. 가맹점별로 매번 조회하지 않고 화면에 표시되는
                              전체 가맹점코드에 대해 1회 배치 조회한다(팝업 오픈 시 실시간 조회가
                              느리거나 응답이 없는 문제를 피하기 위함).
-    - report['opportunity_effect_m'] : 제안 대상(is_target=True) 가맹점들의 opportunity_sales_m 합계
-                             (백만원, 정수) — report['proposal_possible_sales_m'](타겟매출액 합계)와
-                             나란히 요약바에 함께 표시하는 용도."""
+    - report['opportunity_effect_m'] : 브랜드 내 **전체 가맹점**(제안 대상 여부 무관) opportunity_sales_m 합계
+                             (백만원, 정수) — 기회매출액은 범용 구성비가 평균 이상인 가맹점에도 존재하므로
+                             전체 가맹점 기준으로 집계(영업사원 목표 산정 기준과 동일).
+    - report['opportunity_effect_target_m'] : 그중 제안 대상(is_target=True) 가맹점 합계(참고용)."""
     customers = report.get("customers") or []
     if not customers:
         report["opportunity_effect_m"] = 0
+        report["opportunity_effect_target_m"] = 0
         return
     selected_ym = report.get("selected_ym") or ""
     months = report.get("period_months") or []
@@ -2407,6 +2451,7 @@ def _enrich_action_targets(report: dict, brand_name: str) -> None:
             c["phone"] = ""
             c["is_optout"] = False
         report["opportunity_effect_m"] = 0
+        report["opportunity_effect_target_m"] = 0
         return
     import main
     bcode = str((report.get("brand") or {}).get("brand_code") or "")
@@ -2553,6 +2598,7 @@ def _enrich_action_targets(report: dict, brand_name: str) -> None:
             phone_map[str(r.get("stripped_code") or "")] = mobile or phone or ""
 
     opportunity_effect_raw = 0.0
+    opportunity_effect_target_raw = 0.0
     for c in customers:
         code = str(c.get("customer_code") or "")
         c["generic_gp_pct"] = gp_map.get(code, 0)
@@ -2569,12 +2615,13 @@ def _enrich_action_targets(report: dict, brand_name: str) -> None:
             c["is_optout"] = portal_db.is_customer_optout(code, c["phone"])
         except Exception:
             c["is_optout"] = False
-        # 브랜드 전체 기회매출 효과 합계는 report['proposal_possible_sales_m'](타겟매출 효과)와
-        # 동일하게 "제안 대상"(is_target=True) 가맹점만 스코프로 집계 — 두 지표를 같은 모집단
-        # 위에서 비교할 수 있게 하기 위함.
+        # 기회매출액은 제안 대상이 아닌(범용 구성비 평균 이상) 가맹점에도 존재하므로 브랜드 합계는
+        # 전체 가맹점 기준으로 집계한다. 제안 대상 합계는 참고값으로 별도 보관.
+        opportunity_effect_raw += total_expected_raw
         if c.get("is_target"):
-            opportunity_effect_raw += total_expected_raw
+            opportunity_effect_target_raw += total_expected_raw
     report["opportunity_effect_m"] = _money_m(opportunity_effect_raw)
+    report["opportunity_effect_target_m"] = _money_m(opportunity_effect_target_raw)
 
 
 @router.get("/brand-report/action", response_class=HTMLResponse)
@@ -3348,6 +3395,217 @@ async def update_my_phone(request: Request, body: _MyPhonePayload):
     return JSONResponse({"ok": True, "phone": formatted})
 
 
+class _DmPreparePayload(BaseModel):
+    customer_code: str
+    dm_message: str = ""
+    dm_phone: str = ""
+    dm_scheduled_at: str = ""
+
+
+@router.post("/dm-prepare")
+async def dm_prepare(request: Request, body: _DmPreparePayload):
+    """DM 실제 발송 '직전'에 호출 — 차단 사유(수신거부/발송시간)를 먼저 검증하고,
+    [광고] 표시와 해당 고객의 수신거부 링크가 붙은 '최종 발송 문구'를 서버가 확정해 돌려준다.
+    브라우저 확장(SMS 발송 브릿지)은 반드시 이 응답의 message 를 그대로 발송해야 한다."""
+    user = _require_user(request)
+    if user.get("role") == "readonly_all":
+        return JSONResponse({"ok": False, "error": "조회 전용 계정은 DM 발송이 불가합니다."}, status_code=403)
+    if not body.customer_code:
+        return JSONResponse({"ok": False, "error": "고객코드가 없습니다."}, status_code=400)
+    reason = _dm_block_reason(body.customer_code, body.dm_phone, body.dm_scheduled_at)
+    if reason:
+        return JSONResponse({"ok": False, "error": reason})
+    if not _strip_ad_compliance(body.dm_message):
+        return JSONResponse({"ok": False, "error": "발송할 메시지 내용이 없습니다."})
+    message = _apply_ad_compliance(body.dm_message, body.customer_code)
+    return JSONResponse({
+        "ok": True,
+        "message": message,
+        "optout_link": _optout_link(body.customer_code),
+        "msg_type": "2" if len(message) > 80 else "1",
+    })
+
+
+# ── SMS 발송 브릿지(브라우저 확장) 배포 ─────────────────────────────────────
+# 배포(Azure)에는 api/ 폴더만 올라가므로 GitHub Actions에서 browser-extension-sms-bridge 를
+# api/sms_bridge_ext 로 복사해 둔다. 로컬 개발 환경은 저장소 루트의 원본 폴더를 그대로 사용.
+_SMS_EXT_DIR_CANDIDATES = (
+    Path(__file__).parent / "sms_bridge_ext",
+    Path(__file__).parent.parent / "browser-extension-sms-bridge",
+)
+_SMS_EXT_FILES = ("manifest.json", "background.js", "README.md")
+
+
+def _sms_ext_dir() -> Path | None:
+    for d in _SMS_EXT_DIR_CANDIDATES:
+        if (d / "manifest.json").is_file():
+            return d
+    return None
+
+
+def _sms_ext_version() -> str:
+    d = _sms_ext_dir()
+    if not d:
+        return ""
+    try:
+        return str(json.loads((d / "manifest.json").read_text(encoding="utf-8")).get("version") or "")
+    except Exception:
+        return ""
+
+
+# 확장 ID — 설치 경로마다 ID가 다르다.
+#  · 개발자 모드(ZIP) 설치: manifest.json 의 key 로 고정된 ID
+#  · Chrome 웹 스토어 / Edge 추가 기능 스토어: 스토어가 최초 업로드 시 발급하는 ID (key 필드 업로드 불가)
+# 스토어 등록 후 App Service 환경변수에 ID만 넣으면 포털이 자동으로 '원클릭 설치' 버튼을 띄운다.
+_SMS_EXT_DEV_ID = "bndgknhcmfakobpppgndlpdloalmkbne"
+
+
+def _sms_ext_config() -> dict:
+    cws_id = os.getenv("SMS_EXT_CWS_ID", "").strip()     # Chrome 웹 스토어 ID (Chrome + Edge 공용)
+    edge_id = os.getenv("SMS_EXT_EDGE_ID", "").strip()   # Edge 추가 기능 스토어 ID (선택)
+    ids: list[str] = []
+    for i in (cws_id, edge_id, _SMS_EXT_DEV_ID):
+        if i and i not in ids:
+            ids.append(i)
+    version = _sms_ext_version()
+    return {
+        "ids": ids,
+        "version": version,
+        # 스토어 심사·자동업데이트 반영 전에는 저장소 버전보다 낮을 수 있으므로 최소 요구버전을 별도로 지정 가능
+        "min_version": os.getenv("SMS_EXT_MIN_VERSION", "").strip() or version,
+        "cws_url": f"https://chromewebstore.google.com/detail/{cws_id}" if cws_id else "",
+        "edge_url": f"https://microsoftedge.microsoft.com/addons/detail/{edge_id}" if edge_id else "",
+    }
+
+
+@router.get("/sms-extension/privacy", response_class=HTMLResponse)
+async def sms_extension_privacy():
+    """스토어 등록용 개인정보처리방침 (로그인 불필요 — 스토어 심사자가 접근)."""
+    return HTMLResponse("""<!doctype html><html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>SMS 발송 브릿지 개인정보처리방침</title>
+<style>body{font-family:system-ui,'Malgun Gothic',sans-serif;max-width:760px;margin:40px auto;padding:0 20px;line-height:1.75;color:#1f2937}
+h1{font-size:1.4rem}h2{font-size:1.05rem;margin-top:1.6rem}</style></head><body>
+<h1>동원홈푸드 SMS 발송 브릿지 — 개인정보처리방침</h1>
+<p>본 확장 프로그램은 동원홈푸드 임직원 전용 업무 도구로, 사내 세일즈 액션 플랫폼에서 사용자가 직접 요청한 문자(SMS/LMS)를
+사용자 본인의 사내 Direct(direct.dongwon.com) 로그인 세션으로 발송하는 기능만 수행합니다.</p>
+<h2>1. 처리하는 정보</h2>
+<p>사용자가 발송 버튼을 누를 때 포털이 전달하는 수신번호, 회신번호, 문자 내용, 예약시각.</p>
+<h2>2. 이용 목적 및 전송 대상</h2>
+<p>위 정보는 오직 사내 문자 발송 시스템(direct.dongwon.com)으로 발송 요청을 전달하는 데에만 사용됩니다.
+제3자에게 판매·제공하지 않으며, 광고·분석 목적으로 사용하지 않습니다.</p>
+<h2>3. 저장</h2>
+<p>확장 프로그램은 위 정보와 브라우저 쿠키를 별도로 저장하거나 외부로 전송하지 않습니다.
+발송 이력은 사내 포털 서버에 업무 기록으로만 보관됩니다.</p>
+<h2>4. 문의</h2>
+<p>동원홈푸드 외식사업부 세일즈 액션 플랫폼 담당</p>
+</body></html>""")
+
+
+def _sms_ext_setup_bat(browser: str) -> bytes:
+    """압축 해제 후 더블클릭하는 설치 도우미.
+    - 확장 파일을 사용자 전용 고정 경로(%LOCALAPPDATA%\\DWHF\\SmsBridge)로 복사 (다운로드 폴더 정리로 지워지는 것 방지)
+    - 그 경로를 클립보드에 복사 (폴더 선택 창에서 Ctrl+V 한 번으로 지정)
+    - 브라우저의 확장 관리 페이지를 바로 열어준다
+    PowerShell/인코딩 명령 없이 xcopy·clip·start 만 사용(보안 솔루션 오탐 방지). 한국어 Windows 콘솔(cp949) 기준."""
+    if browser == "edge":
+        open_cmd = 'start "" msedge "edge://extensions/"'
+        dev_pos = "왼쪽 메뉴 아래"
+        load_btn = "'압축 풀기된 항목 로드'"
+    else:
+        open_cmd = 'start "" chrome "chrome://extensions/"'
+        dev_pos = "오른쪽 위"
+        load_btn = "'압축해제된 확장 프로그램을 로드합니다'"
+    lines = [
+        "@echo off",
+        "setlocal",
+        "title 동원홈푸드 SMS 발송 브릿지 설치",
+        'set "SRC=%~dp0sms-bridge"',
+        'set "DEST=%LOCALAPPDATA%\\DWHF\\SmsBridge"',
+        'if not exist "%SRC%\\manifest.json" (',
+        "  echo.",
+        "  echo [안내] 압축을 먼저 풀어주세요.",
+        "  echo   다운로드한 ZIP 파일에서 마우스 오른쪽 클릭 - '모두 압축 풀기' 후,",
+        "  echo   풀린 폴더 안의 SETUP.bat 을 다시 실행해 주세요.",
+        "  echo.",
+        "  pause",
+        "  exit /b 1",
+        ")",
+        'if not exist "%DEST%" mkdir "%DEST%"',
+        'xcopy "%SRC%\\*" "%DEST%\\" /E /I /Y /Q >nul',
+        "if errorlevel 1 (",
+        "  echo [오류] 파일 복사에 실패했습니다. 관리자에게 문의해 주세요.",
+        "  pause",
+        "  exit /b 1",
+        ")",
+        '<nul set /p "=%DEST%" | clip',
+        open_cmd,
+        "echo.",
+        "echo ==============================================================",
+        "echo   SMS 발송 브릿지 파일 준비 완료",
+        "echo   설치 경로: %DEST%",
+        "echo   (이 경로가 클립보드에 복사되었습니다)",
+        "echo ==============================================================",
+        "echo.",
+        "echo   방금 열린 브라우저 '확장 프로그램' 화면에서",
+        f"echo   1) {dev_pos} '개발자 모드' 스위치를 켭니다.",
+        f"echo   2) {load_btn} 버튼을 누릅니다.",
+        "echo   3) 폴더 선택 창 위쪽 주소창에 Ctrl+V 후 Enter, [폴더 선택] 클릭",
+        "echo   4) 포털 화면으로 돌아가 [설치 확인] 버튼을 누르면 끝!",
+        "echo.",
+        "echo   * 이미 설치된 경우(업데이트): 확장 카드의 새로고침(동그란 화살표) 버튼만 누르면 됩니다.",
+        "echo.",
+        "pause",
+        "",
+    ]
+    return "\r\n".join(lines).encode("cp949", errors="replace")
+
+
+@router.get("/sms-extension/download")
+async def sms_extension_download(request: Request, browser: str = "chrome"):
+    """SMS 발송 브릿지 설치 패키지(ZIP) — sms-bridge/ 확장 폴더 + SETUP.bat(설치 도우미) + 설치방법.txt"""
+    import io
+    import zipfile
+    from fastapi.responses import Response
+
+    _require_user(request)
+    ext_dir = _sms_ext_dir()
+    if not ext_dir:
+        raise HTTPException(status_code=404, detail="확장 프로그램 파일을 찾을 수 없습니다. 관리자에게 문의하세요.")
+    browser = "edge" if str(browser).lower() == "edge" else "chrome"
+    version = _sms_ext_version() or "0"
+    page = "edge://extensions" if browser == "edge" else "chrome://extensions"
+    howto = (
+        "동원홈푸드 SMS 발송 브릿지 설치 방법\r\n"
+        "========================================\r\n\r\n"
+        "[빠른 설치]\r\n"
+        "1. 이 폴더의 SETUP.bat 을 더블클릭합니다.\r\n"
+        "   (Windows 보호 창이 뜨면 '추가 정보' > '실행')\r\n"
+        "2. 자동으로 열린 확장 프로그램 화면에서 '개발자 모드'를 켭니다.\r\n"
+        "3. '압축해제된 확장 프로그램 로드'(Edge: '압축 풀기된 항목 로드') 클릭\r\n"
+        "4. 폴더 선택 창 주소창에 Ctrl+V > Enter > [폴더 선택]\r\n"
+        "5. 포털로 돌아가 [설치 확인] 클릭\r\n\r\n"
+        "[SETUP.bat 실행이 막힌 경우]\r\n"
+        f"1. 브라우저 주소창에 {page} 입력\r\n"
+        "2. '개발자 모드' 켜기 > '압축해제된 확장 프로그램 로드'\r\n"
+        "3. 이 폴더 안의 sms-bridge 폴더를 선택\r\n"
+        "   ※ 선택한 폴더를 삭제하면 확장이 동작하지 않으니 지우지 마세요.\r\n"
+    )
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for name in _SMS_EXT_FILES:
+            f = ext_dir / name
+            if f.is_file():
+                zf.write(f, f"sms-bridge/{name}")
+        zf.writestr("SETUP.bat", _sms_ext_setup_bat(browser))
+        zf.writestr("README.txt", "\ufeff" + howto)  # BOM: 메모장에서 한글 깨짐 방지
+    fname = f"DWHF_SMS_Bridge_v{version}.zip"
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"', "Cache-Control": "no-store"},
+    )
+
+
 class _DmSendPayload(BaseModel):
     customer_code: str
     customer_name: str = ""
@@ -3414,33 +3672,19 @@ async def dm_send_with_price(request: Request, body: _DmSendPayload):
     sms_result: dict = {}
     _block_reason = ""
     if dm_attempted:
-        # (1) 수신거부 고객 여부 — 고객코드/전화번호 중 하나라도 활성 수신거부 목록에 있으면 차단
-        try:
-            if portal_db.is_customer_optout(body.customer_code, body.dm_phone):
-                _block_reason = "수신거부 등록 고객입니다. DM을 발송할 수 없습니다."
-        except Exception:
-            logger.exception("[DM] 수신거부 확인 실패: customer_code=%s", body.customer_code)
-        # (2) 발송가능시간(08:00~20:00, KST) — 즉시발송은 현재시각, 예약발송은 예약시각 기준
-        if not _block_reason:
-            import datetime as _dt_win
-            try:
-                if body.dm_scheduled_at:
-                    # 예약시각은 사용자가 화면에서 직접 입력한 KST 벽시계 시각(naive)이므로 그대로 사용
-                    _check_dt = _dt_win.datetime.strptime(body.dm_scheduled_at[:16], "%Y-%m-%d %H:%M")
-                else:
-                    # Azure App Service(Linux) 컨테이너는 OS 시간대가 UTC이므로,
-                    # naive datetime.now()를 그대로 쓰면 KST 기준 08~20시 판정이 어긋난다.
-                    _check_dt = _dt_win.datetime.now(_KST)
-                if not _is_within_send_window(_check_dt):
-                    _block_reason = (
-                        f"발송가능시간(오전 {_DM_SEND_HOUR_START}시~오후 {_DM_SEND_HOUR_END - 12}시)이 아닙니다. "
-                        + ("예약 시각을 해당 시간대로 지정해주세요." if body.dm_scheduled_at else "발송가능시간 내에 다시 시도해주세요.")
-                    )
-            except Exception:
-                logger.exception("[DM] 발송시간 검증 실패: scheduled_at=%s", body.dm_scheduled_at)
-        # (3) [광고]/수신거부 안내 누락 시 서버가 강제 보정 (클라이언트 우회 방지)
+        # (1) 수신거부 고객 여부 / (2) 발송가능시간(08:00~20:00, KST) 검증
+        _block_reason = _dm_block_reason(body.customer_code, body.dm_phone, body.dm_scheduled_at)
+        # (3) [광고]/수신거부 안내를 서버가 항상 정규 형식으로 재조립 (클라이언트 수정·삭제 무력화)
         if not _block_reason and body.dm_message:
-            body.dm_message = _apply_ad_compliance(body.dm_message, body.customer_code)
+            _canonical = _apply_ad_compliance(body.dm_message, body.customer_code)
+            if body.client_sms_result is not None and _canonical != body.dm_message:
+                # 확장 프로그램은 클라이언트가 넘긴 문구를 그대로 발송하므로, 정규 문구와 다르면
+                # (= /portal/dm-prepare 를 거치지 않았거나 변조된 경우) 감사 로그에 표시해 둔다.
+                logger.warning("[DM] 확장 발송 메시지가 컴플라이언스 정규 문구와 다름: customer_code=%s emp=%s",
+                               body.customer_code, emp)
+                sap_result["compliance_mismatch"] = True
+                sap_result["client_message"] = body.dm_message
+            body.dm_message = _canonical
 
     if _block_reason:
         sms_result = {"success": False, "status_code": None, "message": _block_reason}

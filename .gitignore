@@ -6,6 +6,11 @@
 *.log
 .DS_Store
 
+# CI에서 browser-extension-sms-bridge 를 복사해 만드는 배포용 사본
+api/sms_bridge_ext/
+# 스토어 업로드용 확장 패키지 (scripts/build_sms_ext_store_package.py 산출물)
+dist/sms-bridge-store-*
+
 # chatbot user data (personal info - not tracked)
 api/_registered_users.json
 api/_admin_whitelist.json

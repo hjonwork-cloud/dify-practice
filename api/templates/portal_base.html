@@ -179,6 +179,9 @@
     <header class="portal-topbar">
       <button class="sb-topbar-toggle" id="sbToggleBtn" onclick="sbToggle()" title="메뉴 접기/펼치기">☰</button>
       <div><b>Sales Action Platform</b><small>범용/전용 구성비 기반 제안 솔루션</small></div>
+      {% if user and user.role != 'readonly_all' and sms_ext_version %}
+      <button type="button" class="sms-ext-badge" id="smsExtBadge" hidden onclick="window.DWHF_SMS_EXT && window.DWHF_SMS_EXT.open()">📲 SMS 브릿지 확인 중…</button>
+      {% endif %}
       <form action="/portal/logout" method="post"><button class="portal-logout" type="submit">로그아웃</button></form>
     </header>
     <section class="portal-content">{% block content %}{% endblock %}</section>
@@ -231,6 +234,322 @@ window.PORTAL_USER_PHONE = {{ (user.phone or '') | tojson }};
   if (!window.PORTAL_USER_PHONE && (location.pathname === '/portal' || location.pathname === '/portal/')) {
     setTimeout(openModal, 500);
   }
+})();
+</script>
+{% endif %}
+{% if user and user.role != 'readonly_all' and sms_ext_version %}
+<!-- ── SMS 발송 브릿지(브라우저 확장) 설치 안내 팝업: 로그인 시 미설치/구버전이면 자동 표시 ── -->
+<style>
+.sms-ext-badge{border:1px solid var(--portal-line,#e4e9ef);background:#fff;border-radius:999px;padding:8px 13px;font:inherit;font-size:12px;font-weight:800;cursor:pointer;white-space:nowrap;}
+.sms-ext-badge.ok{color:#047857;border-color:#a7f3d0;background:#ecfdf5;}
+.sms-ext-badge.warn{color:#b45309;border-color:#fcd34d;background:#fffbeb;animation:smsExtPulse 2s infinite;}
+@keyframes smsExtPulse{0%,100%{box-shadow:0 0 0 0 rgba(245,158,11,.35);}50%{box-shadow:0 0 0 6px rgba(245,158,11,0);}}
+.sms-ext-bg{display:none;position:fixed;inset:0;background:rgba(7,11,16,.6);z-index:10000;align-items:center;justify-content:center;padding:1rem;}
+.sms-ext-bg.open{display:flex;}
+.sms-ext-bg [hidden]{display:none!important;}
+.sms-ext-modal{background:#fff;border-radius:20px;max-width:560px;width:100%;max-height:92vh;overflow-y:auto;padding:1.6rem 1.8rem 1.3rem;box-shadow:0 28px 80px rgba(0,0,0,.32);position:relative;}
+.sms-ext-close{position:absolute;top:.7rem;right:.9rem;border:0;background:none;font-size:1.4rem;cursor:pointer;color:#9ca3af;line-height:1;}
+.sms-ext-close:hover{color:#111;}
+.sms-ext-head{display:flex;gap:.8rem;align-items:center;margin-bottom:.6rem;}
+.sms-ext-head .ico{width:46px;height:46px;border-radius:14px;display:grid;place-items:center;font-size:1.5rem;background:linear-gradient(135deg,#e0f2fe,#ccfbf1);flex-shrink:0;}
+.sms-ext-head h3{margin:0;font-size:1.08rem;}
+.sms-ext-head p{margin:.2rem 0 0;font-size:.8rem;font-weight:700;}
+.sms-ext-status.missing{color:#b91c1c;} .sms-ext-status.outdated{color:#b45309;} .sms-ext-status.unsupported{color:#6b7280;}
+.sms-ext-why{font-size:.83rem;color:#4b5563;line-height:1.6;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:.65rem .8rem;margin:.4rem 0 .9rem;}
+.sms-ext-steps{list-style:none;counter-reset:st;padding:0;margin:0;display:grid;gap:.55rem;}
+.sms-ext-steps li{counter-increment:st;display:grid;grid-template-columns:28px 1fr;gap:.6rem;align-items:start;font-size:.84rem;line-height:1.55;color:#1f2937;}
+.sms-ext-steps li::before{content:counter(st);width:26px;height:26px;border-radius:50%;background:#071015;color:#fff;font-weight:900;font-size:.78rem;display:grid;place-items:center;margin-top:1px;}
+.sms-ext-steps small{color:#6b7280;display:block;font-size:.74rem;margin-top:.1rem;}
+.sms-ext-steps kbd,.sms-ext-alt kbd{border:1px solid #cbd5e1;border-bottom-width:2px;border-radius:4px;padding:0 .3rem;font-size:.72rem;background:#f8fafc;font-family:inherit;}
+.sms-ext-steps code,.sms-ext-alt code{background:#f1f5f9;border-radius:4px;padding:0 .3rem;font-size:.78rem;}
+.sms-ext-dl{display:inline-flex;align-items:center;gap:.4rem;margin-top:.35rem;background:linear-gradient(135deg,#064f88,#0891b2);color:#fff!important;border-radius:999px;padding:.5rem 1.1rem;font-weight:800;font-size:.84rem;text-decoration:none;box-shadow:0 4px 14px rgba(8,145,178,.3);}
+.sms-ext-dl:hover{filter:brightness(1.08);}
+.sms-ext-alt{margin-top:.85rem;font-size:.78rem;color:#4b5563;line-height:1.65;}
+.sms-ext-alt summary{cursor:pointer;font-weight:700;color:#374151;}
+.sms-ext-mini{border:1px solid #cbd5e1;background:#fff;border-radius:6px;padding:.05rem .45rem;font-size:.72rem;font-weight:700;cursor:pointer;margin-left:.25rem;}
+.sms-ext-result{margin-top:.8rem;border-radius:10px;padding:.55rem .75rem;font-size:.82rem;font-weight:700;line-height:1.5;}
+.sms-ext-result.ok{background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;}
+.sms-ext-result.err{background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;}
+.sms-ext-foot{display:flex;align-items:center;gap:.5rem;margin-top:1.1rem;padding-top:.9rem;border-top:1px solid #e5e7eb;}
+.sms-ext-foot button{border:0;border-radius:999px;padding:.5rem 1rem;font-size:.82rem;font-weight:800;cursor:pointer;background:#f3f4f6;color:#374151;}
+.sms-ext-foot button.link{background:none;color:#9ca3af;font-weight:600;padding:.5rem .3rem;}
+.sms-ext-foot button.primary{background:#071015;color:#fff;}
+.sms-ext-foot button.primary:hover{background:var(--portal-coral,#18b9c7);}
+.sms-ext-toast{position:fixed;right:24px;bottom:24px;z-index:10001;background:#065f46;color:#fff;border-radius:12px;padding:.75rem 1rem;font-size:.85rem;font-weight:700;box-shadow:0 12px 30px rgba(0,0,0,.25);}
+.sms-ext-store{border:2px solid #0891b2;border-radius:16px;padding:1rem 1.1rem .8rem;background:linear-gradient(135deg,#f0fdff,#ecfeff);margin-bottom:.9rem;}
+.sms-ext-store-btn{display:flex;flex-direction:column;align-items:center;gap:.15rem;text-decoration:none;background:linear-gradient(135deg,#064f88,#0891b2);color:#fff!important;border-radius:14px;padding:.8rem 1rem;box-shadow:0 6px 18px rgba(8,145,178,.35);}
+.sms-ext-store-btn:hover{filter:brightness(1.08);}
+.sms-ext-store-btn .big{font-size:1.02rem;font-weight:900;}
+.sms-ext-store-btn .sub{font-size:.74rem;opacity:.9;}
+.sms-ext-store-steps{margin:.75rem 0 .3rem;padding-left:1.2rem;font-size:.82rem;line-height:1.7;color:#1f2937;}
+.sms-ext-store-steps b{color:#0e7490;}
+.sms-ext-store-note{font-size:.74rem;color:#475569;margin:.2rem 0 0;line-height:1.55;}
+.sms-ext-manual>summary{cursor:pointer;font-size:.84rem;font-weight:800;color:#374151;margin-bottom:.6rem;}
+.sms-ext-manual:not([open])>summary{color:#6b7280;font-weight:700;font-size:.8rem;margin-bottom:0;}
+</style>
+<div class="sms-ext-bg" id="smsExtModalBg">
+  <div class="sms-ext-modal" role="dialog" aria-labelledby="smsExtTitle">
+    <button type="button" class="sms-ext-close" data-sms-ext-close>&times;</button>
+    <div class="sms-ext-head">
+      <span class="ico">📲</span>
+      <div>
+        <h3 id="smsExtTitle">SMS 발송 브릿지 설치 안내</h3>
+        <p class="sms-ext-status" id="smsExtStatus"></p>
+      </div>
+    </div>
+    <div class="sms-ext-why">
+      DM 문자는 <b>내 Direct(그룹웨어) 로그인 세션</b>으로 발송됩니다.
+      브라우저 확장 프로그램 <b>'SMS 발송 브릿지'</b>가 없으면 발송이 실패하거나 지연될 수 있으니
+      <b>최초 1회만</b> 설치해 주세요. (약 1분 소요)
+    </div>
+    <div id="smsExtUnsupported" class="sms-ext-result err" hidden>
+      현재 브라우저에서는 설치할 수 없습니다. <b>Chrome</b> 또는 <b>Microsoft Edge</b>로 포털에 접속해 주세요.
+    </div>
+    <!-- 원클릭 설치 (스토어 등록 후 SMS_EXT_CWS_ID / SMS_EXT_EDGE_ID 환경변수가 있을 때만 표시) -->
+    <div class="sms-ext-store" id="smsExtStore" hidden>
+      <a class="sms-ext-store-btn" id="smsExtStoreBtn" href="#" target="_blank" rel="noopener">
+        <span class="big" id="smsExtStoreBtnLabel">🧩 원클릭 설치</span>
+        <span class="sub" id="smsExtStoreBtnSub"></span>
+      </a>
+      <ol class="sms-ext-store-steps" id="smsExtStoreSteps"></ol>
+      <p class="sms-ext-store-note">설치 후 이 화면으로 돌아오면 <b>자동으로 연결을 확인</b>합니다. 스토어 설치본은 새 버전이 <b>자동 업데이트</b>됩니다.</p>
+    </div>
+    <details class="sms-ext-manual" id="smsExtManual" open>
+    <summary id="smsExtManualSummary">설치 방법 (설치 파일)</summary>
+    <ol class="sms-ext-steps" id="smsExtSteps">
+      <li><div><b>설치 파일 받기</b><br>
+        <a class="sms-ext-dl" id="smsExtDlBtn" href="/portal/sms-extension/download?browser=chrome">📥 설치 파일 다운로드 (v{{ sms_ext_version }})</a></div></li>
+      <li><div><b>압축 풀고 <code>SETUP.bat</code> 더블클릭</b>
+        <small>받은 ZIP 우클릭 › '모두 압축 풀기' › 풀린 폴더의 SETUP.bat 실행 → 확장 관리 화면이 자동으로 열리고 설치 경로가 복사됩니다.
+        (파란 'Windows의 PC 보호' 창이 뜨면 '추가 정보' › '실행')</small></div></li>
+      <li><div><b>'개발자 모드' 스위치 켜기</b>
+        <small><span data-sms-br="chrome">확장 프로그램 화면 오른쪽 위</span><span data-sms-br="edge" hidden>확장 화면 왼쪽 메뉴 아래</span></small></div></li>
+      <li><div><b><span data-sms-br="chrome">'압축해제된 확장 프로그램을 로드합니다'</span><span data-sms-br="edge" hidden>'압축 풀기된 항목 로드'</span></b> 클릭
+        <small>폴더 선택 창 위쪽 주소창에 <kbd>Ctrl</kbd>+<kbd>V</kbd> › <kbd>Enter</kbd> › [폴더 선택]</small></div></li>
+      <li><div><b>아래 [✅ 설치 확인]</b>을 누르면 끝!
+        <small id="smsExtUpdateTip" hidden>업데이트인 경우: SETUP.bat 실행 후 확장 카드의 새로고침(↻) 버튼만 누르면 됩니다.
+        기존에 다른 폴더로 설치했다면 기존 항목을 '삭제'하고 4단계를 진행하세요.</small></div></li>
+    </ol>
+    <details class="sms-ext-alt" id="smsExtAlt">
+      <summary>SETUP.bat 실행이 막혀 있나요? (수동 설치)</summary>
+      ① 새 탭 주소창에 <code id="smsExtPageUrl">chrome://extensions</code>
+      <button type="button" class="sms-ext-mini" id="smsExtCopyBtn">주소 복사</button> 를 붙여넣고 이동<br>
+      ② '개발자 모드' 켜기 › 확장 로드 버튼 › 압축 푼 폴더 안의 <code>sms-bridge</code> 폴더 선택<br>
+      <span style="color:#b91c1c;">※ 선택한 폴더를 삭제하면 확장이 동작하지 않으니 '문서' 등 안전한 위치에 두세요.</span>
+    </details>
+    </details>
+    <div id="smsExtResult" class="sms-ext-result" hidden></div>
+    <div class="sms-ext-foot">
+      <button type="button" class="link" id="smsExtSkipToday">오늘 하루 보지 않기</button>
+      <span style="flex:1"></span>
+      <button type="button" data-sms-ext-close>나중에</button>
+      <button type="button" class="primary" id="smsExtVerifyBtn">✅ 설치 확인</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+  var CFG = {{ (sms_ext or {}) | tojson }};
+  var EXT_IDS = (CFG && CFG.ids && CFG.ids.length) ? CFG.ids : ['bndgknhcmfakobpppgndlpdloalmkbne'];
+  var LATEST = (CFG && CFG.min_version) || {{ sms_ext_version | tojson }};
+  var SKIP_KEY = 'smsExtSkipDate', PROMPTED_KEY = 'smsExtPrompted', VERIFY_KEY = 'smsExtVerify';
+  // 로그인 직후 1회 세팅되는 sb_fresh 쿠키 (아래 사이드바 스크립트가 지우기 전에 먼저 읽는다)
+  var isFreshLogin = document.cookie.indexOf('sb_fresh=1') !== -1;
+  var ua = navigator.userAgent || '';
+  var isEdge = /Edg\//.test(ua);
+  var isChromium = /Chrome\/|Edg\//.test(ua) && !/Firefox|FxiOS|OPR\//.test(ua);
+  var browser = isEdge ? 'edge' : 'chrome';
+  // 원클릭 설치 경로: Edge는 Edge 스토어 우선, 없으면 Chrome 웹 스토어(다른 스토어 허용 1회 추가)
+  var storeMode = !isChromium ? '' : isEdge ? (CFG.edge_url ? 'edge' : (CFG.cws_url ? 'edge-cws' : '')) : (CFG.cws_url ? 'chrome' : '');
+  var $ = function(id){ return document.getElementById(id); };
+  var lastState = null, activeId = null, awaitingStore = false;
+
+  function todayStr(){ var d = new Date(); return d.getFullYear() + '-' + (d.getMonth()+1) + '-' + d.getDate(); }
+  function cmpVer(a, b){
+    var pa = String(a||'0').split('.').map(Number), pb = String(b||'0').split('.').map(Number);
+    for (var i = 0; i < Math.max(pa.length, pb.length); i++) {
+      var x = pa[i] || 0, y = pb[i] || 0;
+      if (x !== y) return x < y ? -1 : 1;
+    }
+    return 0;
+  }
+  function hasRuntime(){ return !!(window.chrome && chrome.runtime && chrome.runtime.sendMessage); }
+  function pingOne(id, timeoutMs){
+    return new Promise(function(resolve){
+      if (!hasRuntime()) { resolve(null); return; }
+      var done = false;
+      var t = setTimeout(function(){ if (!done) { done = true; resolve(null); } }, timeoutMs || 2500);
+      try {
+        chrome.runtime.sendMessage(id, { type: 'ping' }, function(r){
+          if (done) return; done = true; clearTimeout(t);
+          if (chrome.runtime.lastError || !r || !r.ok) resolve(null); else { r.id = id; resolve(r); }
+        });
+      } catch (e) { done = true; clearTimeout(t); resolve(null); }
+    });
+  }
+  /** 등록된 모든 확장 ID(스토어본/개발자모드본)에 동시에 ping → 응답한 것 중 최신 버전 채택 */
+  function ping(timeoutMs){
+    return Promise.all(EXT_IDS.map(function(id){ return pingOne(id, timeoutMs); })).then(function(rs){
+      var best = null;
+      rs.forEach(function(r){ if (r && (!best || cmpVer(best.version, r.version) < 0)) best = r; });
+      if (best) activeId = best.id;
+      return best;
+    });
+  }
+  function resolveId(){
+    return activeId ? Promise.resolve(activeId) : ping().then(function(r){ return r ? r.id : EXT_IDS[EXT_IDS.length - 1]; });
+  }
+  function check(){
+    if (!isChromium) return Promise.resolve({ state: 'unsupported' });
+    return ping().then(function(r){
+      if (!r) return { state: 'missing' };
+      if (LATEST && cmpVer(r.version, LATEST) < 0) return { state: 'outdated', version: r.version };
+      return { state: 'ok', version: r.version };
+    });
+  }
+  function updateBadge(res){
+    var b = $('smsExtBadge'); if (!b) return;
+    b.hidden = false;
+    b.className = 'sms-ext-badge ' + (res.state === 'ok' ? 'ok' : 'warn');
+    b.textContent = res.state === 'ok' ? ('📲 SMS 브릿지 연결됨 v' + res.version)
+                  : res.state === 'outdated' ? '⚠️ SMS 브릿지 업데이트 필요'
+                  : res.state === 'unsupported' ? '⚠️ SMS 브릿지: Chrome/Edge 필요'
+                  : '⚠️ SMS 브릿지 미설치';
+    b.title = res.state === 'ok' ? 'DM은 이 PC의 Direct 로그인 세션으로 발송됩니다.' : '클릭하면 설치 안내를 엽니다.';
+  }
+  function showResult(kind, html){
+    var el = $('smsExtResult'); if (!el) return;
+    el.className = 'sms-ext-result ' + kind; el.innerHTML = html; el.hidden = !html;
+  }
+  function openModal(res, resultHtml){
+    res = res || lastState || { state: 'missing' };
+    var st = $('smsExtStatus');
+    if (st) {
+      st.className = 'sms-ext-status ' + res.state;
+      st.textContent = res.state === 'outdated' ? ('설치된 버전 v' + res.version + ' → 최신 v' + LATEST + ' 업데이트가 필요합니다')
+                     : res.state === 'unsupported' ? '지원하지 않는 브라우저입니다'
+                     : res.state === 'ok' ? ('정상 연결됨 (v' + res.version + ')')
+                     : '이 PC에 아직 설치되지 않았습니다';
+    }
+    $('smsExtUnsupported').hidden = res.state !== 'unsupported';
+    $('smsExtStore').hidden = !storeMode || res.state === 'unsupported';
+    $('smsExtManual').hidden = res.state === 'unsupported';
+    $('smsExtUpdateTip').hidden = res.state !== 'outdated';
+    showResult(resultHtml ? 'err' : '', resultHtml || '');
+    $('smsExtModalBg').classList.add('open');
+    try { sessionStorage.setItem(PROMPTED_KEY, '1'); } catch (e) {}
+  }
+  function closeModal(){ $('smsExtModalBg').classList.remove('open'); }
+  function toast(msg){
+    var t = document.createElement('div'); t.className = 'sms-ext-toast'; t.textContent = msg;
+    document.body.appendChild(t); setTimeout(function(){ t.remove(); }, 4000);
+  }
+  // 다른 팝업(내 연락처 등록 등)이 떠 있으면 닫힌 뒤에 띄운다
+  function whenNoOtherModal(fn){
+    var tries = 0;
+    (function wait(){
+      var other = document.querySelector('.my-phone-modal-bg.open');
+      if (other && tries++ < 600) { setTimeout(wait, 500); return; }
+      fn();
+    })();
+  }
+
+  // 브라우저별 문구/링크
+  $('smsExtDlBtn').href = '/portal/sms-extension/download?browser=' + browser;
+  $('smsExtPageUrl').textContent = isEdge ? 'edge://extensions' : 'chrome://extensions';
+  document.querySelectorAll('[data-sms-br]').forEach(function(el){ el.hidden = el.getAttribute('data-sms-br') !== browser; });
+  if (storeMode) {
+    var STORE = {
+      'chrome':   { url: CFG.cws_url,  label: '🧩 Chrome 웹 스토어에서 원클릭 설치', sub: '클릭 2번 · 약 10초',
+                    steps: ['위 버튼 클릭 → 새 탭에서 <b>[Chrome에 추가]</b>', '확인 창에서 <b>[확장 프로그램 추가]</b>', '이 탭으로 돌아오면 끝!'] },
+      'edge':     { url: CFG.edge_url, label: '🧩 Edge 추가 기능 스토어에서 원클릭 설치', sub: '클릭 2번 · 약 10초',
+                    steps: ['위 버튼 클릭 → 새 탭에서 <b>[받기]</b>', '확인 창에서 <b>[확장 추가]</b>', '이 탭으로 돌아오면 끝!'] },
+      'edge-cws': { url: CFG.cws_url,  label: '🧩 웹 스토어에서 원클릭 설치 (Edge)', sub: '최초 1회만 클릭 3번 · 약 15초',
+                    steps: ['위 버튼 클릭 → 새 탭 상단 노란 배너의 <b>[다른 스토어의 확장 허용]</b> → <b>[허용]</b> <small>(처음 1회만)</small>',
+                            '<b>[Chrome에 추가]</b> → 확인 창에서 <b>[확장 추가]</b>', '이 탭으로 돌아오면 끝!'] }
+    }[storeMode];
+    $('smsExtStoreBtn').href = STORE.url;
+    $('smsExtStoreBtnLabel').textContent = STORE.label;
+    $('smsExtStoreBtnSub').textContent = STORE.sub;
+    $('smsExtStoreSteps').innerHTML = STORE.steps.map(function(s){ return '<li>' + s + '</li>'; }).join('');
+    // 스토어가 있으면 파일 설치는 접어서 '대체 수단'으로만 노출
+    $('smsExtManual').removeAttribute('open');
+    $('smsExtManualSummary').textContent = '스토어 접속이 막혀 있나요? 설치 파일로 설치하기';
+    $('smsExtStoreBtn').addEventListener('click', function(){
+      awaitingStore = true;
+      showResult('', '');
+      $('smsExtStoreBtnSub').textContent = '새 탭에서 추가한 뒤 이 탭으로 돌아오세요';
+    });
+    // 스토어 탭에서 설치하고 돌아오면 자동 확인 (설치 직후엔 페이지가 확장과 통신하려면 새로고침 필요)
+    var onBack = function(){
+      if (!awaitingStore || document.visibilityState !== 'visible') return;
+      awaitingStore = false;
+      check().then(function(res){
+        lastState = res; updateBadge(res);
+        if (res.state === 'ok') {
+          showResult('ok', '🎉 설치 완료! (v' + res.version + ') 이제 DM이 내 Direct 세션으로 발송됩니다.');
+          setTimeout(closeModal, 1800);
+        } else {
+          try { sessionStorage.setItem(VERIFY_KEY, '1'); } catch (e) {}
+          location.reload();
+        }
+      });
+    };
+    document.addEventListener('visibilitychange', onBack);
+    window.addEventListener('focus', onBack);
+  }
+  document.querySelectorAll('[data-sms-ext-close]').forEach(function(el){ el.addEventListener('click', closeModal); });
+  $('smsExtModalBg').addEventListener('click', function(e){ if (e.target === this) closeModal(); });
+  $('smsExtCopyBtn').addEventListener('click', function(){
+    var txt = $('smsExtPageUrl').textContent, btn = this;
+    (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(function(){
+      btn.textContent = '복사됨 ✓'; setTimeout(function(){ btn.textContent = '주소 복사'; }, 1800);
+    }).catch(function(){ prompt('아래 주소를 복사(Ctrl+C)하세요', txt); });
+  });
+  $('smsExtSkipToday').addEventListener('click', function(){
+    try { localStorage.setItem(SKIP_KEY, todayStr()); } catch (e) {}
+    closeModal();
+  });
+  $('smsExtVerifyBtn').addEventListener('click', function(){
+    var btn = this; btn.disabled = true; btn.textContent = '확인 중…';
+    check().then(function(res){
+      lastState = res; updateBadge(res);
+      btn.disabled = false; btn.textContent = '✅ 설치 확인';
+      if (res.state === 'ok') {
+        showResult('ok', '🎉 설치 완료! (v' + res.version + ') 이제 DM이 내 Direct 세션으로 발송됩니다.');
+        setTimeout(closeModal, 1800);
+      } else if (res.state === 'outdated') {
+        showResult('err', '아직 구버전(v' + res.version + ')입니다. 확장 관리 화면에서 SMS 발송 브릿지 카드의 새로고침(↻)을 누른 뒤 다시 확인해 주세요.');
+      } else if (res.state === 'missing') {
+        // 확장 설치 직후에는 페이지를 새로고침해야 확장과 통신할 수 있다 → 새로고침 후 자동 재확인
+        try { sessionStorage.setItem(VERIFY_KEY, '1'); } catch (e) {}
+        location.reload();
+      }
+    });
+  });
+
+  window.DWHF_SMS_EXT = { ids: EXT_IDS, latest: LATEST, ping: ping, resolveId: resolveId, check: check,
+                          open: function(){ openModal(lastState); } };
+
+  check().then(function(res){
+    lastState = res; updateBadge(res);
+    var verifying = false;
+    try { verifying = sessionStorage.getItem(VERIFY_KEY) === '1'; sessionStorage.removeItem(VERIFY_KEY); } catch (e) {}
+    if (verifying) {
+      if (res.state === 'ok') { toast('🎉 SMS 발송 브릿지 설치 확인 완료 (v' + res.version + ')'); return; }
+      openModal(res, storeMode
+        ? '아직 설치가 확인되지 않았습니다. 스토어에서 [추가]까지 완료했는지 확인해 주세요.'
+        : '아직 설치가 확인되지 않았습니다. 3~4단계(개발자 모드 › 확장 로드)를 완료했는지 확인해 주세요.');
+      return;
+    }
+    if (res.state === 'ok') return;
+    var skipped = false, prompted = false;
+    try { skipped = localStorage.getItem(SKIP_KEY) === todayStr(); prompted = sessionStorage.getItem(PROMPTED_KEY) === '1'; } catch (e) {}
+    // 로그인 직후에는 항상, 그 외에는 브라우저 세션당 1회 표시 ('오늘 하루 보지 않기' 선택 시 당일 생략)
+    if (!skipped && (isFreshLogin || !prompted)) {
+      setTimeout(function(){ whenNoOtherModal(function(){ openModal(res); }); }, 900);
+    }
+  });
 })();
 </script>
 {% endif %}

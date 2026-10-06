@@ -32,6 +32,14 @@ jobs:
           python -m venv antenv
           source antenv/bin/activate
           pip install -r requirements.txt
+
+      # SMS 발송 브릿지(브라우저 확장) 설치 패키지를 포털에서 내려받을 수 있도록 api/ 안으로 복사
+      # (배포 아티팩트는 api/ 폴더만 포함 → /portal/sms-extension/download 가 이 폴더를 ZIP으로 제공)
+      - name: Bundle SMS bridge extension into api/
+        run: |
+          rm -rf api/sms_bridge_ext
+          mkdir -p api/sms_bridge_ext
+          cp browser-extension-sms-bridge/manifest.json browser-extension-sms-bridge/background.js browser-extension-sms-bridge/README.md api/sms_bridge_ext/
                 
       # By default, when you enable GitHub CI/CD integration through the Azure portal, the platform automatically sets the SCM_DO_BUILD_DURING_DEPLOYMENT application setting to true. This triggers the use of Oryx, a build engine that handles application compilation and dependency installation (e.g., pip install) directly on the platform during deployment. Hence, we exclude the antenv virtual environment directory from the deployment artifact to reduce the payload size. 
       - name: Upload artifact for deployment jobs

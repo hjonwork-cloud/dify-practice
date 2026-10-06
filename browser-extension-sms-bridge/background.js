@@ -579,6 +579,13 @@ async function callSendSms({ phone, message, callback, msgType, scheduledAt, sen
   return { success: true, status: resp.status, message: bodyText };
 }
 
+/** [광고] 접두어 + 맨 끝 무료수신거부 링크(포털 /portal/o/… 또는 /portal/optout?…) 포함 여부 */
+function isAdCompliant(text) {
+  const s = String(text || "").trim();
+  if (!s.startsWith("[광고]")) return false;
+  return /\n무료수신거부 : https?:\/\/\S+\/portal\/(?:o\/\S+|optout\S*)$/.test(s);
+}
+
 chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
   const type = message && message.type;
 
@@ -605,6 +612,12 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
   if (type === "send_sms") {
     const { phone, msg, callback, msgType, scheduledAt } = message;
     const messageText = message.message || msg; // 호출측 호환을 위해 msg/message 둘 다 허용
+    // 정보통신망법 준수 이중 안전장치: 포털 서버(/portal/dm-prepare)가 확정한 정규 문구
+    // ([광고]로 시작 + 맨 끝 '무료수신거부 : <수신거부 링크>')가 아니면 발송하지 않는다.
+    if (!isAdCompliant(messageText)) {
+      sendResponse({ ok: false, error: "[광고] 표시 또는 무료수신거부 링크가 누락되어 발송할 수 없습니다. 포털 화면을 새로고침 후 다시 시도해 주세요." });
+      return false;
+    }
     callSendSms({
       phone,
       message: messageText,
