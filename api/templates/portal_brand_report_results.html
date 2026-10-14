@@ -181,8 +181,8 @@
 <!-- 요약 배지 -->
 <div class="results-summary">
   <div class="rs-badge"><b>{{ summary.count }}</b><span>총 액션건수</span></div>
-  <div class="rs-badge green"><b>{{ '{:,}'.format(summary.total_sales_after_m) }}백만</b><span>누적 매출</span></div>
-  <div class="rs-badge blue"><b>{{ '{:,}'.format(summary.total_gp_after_m) }}백만</b><span>누적 GP</span></div>
+  <div class="rs-badge green"><b>{{ '{:,.2f}'.format(summary.total_sales_after_m) }}백만</b><span>누적 매출</span></div>
+  <div class="rs-badge blue"><b>{{ '{:,.2f}'.format(summary.total_gp_after_m) }}백만</b><span>누적 GP</span></div>
   <div class="rs-badge amber"><b>{{ summary.avg_gp_rate }}%</b><span>평균 GP율</span></div>
 </div>
 
@@ -240,8 +240,8 @@
               <button class="expand-btn" onclick="event.stopPropagation();toggleDetail({{ rid }})" title="발송 품목 보기">📌 상세</button>
             {% else %}<span style="color:#e5e7eb;">-</span>{% endif %}
           </td>
-          <td style="text-align:right;">{{ '{:,}'.format(r.sales_after_m | default(0)) }}</td>
-          <td style="text-align:right;">{{ '{:,}'.format(r.gp_after_m | default(0)) }}</td>
+          <td style="text-align:right;">{{ '{:,.2f}'.format(r.sales_after_m | default(0)) }}</td>
+          <td style="text-align:right;">{{ '{:,.2f}'.format(r.gp_after_m | default(0)) }}</td>
           <td style="text-align:right;">
             {% set gp = r.gp_rate_after | default(0) %}
             <span class="gp-chip {% if gp >= 20 %}up{% elif gp >= 10 %}mid{% else %}down{% endif %}">{{ gp }}%</span>

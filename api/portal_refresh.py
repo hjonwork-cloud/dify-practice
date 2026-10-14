@@ -1165,13 +1165,13 @@ def run_action_results_refresh() -> dict:
       -- 제안 품목(자재코드 일치) + 발송일 이후 매출만 집계
       ROUND(SUM(CASE WHEN a.dm_matnr_csv <> ''
                           AND ARRAY_CONTAINS(SPLIT(a.dm_matnr_csv, ','), TRIM(m.`자재`))
-                     THEN COALESCE(m.`매출액`, 0) ELSE 0 END) / 10000) AS sales_after_m,
+                     THEN COALESCE(m.`매출액`, 0) ELSE 0 END) / 10000.0, 2) AS sales_after_m,
       ROUND((SUM(CASE WHEN a.dm_matnr_csv <> ''
                            AND ARRAY_CONTAINS(SPLIT(a.dm_matnr_csv, ','), TRIM(m.`자재`))
                       THEN COALESCE(m.`매출액`, 0) ELSE 0 END)
            - SUM(CASE WHEN a.dm_matnr_csv <> ''
                            AND ARRAY_CONTAINS(SPLIT(a.dm_matnr_csv, ','), TRIM(m.`자재`))
-                      THEN COALESCE(m.`매출원가`, 0) ELSE 0 END)) / 10000) AS gp_after_m,
+                      THEN COALESCE(m.`매출원가`, 0) ELSE 0 END)) / 10000.0, 2) AS gp_after_m,
       CASE WHEN SUM(CASE WHEN a.dm_matnr_csv <> ''
                               AND ARRAY_CONTAINS(SPLIT(a.dm_matnr_csv, ','), TRIM(m.`자재`))
                          THEN COALESCE(m.`매출액`, 0) ELSE 0 END) = 0 THEN 0.0
@@ -1186,24 +1186,24 @@ def run_action_results_refresh() -> dict:
       ROUND(SUM(CASE WHEN a.dm_matnr_csv <> ''
                           AND ARRAY_CONTAINS(SPLIT(a.dm_matnr_csv, ','), TRIM(m.`자재`))
                           AND COALESCE(m.`자재그룹명`, '') <> 'FC전용상품'
-                     THEN COALESCE(m.`매출액`, 0) ELSE 0 END) / 10000) AS generic_sales_after_m,
+                     THEN COALESCE(m.`매출액`, 0) ELSE 0 END) / 10000.0, 2) AS generic_sales_after_m,
       -- KPI 운영기간(2026-10~12) 월별 범용상품 추가매출 — 담당자/관리자 KPI 성과 달성률 산식용.
       -- 전체 누적(generic_sales_after_m)과 달리 해당 월의 대금청구일 범위로만 한정 집계.
       ROUND(SUM(CASE WHEN a.dm_matnr_csv <> ''
                           AND ARRAY_CONTAINS(SPLIT(a.dm_matnr_csv, ','), TRIM(m.`자재`))
                           AND COALESCE(m.`자재그룹명`, '') <> 'FC전용상품'
                           AND m.`대금청구일` BETWEEN '20261001' AND '20261031'
-                     THEN COALESCE(m.`매출액`, 0) ELSE 0 END) / 10000) AS generic_sales_m10,
+                     THEN COALESCE(m.`매출액`, 0) ELSE 0 END) / 10000.0, 2) AS generic_sales_m10,
       ROUND(SUM(CASE WHEN a.dm_matnr_csv <> ''
                           AND ARRAY_CONTAINS(SPLIT(a.dm_matnr_csv, ','), TRIM(m.`자재`))
                           AND COALESCE(m.`자재그룹명`, '') <> 'FC전용상품'
                           AND m.`대금청구일` BETWEEN '20261101' AND '20261130'
-                     THEN COALESCE(m.`매출액`, 0) ELSE 0 END) / 10000) AS generic_sales_m11,
+                     THEN COALESCE(m.`매출액`, 0) ELSE 0 END) / 10000.0, 2) AS generic_sales_m11,
       ROUND(SUM(CASE WHEN a.dm_matnr_csv <> ''
                           AND ARRAY_CONTAINS(SPLIT(a.dm_matnr_csv, ','), TRIM(m.`자재`))
                           AND COALESCE(m.`자재그룹명`, '') <> 'FC전용상품'
                           AND m.`대금청구일` BETWEEN '20261201' AND '20261231'
-                     THEN COALESCE(m.`매출액`, 0) ELSE 0 END) / 10000) AS generic_sales_m12,
+                     THEN COALESCE(m.`매출액`, 0) ELSE 0 END) / 10000.0, 2) AS generic_sales_m12,
       -- 샘플출고: 제안 품목 중 매출액=0, 수량>0
       COALESCE(SUM(CASE WHEN a.dm_matnr_csv <> ''
                              AND ARRAY_CONTAINS(SPLIT(a.dm_matnr_csv, ','), TRIM(m.`자재`))
@@ -1275,13 +1275,13 @@ def read_action_results(emp_code: str, brand_code: str = "", action_ym: str = ""
                 "dm_count":              int(r.get("dm_count") or 0),
                 "price_count":           int(r.get("price_count") or 0),
                 "dm_matnr_csv":          str(r.get("dm_matnr_csv") or ""),
-                "sales_after_m":         int(r.get("sales_after_m") or 0),
-                "gp_after_m":            int(r.get("gp_after_m") or 0),
+                "sales_after_m":         float(r.get("sales_after_m") or 0),
+                "gp_after_m":            float(r.get("gp_after_m") or 0),
                 "gp_rate_after":         float(r.get("gp_rate_after") or 0),
-                "generic_sales_after_m": int(r.get("generic_sales_after_m") or 0),
-                "generic_sales_m10":     int(r.get("generic_sales_m10") or 0),
-                "generic_sales_m11":     int(r.get("generic_sales_m11") or 0),
-                "generic_sales_m12":     int(r.get("generic_sales_m12") or 0),
+                "generic_sales_after_m": float(r.get("generic_sales_after_m") or 0),
+                "generic_sales_m10":     float(r.get("generic_sales_m10") or 0),
+                "generic_sales_m11":     float(r.get("generic_sales_m11") or 0),
+                "generic_sales_m12":     float(r.get("generic_sales_m12") or 0),
                 "sample_qty":            int(r.get("sample_qty") or 0),
                 "sample_count":          int(r.get("sample_count") or 0),
                 "dm_product_qty":        int(r.get("dm_product_qty") or 0),
