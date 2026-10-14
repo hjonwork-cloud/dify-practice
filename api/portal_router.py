@@ -934,11 +934,27 @@ def _pick_brand(brand_name: str | None, emp_code: str = _DEFAULT_EMP_CODE) -> di
 
 # 추천상품에 포함되기 위한 최소 "타매장 사용률"(%) 기준치. 이 값 미만은 추천/기회매출액 계산에서 제외된다.
 ADOPTION_RATE_MIN = 30.0
+# 사용자가 "채택률 기준 낮추기" 버튼으로 선택할 수 있는 단계값(%). 특정 브랜드는 가맹점
+# 구성이 매우 다양(SKU가 세분화)해 기본 30% 기준으로는 추천 후보 상품이 아예 0개가 되는
+# 경우가 있어, 화면에서 사용자가 직접 기준을 단계적으로 낮춰볼 수 있게 한다.
+ADOPTION_RATE_MIN_STEPS = (30.0, 20.0, 10.0, 0.0)
+
+
+def _clamp_adoption_rate_min(value) -> float:
+    """요청으로 들어온 채택률 기준값을 허용된 단계값 중 가장 가까운 값으로 스냅한다.
+    값이 없거나 해석 불가하면 기본값(ADOPTION_RATE_MIN)을 반환한다."""
+    if value is None:
+        return ADOPTION_RATE_MIN
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return ADOPTION_RATE_MIN
+    return min(ADOPTION_RATE_MIN_STEPS, key=lambda s: abs(s - v))
 
 
 def _recommend_products(
     brand_name: str, customer_code: str, months: list[str], emp_code: str = _DEFAULT_EMP_CODE,
-    target_total_sales_m: float = 0.0,
+    target_total_sales_m: float = 0.0, adoption_rate_min: float = ADOPTION_RATE_MIN,
 ) -> list[dict]:
     """가맹점(customer_code)이 아직 쓰지 않는 범용상품 추천 목록.
 
@@ -946,7 +962,9 @@ def _recommend_products(
     (예상 기회매출액) 내림차순. 단순히 다른 가맹점 채택 수/GP율이 아니라,
     실제 채택 가맹점들의 (사용수량 ÷ 그 가맹점 전체매출) 평균 원단위 사용강도를
     이 가맹점의 전체매출 규모에 대입해 예상사용수량·예상기회매출을 추정한다.
-    타매장 사용률(adoption_rate)이 ADOPTION_RATE_MIN(%) 미만인 상품은 제외한다.
+    타매장 사용률(adoption_rate)이 adoption_rate_min(%, 기본 ADOPTION_RATE_MIN) 미만인
+    상품은 제외한다. (가맹점 구성이 다양한 일부 브랜드는 화면의 "채택률 기준 낮추기"
+    버튼을 통해 이 값을 낮춰 호출할 수 있다.)
     """
     import main
     target_total_sales_raw = float(target_total_sales_m or 0) * 10_000.0  # 백만원 → raw(100원 단위)
@@ -1024,7 +1042,7 @@ def _recommend_products(
         avg_unit_sales_raw = (sales / total_qty) if total_qty > 0 else 0
         expected_sales_m = _money_m2(expected_qty * avg_unit_sales_raw)
         adoption_rate = round(adopter_count / total_franchises * 100, 1) if total_franchises > 0 else 0.0
-        if total_franchises > 0 and adoption_rate < ADOPTION_RATE_MIN:
+        if total_franchises > 0 and adoption_rate < adoption_rate_min:
             continue  # 타매장 사용률 기준치 미만 상품은 추천에서 제외
         result.append({
             **r,
@@ -2414,7 +2432,7 @@ async def portal_admin_page(request: Request):
 
 
 @router.get("/target-detail")
-async def target_detail(request: Request, brand: str = "", customer_code: str = ""):
+async def target_detail(request: Request, brand: str = "", customer_code: str = "", adoption_min: float | None = None):
     user = _require_user(request)
     report = brand_report(brand or None, emp_code=user["emp_code"])
     if not report.get("brand"):
@@ -2424,8 +2442,10 @@ async def target_detail(request: Request, brand: str = "", customer_code: str = 
     if not customer:
         raise HTTPException(status_code=404, detail="customer_not_found")
     bname = str((report.get("brand") or {}).get("brand_name") or brand)
+    _adoption_min = _clamp_adoption_rate_min(adoption_min)
     products = _recommend_products(bname, code, report.get("period_months") or [], user["emp_code"],
-                                    target_total_sales_m=float(customer.get("sales_m") or 0))
+                                    target_total_sales_m=float(customer.get("sales_m") or 0),
+                                    adoption_rate_min=_adoption_min)
 
     # plant_code: 사전계산 테이블 우선, fallback 실시간
     plant_code = str(customer.get("plant_code") or "")
@@ -2448,14 +2468,15 @@ async def target_detail(request: Request, brand: str = "", customer_code: str = 
         "product_names": ", ".join(str(p.get("product_name") or p.get("product_code") or "") for p in products),
         "dm_message": _dm_message(bname, customer, float(report.get("brand_avg") or 0), products),
         "optout_link": _optout_link(code),
+        "adoption_rate_min": _adoption_min,
     }))
 
 
-def _enrich_action_targets(report: dict, brand_name: str) -> None:
+def _enrich_action_targets(report: dict, brand_name: str, adoption_rate_min: float = ADOPTION_RATE_MIN) -> None:
     """ACTION TARGETS 통합 화면 전용 보강: report['customers'] 각 항목(딕셔너리, 리스트 슬라이싱으로
     customer_page 등과 참조 공유됨)에 in-place 로 필드를 추가한다.
     - generic_gp_pct       : 가맹점별 범용상품 GP%(선택월 기준)
-    - reco_count           : 추천대상품목 개수(타매장 사용률 ADOPTION_RATE_MIN% 이상인 상품만 집계,
+    - reco_count           : 추천대상품목 개수(타매장 사용률 adoption_rate_min% 이상인 상품만 집계,
                              _recommend_products() 와 동일한 후보군 기준)
     - opportunity_sales_m  : 가맹점별 기회매출액 합계(백만원, 소수점 2자리) — 추천 후보 상품별
                              (사용강도 × 이 가맹점 매출규모 × 평균단가) 를 모두 합산한 값.
@@ -2468,7 +2489,11 @@ def _enrich_action_targets(report: dict, brand_name: str) -> None:
     - report['opportunity_effect_m'] : 브랜드 내 **전체 가맹점**(제안 대상 여부 무관) opportunity_sales_m 합계
                              (백만원, 정수) — 기회매출액은 범용 구성비가 평균 이상인 가맹점에도 존재하므로
                              전체 가맹점 기준으로 집계(영업사원 목표 산정 기준과 동일).
-    - report['opportunity_effect_target_m'] : 그중 제안 대상(is_target=True) 가맹점 합계(참고용)."""
+    - report['opportunity_effect_target_m'] : 그중 제안 대상(is_target=True) 가맹점 합계(참고용).
+
+    adoption_rate_min: 타매장 사용률(%) 하한선. 가맹점 구성이 다양해 SKU 단위로는 기본값(30%)을
+    넘는 상품이 전혀 없는 브랜드가 있어, 화면의 "채택률 기준 낮추기" 버튼으로 호출 시마다
+    낮춰서 재계산할 수 있도록 매개변수화했다."""
     customers = report.get("customers") or []
     if not customers:
         report["opportunity_effect_m"] = 0
@@ -2576,14 +2601,14 @@ def _enrich_action_targets(report: dict, brand_name: str) -> None:
     except Exception:
         product_agg_rows = []
 
-    # 타매장 사용률(%) >= ADOPTION_RATE_MIN 인 상품만 추천 후보 유니버스에 포함
+    # 타매장 사용률(%) >= adoption_rate_min 인 상품만 추천 후보 유니버스에 포함
     per_product_factor: dict = {}   # product_code -> qty_intensity * avg_unit_sales_raw
     universe_set: set = set()
     for r in product_agg_rows:
         pcode = str(r.get("product_code") or "")
         adopter_count = int(r.get("adopter_count") or 0)
         adoption_rate = round(adopter_count / total_franchises * 100, 1) if total_franchises > 0 else 0.0
-        if total_franchises > 0 and adoption_rate < ADOPTION_RATE_MIN:
+        if total_franchises > 0 and adoption_rate < adoption_rate_min:
             continue
         sales = float(r.get("sales") or 0)
         total_qty = float(r.get("total_qty") or 0)
@@ -2664,6 +2689,7 @@ async def brand_report_action_page(
     threshold: float | None = None,
     customer_page: int = 1,
     target_page: int = 1,
+    adoption_min: float | None = None,
 ):
     user = _require_user(request)
     emp_code = user["emp_code"]
@@ -2673,9 +2699,18 @@ async def brand_report_action_page(
         _action_emp = access_control.ADMIN_EMP_CODE
     report = brand_report(brand or None, emp_code=_action_emp,
                           threshold_pct=threshold, customer_page=customer_page, target_page=target_page)
+    # 타매장 사용률(채택률) 기준: 가맹점 구성이 다양한 브랜드는 SKU 단위로 기본값(30%)을 넘는
+    # 상품이 전혀 없어 추천/기회매출액이 항상 0이 될 수 있다. 화면의 "채택률 기준 낮추기" 버튼으로
+    # 30→20→10→0% 단계적으로 낮춰 재계산할 수 있게 한다.
+    _adoption_min = _clamp_adoption_rate_min(adoption_min)
+    report["adoption_rate_min"] = _adoption_min
+    report["adoption_rate_min_default"] = ADOPTION_RATE_MIN
+    _steps_idx = ADOPTION_RATE_MIN_STEPS.index(_adoption_min)
+    report["adoption_rate_min_next"] = ADOPTION_RATE_MIN_STEPS[min(_steps_idx + 1, len(ADOPTION_RATE_MIN_STEPS) - 1)]
     if report.get("brand"):
         try:
-            _enrich_action_targets(report, str((report.get("brand") or {}).get("brand_name") or brand))
+            _enrich_action_targets(report, str((report.get("brand") or {}).get("brand_name") or brand),
+                                    adoption_rate_min=_adoption_min)
         except Exception as _enrich_err:
             logger.warning(f"[brand-report/action] 가맹점 GP/추천품목 보강 실패: {_enrich_err}")
     return _render(request, "portal_brand_report_action.html", report=report)

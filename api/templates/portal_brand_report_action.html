@@ -197,14 +197,43 @@
       </span>
     </span>
   </div>
+  <div class="acb-kpi">
+    <strong>{{ report.adoption_rate_min|int }}%</strong>
+    <span class="acb-kpi-label">채택률 기준
+      <span class="help-tip" tabindex="0">?
+        <span class="help-tip-box"><b>채택률 기준</b>: 추천상품에 포함되려면 상품이 "다른 가맹점 중 최소 이 비율(%) 이상"에서 이미 쓰이고 있어야 합니다. 가맹점 구성이 다양한(SKU가 세분화된) 브랜드는 기본값(30%)에서 추천상품·기회매출액이 전부 0으로 나올 수 있습니다. 오른쪽 버튼으로 기준을 30→20→10→0%로 단계적으로 낮춰 다시 계산할 수 있습니다.</span>
+      </span>
+    </span>
+  </div>
   <div class="action-compact-slider">
     <span style="font-size:.75rem;color:#6b7280;">기준 슬라이더</span>
     <input type="range" name="threshold" min="0" max="{{ report.threshold_max }}" step="0.1" value="{{ report.threshold }}"
            oninput="document.getElementById('acbThreshVal').textContent=this.value">
     <output id="acbThreshVal">{{ report.threshold }}</output>%
-    <button class="btn portal-primary" type="submit" style="padding:.25rem .6rem;font-size:.8rem;">적용</button>
+    <button class="btn portal-primary" type="submit" name="adoption_min" value="{{ report.adoption_rate_min }}" style="padding:.25rem .6rem;font-size:.8rem;">적용</button>
+  </div>
+  <div class="action-compact-slider" style="gap:.4rem;">
+    {% if report.adoption_rate_min > 0 %}
+    <button class="btn" type="submit" name="adoption_min" value="{{ report.adoption_rate_min_next }}"
+            style="padding:.25rem .6rem;font-size:.78rem;border:1px solid #d1d5db;border-radius:.35rem;background:#fff;cursor:pointer;white-space:nowrap;"
+            title="추천상품이 0개로 나올 때, 타매장 채택률 기준을 10%p 낮춰 다시 계산합니다.">
+      채택률 기준 10%p 낮추기 ({{ report.adoption_rate_min|int }}% → {{ report.adoption_rate_min_next|int }}%)
+    </button>
+    {% endif %}
+    {% if report.adoption_rate_min < report.adoption_rate_min_default %}
+    <button class="btn" type="submit" name="adoption_min" value="{{ report.adoption_rate_min_default }}"
+            style="padding:.25rem .6rem;font-size:.78rem;border:1px solid #d1d5db;border-radius:.35rem;background:#fff;cursor:pointer;white-space:nowrap;">
+      기본값({{ report.adoption_rate_min_default|int }}%)로 복원
+    </button>
+    {% endif %}
   </div>
 </form>
+
+{% if report.adoption_rate_min < report.adoption_rate_min_default %}
+<p style="font-size:.78rem;color:#b45309;margin:-.4rem 0 .6rem;">※ 채택률 기준을 {{ report.adoption_rate_min|int }}%로 낮춰 계산 중입니다. 기본값({{ report.adoption_rate_min_default|int }}%)보다 신뢰도가 낮은 추천이 포함될 수 있습니다.</p>
+{% elif report.opportunity_effect_m == 0 %}
+<p style="font-size:.78rem;color:#b45309;margin:-.4rem 0 .6rem;">※ 이 브랜드는 가맹점 구성이 다양해(SKU 단위로) 기본 채택률 기준({{ report.adoption_rate_min_default|int }}%)을 넘는 추천상품이 없어 기회매출액이 0으로 표시됩니다. 위의 "채택률 기준 낮추기" 버튼을 눌러 기준을 낮추면 추천상품이 나올 수 있습니다.</p>
+{% endif %}
 
 <!-- ── ACTION TARGETS 통합 (전체 가맹점 + 액션 실행) ─────────────── -->
 <article class="portal-panel">
@@ -246,7 +275,7 @@
             data-gap="{{ c.gap }}"
             data-phone="{{ c.phone }}"
             data-optout="{{ 1 if c.is_optout else 0 }}"
-            data-detail-url="/portal/target-detail?brand={{ report.brand.brand_name|urlencode }}&customer_code={{ c.customer_code|urlencode }}"
+            data-detail-url="/portal/target-detail?brand={{ report.brand.brand_name|urlencode }}&customer_code={{ c.customer_code|urlencode }}&adoption_min={{ report.adoption_rate_min }}"
             data-open="0" data-loaded="0" onclick="toggleTarget(this)">
           <td class="mono">{{ c.customer_code }}</td>
           <td><b>{{ c.customer_name }}</b>{% if c.is_target %}<span class="target-badge">타겟</span>{% endif %}{% if c.is_optout %}<span class="optout-badge" title="수신거부 고객 — DM 발송 불가">🚫 수신거부</span>{% endif %}</td>
