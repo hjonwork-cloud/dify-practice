@@ -316,6 +316,38 @@ def _employee_whitelist() -> dict[str, dict]:
     return _cache_set("employee_whitelist", out)
 
 
+def _team_emp_codes(team_kw: str) -> list[str]:
+    """팀명(team_kw, 예: '외식2팀')에 해당하는 사원의 emp_code 목록을 반환.
+
+    주의: T_MAIN `지점명`은 사원 단위가 아니라 거래(고객/채널) 단위로 기록되어,
+    한 사원이 같은 달에도 여러 `지점명`(예: 외식1팀/외식2팀/(FC)1지점)을 동시에
+    가질 수 있다. 따라서 `지점명 LIKE '%팀명%'`을 전체 이력(기간 제한 없이)에
+    대해 서브쿼리로 돌리면, 과거 또는 타 채널 거래에서 우연히 해당 팀명이 찍힌
+    적 있는 '다른 팀' 사원까지 전부 끌려 들어온다 — 이것이 팀장 권한에 타팀
+    실행내역이 노출되던 근본 원인이다.
+    대신 이미 최근 3개월로 범위가 제한되고 사원당 1팀으로 정규화된
+    `_employee_whitelist()`의 team 필드를 단일 소스로 사용한다(관리자 KPI
+    담당자 로스터 구성 시 사용하는 것과 동일한 substring 포함 매칭 관례).
+    """
+    if not team_kw:
+        return []
+    try:
+        wl = _employee_whitelist()
+    except Exception:
+        wl = {}
+    return [k for k, v in wl.items()
+            if k != access_control.ADMIN_EMP_CODE and team_kw in (v.get("team") or "")]
+
+
+def _team_scope_where(team_kw: str) -> str:
+    """_team_emp_codes() 결과를 `emp_code IN (...)` SQL 조건으로 변환.
+    대상 사원이 없으면(이상 상황) 안전하게 아무 것도 매치되지 않도록 1=0을 반환한다."""
+    codes = _team_emp_codes(team_kw)
+    if not codes:
+        return "1=0"
+    return "emp_code IN (" + ", ".join(_sql(c) for c in codes) + ")"
+
+
 def _portal_user(emp_code: str) -> dict | None:
     code = str(emp_code or "").strip()
     if not code:
@@ -2758,13 +2790,7 @@ async def brand_report_results_page(
         if is_admin_u or _is_readonly_all(emp_code):
             scope_where = "1=1"
         elif emp_code in _TEAM_LEADERS:
-            team_kw = _TEAM_LEADERS[emp_code]
-            import main as _main_m
-            scope_where = (
-                f"emp_code IN (SELECT DISTINCT `영업사원`"
-                f" FROM {_main_m.T_MAIN}"
-                f" WHERE `지점명` LIKE '%{team_kw}%')"
-            )
+            scope_where = _team_scope_where(_TEAM_LEADERS[emp_code])
         else:
             scope_where = f"emp_code = '{emp_code}'"
         rows = read_action_results(emp_code, brand_code=brand_code, action_ym=action_ym,
@@ -2918,9 +2944,7 @@ async def kpi_data(
     if scope_emp:
         scope_where = f"emp_code = '{scope_emp}'"
     elif scope_team:
-        import main as _main_m3
-        scope_where = (f"emp_code IN (SELECT DISTINCT `영업사원` FROM {_main_m3.T_MAIN}"
-                       f" WHERE `지점명` LIKE '%{scope_team}%')")
+        scope_where = _team_scope_where(scope_team)
     else:
         scope_where = "1=1"
     try:
@@ -3013,13 +3037,7 @@ async def action_results(
     if is_admin_u or _is_readonly_all(emp_code):
         scope_where = "1=1"
     elif emp_code in _TEAM_LEADERS:
-        team_kw = _TEAM_LEADERS[emp_code]
-        import main as _main_m2
-        scope_where = (
-            f"emp_code IN (SELECT DISTINCT `영업사원`"
-            f" FROM {_main_m2.T_MAIN}"
-            f" WHERE `지점명` LIKE '%{team_kw}%')"
-        )
+        scope_where = _team_scope_where(_TEAM_LEADERS[emp_code])
     else:
         scope_where = f"emp_code = '{emp_code}'"
     try:
