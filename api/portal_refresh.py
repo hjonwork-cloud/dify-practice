@@ -1252,9 +1252,14 @@ def run_action_results_refresh() -> dict:
 
 
 def read_action_results(emp_code: str, brand_code: str = "", action_ym: str = "",
-                        scope_where: str = "") -> list[dict]:
+                        scope_where: str = "", limit: int = 20000) -> list[dict]:
     """T_ACTION_RESULTS에서 액션 실적 조회.
     scope_where: 비어있으면 개인(emp_code) 필터, 값이 있으면 해당 WHERE 조건 적용.
+    limit: 안전망 상한선(기본 20000). 이전에는 LIMIT 500으로 고정되어 있어,
+    관리자/팀장체럼 범위가 넓은 scope에서 실제 액션이 500건을 넘어서면 누적
+    액션건수/매출/GP 등 요약치가 500건까지만 집계되고 더 이상 증가하지
+    않는 버그가 있었다(예: 실적리프레시 후 611건이 처리되어도 누적액션건수가
+    500에서 고정).
     """
     import main
     _emp = str(emp_code or "").strip()
@@ -1271,7 +1276,7 @@ def read_action_results(emp_code: str, brand_code: str = "", action_ym: str = ""
     where = " AND ".join(conds)
     try:
         rows = main._safe_query(
-            f"SELECT * FROM {T_ACTION_RESULTS} WHERE {where} ORDER BY action_ym DESC LIMIT 500",
+            f"SELECT * FROM {T_ACTION_RESULTS} WHERE {where} ORDER BY action_ym DESC LIMIT {int(limit)}",
             raw=True,
         ) or []
         return [
