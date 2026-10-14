@@ -2705,20 +2705,24 @@ def _kpi_activity_summary(logs: list[dict], as_of: date) -> dict:
     return {"weeks": weeks, "rate": overall, "current_week": cur_week, "total_count": sum(weekly_counts.values())}
 
 
-def _kpi_generic_by_month(rows: list[dict]) -> dict[str, int]:
-    out = {"10": 0, "11": 0, "12": 0}
+def _kpi_generic_by_month(rows: list[dict]) -> dict[str, float]:
+    """월별 범용상품 추가매출(백만원) 합산.
+    generic_sales_m10/11/12는 0.19처럼 1백만 미만 소숫점 값이 흔하므로
+    int()로 자르면 전부 0이 되어 성과달성률이 항상 0%로 나온다 — float로 보존.
+    """
+    out = {"10": 0.0, "11": 0.0, "12": 0.0}
     for r in rows:
-        out["10"] += int(r.get("generic_sales_m10") or 0)
-        out["11"] += int(r.get("generic_sales_m11") or 0)
-        out["12"] += int(r.get("generic_sales_m12") or 0)
+        out["10"] += float(r.get("generic_sales_m10") or 0)
+        out["11"] += float(r.get("generic_sales_m11") or 0)
+        out["12"] += float(r.get("generic_sales_m12") or 0)
     return out
 
 
-def _kpi_performance_summary(generic_by_month: dict[str, int]) -> dict:
+def _kpi_performance_summary(generic_by_month: dict[str, float]) -> dict:
     target = _KPI_MONTHLY_GENERIC_TARGET_M
-    months, best, achieved_any = [], 0, False
+    months, best, achieved_any = [], 0.0, False
     for mm in _KPI_MONTHS:
-        amt = generic_by_month.get(mm, 0)
+        amt = round(generic_by_month.get(mm, 0.0), 2)
         ok = amt >= target
         achieved_any = achieved_any or ok
         best = max(best, amt)
