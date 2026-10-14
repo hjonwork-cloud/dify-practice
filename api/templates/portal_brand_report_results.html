@@ -14,6 +14,7 @@
   background:#fff;border:1px solid #e5e7eb;border-radius:.6rem;padding:.5rem 1rem;min-width:90px;}
 .rs-badge b{font-size:1.15rem;letter-spacing:-.5px;color:#111;}
 .rs-badge span{font-size:.72rem;color:#6b7280;margin-top:2px;}
+.rs-badge-sub{font-size:.68rem;color:#9ca3af;margin-top:3px;white-space:nowrap;}
 .rs-badge.green b{color:#16a34a;}
 .rs-badge.blue  b{color:#2563eb;}
 .rs-badge.amber b{color:#d97706;}
@@ -28,6 +29,9 @@
 .results-table th.sorted-desc::after{content:' ↓';}
 .results-table td{padding:.4rem .6rem;border-bottom:1px solid #f3f4f6;vertical-align:middle;}
 .results-table tr:hover td{background:#f9fafb;}
+.results-total-row td{background:#f1f5f9;border-bottom:2px solid #cbd5e1;
+  font-size:.82rem;color:#1e293b;white-space:nowrap;}
+.results-total-row:hover td{background:#f1f5f9;}
 .gp-chip{display:inline-block;padding:.1rem .45rem;border-radius:.25rem;font-size:.72rem;font-weight:700;}
 .gp-chip.up{background:#dcfce7;color:#166534;}
 .gp-chip.mid{background:#fef3c7;color:#92400e;}
@@ -180,10 +184,18 @@
 
 <!-- 요약 배지 -->
 <div class="results-summary">
-  <div class="rs-badge"><b>{{ summary.count }}</b><span>총 액션건수</span></div>
+  <div class="rs-badge">
+    <b>{{ summary.count }}</b><span>누적 액션건수</span>
+    <div class="rs-badge-sub">DM발송 {{ summary.dm_count | default(0) }}회 · 판가설정 {{ summary.price_count | default(0) }}회</div>
+  </div>
   <div class="rs-badge green"><b>{{ '{:,.2f}'.format(summary.total_sales_after_m) }}백만</b><span>누적 매출</span></div>
-  <div class="rs-badge blue"><b>{{ '{:,.2f}'.format(summary.total_gp_after_m) }}백만</b><span>누적 GP</span></div>
-  <div class="rs-badge amber"><b>{{ summary.avg_gp_rate }}%</b><span>평균 GP율</span></div>
+  <div class="rs-badge blue">
+    <b>{{ '{:,.2f}'.format(summary.total_gp_after_m) }}백만</b><span>누적 GP</span>
+    <div class="rs-badge-sub">평균 GP율 {{ summary.avg_gp_rate }}%</div>
+  </div>
+  <div class="rs-badge" style="background:#f0fdf4;"><b>{{ summary.sample_count | default(0) }}</b><span>샘플출고(건)</span></div>
+  <div class="rs-badge" style="background:#eff6ff;"><b>{{ summary.dm_product_qty | default(0) }}</b><span>DM 전환 품목수(개)</span></div>
+</div>
 </div>
 
 {% if rows %}
@@ -207,6 +219,23 @@
           <th onclick="sortTable(11)" style="text-align:center;">샘플출고</th>
           <th onclick="sortTable(12)" style="text-align:center;">DM전환(건)</th>
           {% if user and user.is_admin %}<th style="text-align:center;width:52px;">삭제</th>{% endif %}
+        </tr>
+        <!-- 헤더 아래 합계행 — 원단위 합산값(summary)으로 표시, 정렬 대상에서 제외 -->
+        <tr class="results-total-row">
+          <td><b>합계</b></td>
+          <td></td>
+          <td></td>
+          <td></td>
+          <td style="text-align:center;">-</td>
+          <td style="text-align:center;"><b>{{ summary.dm_count | default(0) }}회</b></td>
+          <td style="text-align:center;"><b>{{ summary.price_count | default(0) }}회</b></td>
+          <td style="text-align:center;">-</td>
+          <td style="text-align:right;"><b>{{ '{:,.2f}'.format(summary.total_sales_after_m) }}</b></td>
+          <td style="text-align:right;"><b>{{ '{:,.2f}'.format(summary.total_gp_after_m) }}</b></td>
+          <td style="text-align:right;"><b>{{ summary.avg_gp_rate }}%</b></td>
+          <td style="text-align:center;"><b>{{ summary.sample_count | default(0) }}건</b></td>
+          <td style="text-align:center;"><b>{{ summary.dm_product_qty | default(0) }}건</b></td>
+          {% if user and user.is_admin %}<td></td>{% endif %}
         </tr>
       </thead>
       <tbody id="resultsTbody">
@@ -726,6 +755,22 @@
     </label>
   </div>
 
+  <!-- 요약 KPI 카드 (현재 필터 범위 기준, 원단위 합산) -->
+  <div class="results-summary" id="kpiAdminSummaryCards" style="margin-bottom:1rem;">
+    <div class="rs-badge">
+      <b id="kpiAdmS_count">-</b><span>누적 액션건수</span>
+      <div class="rs-badge-sub" id="kpiAdmS_breakdown">&nbsp;</div>
+    </div>
+    <div class="rs-badge green"><b id="kpiAdmS_sales">-</b><span>누적 매출(백만)</span></div>
+    <div class="rs-badge blue">
+      <b id="kpiAdmS_gp">-</b><span>누적 GP(백만)</span>
+      <div class="rs-badge-sub" id="kpiAdmS_gprate">&nbsp;</div>
+    </div>
+    <div class="rs-badge" style="background:#f0fdf4;"><b id="kpiAdmS_sample">-</b><span>샘플출고(건)</span></div>
+    <div class="rs-badge" style="background:#eff6ff;"><b id="kpiAdmS_dmqty">-</b><span>DM 전환 품목수(개)</span></div>
+    <div class="rs-badge" style="background:#faf5ff;"><b id="kpiAdmS_empcount">-</b><span>조회 대상 인원</span></div>
+  </div>
+
   <div class="results-table-wrap">
     <table class="kpi-admin-table" id="kpiAdminTable">
       <thead><tr>
@@ -932,18 +977,46 @@
       .then(function(r){ return r.json(); })
       .then(function(data){
         var rows = data.rows || [];
+        var sum  = data.summary || {};
+        function fmt2(n){ return (n || 0).toLocaleString('ko-KR', {minimumFractionDigits:2, maximumFractionDigits:2}); }
+        var elCount = document.getElementById('kpiAdmS_count');
+        if (elCount) elCount.textContent = sum.total_count || 0;
+        var elBreak = document.getElementById('kpiAdmS_breakdown');
+        if (elBreak) elBreak.textContent = 'DM발송 ' + (sum.dm_count || 0) + '회 · 판가설정 ' + (sum.price_count || 0) + '회';
+        var elSales = document.getElementById('kpiAdmS_sales');
+        if (elSales) elSales.textContent = fmt2(sum.total_sales_m) + '백만';
+        var elGp = document.getElementById('kpiAdmS_gp');
+        if (elGp) elGp.textContent = fmt2(sum.total_gp_m) + '백만';
+        var elGpRate = document.getElementById('kpiAdmS_gprate');
+        if (elGpRate) elGpRate.textContent = '평균 GP율 ' + (sum.avg_gp_rate || 0) + '%';
+        var elSample = document.getElementById('kpiAdmS_sample');
+        if (elSample) elSample.textContent = sum.sample_count || 0;
+        var elDmQty = document.getElementById('kpiAdmS_dmqty');
+        if (elDmQty) elDmQty.textContent = sum.dm_product_qty || 0;
+        var elEmpCount = document.getElementById('kpiAdmS_empcount');
+        if (elEmpCount) elEmpCount.textContent = (sum.emp_count || 0) + '명';
+
         if (!tbody) return;
         if (!rows.length) { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#9ca3af;padding:1.2rem;">데이터가 없습니다.</td></tr>'; return; }
         var html = '';
         rows.forEach(function(r){
           html += '<tr><td><b>' + r.emp_name + '</b></td><td style="color:#6b7280;font-size:.76rem;">' + r.team + '</td>' +
             '<td style="text-align:right;">' + r.total_count + '</td>' +
-            '<td style="text-align:right;">' + r.total_sales_m.toLocaleString() + '</td>' +
-            '<td style="text-align:right;">' + r.total_gp_m.toLocaleString() + '</td>' +
+            '<td style="text-align:right;">' + fmt2(r.total_sales_m) + '</td>' +
+            '<td style="text-align:right;">' + fmt2(r.total_gp_m) + '</td>' +
             '<td style="text-align:right;"><span class="kpi-rate-pill ' + kpiRateClass(r.activity_rate) + '">' + r.activity_rate + '%</span></td>' +
             '<td style="text-align:right;"><span class="kpi-rate-pill ' + kpiRateClass(r.performance_rate) + '">' + r.performance_rate + '%</span></td>' +
             '</tr>';
         });
+        // 합계행 — 원단위 합산값(summary)으로 표시
+        html += '<tr class="results-total-row">' +
+          '<td><b>합계 (' + (sum.emp_count || rows.length) + '명)</b></td><td></td>' +
+          '<td style="text-align:right;"><b>' + (sum.total_count || 0) + '</b></td>' +
+          '<td style="text-align:right;"><b>' + fmt2(sum.total_sales_m) + '</b></td>' +
+          '<td style="text-align:right;"><b>' + fmt2(sum.total_gp_m) + '</b></td>' +
+          '<td style="text-align:right;">-</td>' +
+          '<td style="text-align:right;">-</td>' +
+          '</tr>';
         tbody.innerHTML = html;
       })
       .catch(function(){ if (tbody) tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#ef4444;padding:1rem;">불러오기 실패</td></tr>'; });

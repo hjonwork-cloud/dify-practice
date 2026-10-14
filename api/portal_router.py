@@ -2784,6 +2784,10 @@ async def brand_report_results_page(
         "total_sales_after_m":   total_sales,
         "total_gp_after_m":      total_gp,
         "avg_gp_rate":           round(total_gp_raw / total_sales_raw * 100, 1) if total_sales_raw else 0,
+        "dm_count":              sum(int(r.get("dm_count") or 0) for r in rows),
+        "price_count":           sum(int(r.get("price_count") or 0) for r in rows),
+        "sample_count":          sum(int(r.get("sample_count") or 0) for r in rows),
+        "dm_product_qty":        sum(int(r.get("dm_product_qty") or 0) for r in rows),
     }
     try:
         dm_logs = portal_db.list_dm_logs(emp_code=user["emp_code"], brand_code=brand_code or None, action_ym=action_ym or None)
@@ -2937,32 +2941,63 @@ async def kpi_data(
     by_emp: dict[str, list[dict]] = {}
     for r in rows:
         by_emp.setdefault(str(r.get("emp_code") or ""), []).append(r)
+    # ── 조회 대상 담당자 로스터 ──
+    # by_emp(실적이 있는 사원)만으로는 실적 0인 하위 사원이 누락된다.
+    # scope_emp: 해당 1인, scope_team: 본인(팀장) 팀 소속 전원, 둘 다 없으면(전체관리자) 전체 사원.
+    # 실적 0이어도 모두 노출하여 활동 독려에 활용할 수 있도록 한다.
+    if scope_emp:
+        roster = {scope_emp: wl.get(scope_emp, {"name": scope_emp, "team": ""})}
+    elif scope_team:
+        # substring 포함 매칭 — kpi_departments 드롭다운 구성(_my_team in team) 및
+        # _is_readonly_all()의 FULL_SCOPE_TEAMS 매칭과 동일한 관례를 따른다.
+        roster = {k: v for k, v in wl.items()
+                  if k != access_control.ADMIN_EMP_CODE and scope_team in (v.get("team") or "")}
+    else:
+        roster = {k: v for k, v in wl.items() if k != access_control.ADMIN_EMP_CODE}
     out_rows = []
-    for ecode, erows in by_emp.items():
+    for ecode, info in roster.items():
         if not ecode:
             continue
-        info = wl.get(ecode, {})
+        erows = by_emp.get(ecode, [])
         try:
             logs = portal_db.list_dm_logs_in_range(date_from.isoformat(), date_to.isoformat(), emp_code=ecode)
         except Exception:
             logs = []
         act = _kpi_activity_summary(logs, date_to)
         perf = _kpi_performance_summary(_kpi_generic_by_month(erows))
+        _e_sales_raw = sum(r.get("sales_after_raw") or 0 for r in erows)
+        _e_gp_raw    = sum(r.get("gp_after_raw") or 0 for r in erows)
         out_rows.append({
             "emp_code": ecode,
             "emp_name": info.get("name") or ecode,
             "team": info.get("team") or "",
             "total_count": len(erows),
-            "total_sales_m": sum(r.get("sales_after_m") or 0 for r in erows),
-            "total_gp_m": sum(r.get("gp_after_m") or 0 for r in erows),
+            "total_sales_m": round(_e_sales_raw / 10000.0, 2),
+            "total_gp_m": round(_e_gp_raw / 10000.0, 2),
             "activity_rate": act["rate"],
             "activity_count": act["total_count"],
             "performance_rate": perf["rate"],
             "performance_best_m": perf["best_m"],
         })
     out_rows.sort(key=lambda x: (x["team"], -x["performance_rate"]))
+
+    # ── 전체 합계(원단위 합산) ── 행별 반올림된 total_sales_m을 다시 합산하면
+    # 오차가 누적되므로, scope 내 전체 rows(원단위)를 직접 합산한다.
+    _tot_sales_raw = sum(r.get("sales_after_raw") or 0 for r in rows)
+    _tot_gp_raw    = sum(r.get("gp_after_raw") or 0 for r in rows)
+    summary = {
+        "emp_count":      len(out_rows),
+        "total_count":    len(rows),
+        "dm_count":       sum(int(r.get("dm_count") or 0) for r in rows),
+        "price_count":    sum(int(r.get("price_count") or 0) for r in rows),
+        "total_sales_m":  round(_tot_sales_raw / 10000.0, 2),
+        "total_gp_m":     round(_tot_gp_raw / 10000.0, 2),
+        "avg_gp_rate":    round(_tot_gp_raw / _tot_sales_raw * 100, 1) if _tot_sales_raw else 0,
+        "sample_count":   sum(int(r.get("sample_count") or 0) for r in rows),
+        "dm_product_qty": sum(int(r.get("dm_product_qty") or 0) for r in rows),
+    }
     return JSONResponse({"period": period, "date_from": date_from.isoformat(), "date_to": date_to.isoformat(),
-                         "rows": out_rows})
+                         "rows": out_rows, "summary": summary})
 
 
 @router.get("/action-results")
@@ -3004,6 +3039,10 @@ async def action_results(
             "total_sales_after_m":   total_sales,
             "total_gp_after_m":      total_gp,
             "avg_gp_rate":       round(total_gp_raw / total_sales_raw * 100, 1) if total_sales_raw else 0,
+            "dm_count":          sum(int(r.get("dm_count") or 0) for r in rows),
+            "price_count":       sum(int(r.get("price_count") or 0) for r in rows),
+            "sample_count":      sum(int(r.get("sample_count") or 0) for r in rows),
+            "dm_product_qty":    sum(int(r.get("dm_product_qty") or 0) for r in rows),
         },
     }))
 
