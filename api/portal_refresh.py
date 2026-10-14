@@ -1127,6 +1127,7 @@ def run_action_results_refresh() -> dict:
                0 AS action_item_count, '' AS dm_matnr_csv,
                CAST(0 AS BIGINT) AS dm_count, CAST(0 AS BIGINT) AS price_count,
                CAST(0 AS BIGINT) AS sales_after_m, CAST(0 AS BIGINT) AS gp_after_m,
+               CAST(0.0 AS DOUBLE) AS sales_after_raw, CAST(0.0 AS DOUBLE) AS gp_after_raw,
                CAST(0.0 AS DOUBLE) AS gp_rate_after, CAST(0 AS BIGINT) AS generic_sales_after_m,
                CAST(0 AS BIGINT) AS generic_sales_m10, CAST(0 AS BIGINT) AS generic_sales_m11,
                CAST(0 AS BIGINT) AS generic_sales_m12,
@@ -1172,6 +1173,17 @@ def run_action_results_refresh() -> dict:
            - SUM(CASE WHEN a.dm_matnr_csv <> ''
                            AND ARRAY_CONTAINS(SPLIT(a.dm_matnr_csv, ','), TRIM(m.`자재`))
                       THEN COALESCE(m.`매출원가`, 0) ELSE 0 END)) / 10000.0, 2) AS gp_after_m,
+      -- 원단위(반올림 전) 매출/GP — 페이지 상단 합계배지·평균GP율은 이 값을 합산해
+      -- 행별 0.01백만 단위 반올림 오차가 누적되지 않도록 한다.
+      SUM(CASE WHEN a.dm_matnr_csv <> ''
+                   AND ARRAY_CONTAINS(SPLIT(a.dm_matnr_csv, ','), TRIM(m.`자재`))
+              THEN COALESCE(m.`매출액`, 0) ELSE 0 END) AS sales_after_raw,
+      (SUM(CASE WHEN a.dm_matnr_csv <> ''
+                     AND ARRAY_CONTAINS(SPLIT(a.dm_matnr_csv, ','), TRIM(m.`자재`))
+                THEN COALESCE(m.`매출액`, 0) ELSE 0 END)
+       - SUM(CASE WHEN a.dm_matnr_csv <> ''
+                       AND ARRAY_CONTAINS(SPLIT(a.dm_matnr_csv, ','), TRIM(m.`자재`))
+                  THEN COALESCE(m.`매출원가`, 0) ELSE 0 END)) AS gp_after_raw,
       CASE WHEN SUM(CASE WHEN a.dm_matnr_csv <> ''
                               AND ARRAY_CONTAINS(SPLIT(a.dm_matnr_csv, ','), TRIM(m.`자재`))
                          THEN COALESCE(m.`매출액`, 0) ELSE 0 END) = 0 THEN 0.0
@@ -1277,6 +1289,8 @@ def read_action_results(emp_code: str, brand_code: str = "", action_ym: str = ""
                 "dm_matnr_csv":          str(r.get("dm_matnr_csv") or ""),
                 "sales_after_m":         float(r.get("sales_after_m") or 0),
                 "gp_after_m":            float(r.get("gp_after_m") or 0),
+                "sales_after_raw":       float(r.get("sales_after_raw") or 0),
+                "gp_after_raw":          float(r.get("gp_after_raw") or 0),
                 "gp_rate_after":         float(r.get("gp_rate_after") or 0),
                 "generic_sales_after_m": float(r.get("generic_sales_after_m") or 0),
                 "generic_sales_m10":     float(r.get("generic_sales_m10") or 0),

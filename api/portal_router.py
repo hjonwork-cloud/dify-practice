@@ -2771,13 +2771,15 @@ async def brand_report_results_page(
         brands = _brand_rows(user["emp_code"])
     except Exception:
         brands = []
-    total_sales   = sum(r.get("sales_after_m") or 0 for r in rows)
-    total_gp      = sum(r.get("gp_after_m") or 0 for r in rows)
+    total_sales_raw = sum(r.get("sales_after_raw") or 0 for r in rows)
+    total_gp_raw    = sum(r.get("gp_after_raw") or 0 for r in rows)
+    total_sales     = round(total_sales_raw / 10000.0, 2)
+    total_gp        = round(total_gp_raw / 10000.0, 2)
     summary = {
         "count":                 len(rows),
         "total_sales_after_m":   total_sales,
         "total_gp_after_m":      total_gp,
-        "avg_gp_rate":           round(total_gp / total_sales * 100, 1) if total_sales else 0,
+        "avg_gp_rate":           round(total_gp_raw / total_sales_raw * 100, 1) if total_sales_raw else 0,
     }
     try:
         dm_logs = portal_db.list_dm_logs(emp_code=user["emp_code"], brand_code=brand_code or None, action_ym=action_ym or None)
@@ -2987,14 +2989,17 @@ async def action_results(
                                    scope_where=scope_where)
     except Exception as e:
         rows = []
-    total_sales = sum(r.get("sales_after_m", 0) for r in rows)
-    total_gp    = sum(r.get("gp_after_m", 0) for r in rows)
+    total_sales_raw = sum(r.get("sales_after_raw") or 0 for r in rows)
+    total_gp_raw    = sum(r.get("gp_after_raw") or 0 for r in rows)
+    total_sales = round(total_sales_raw / 10000.0, 2)
+    total_gp    = round(total_gp_raw / 10000.0, 2)
     return JSONResponse(_json_safe({
         "rows": rows,
         "summary": {
             "count":             len(rows),
             "total_sales_after_m":   total_sales,
             "total_gp_after_m":      total_gp,
+            "avg_gp_rate":       round(total_gp_raw / total_sales_raw * 100, 1) if total_sales_raw else 0,
         },
     }))
 
