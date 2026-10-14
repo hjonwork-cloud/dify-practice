@@ -3060,6 +3060,11 @@ async def action_matnr_sales(
                    ROUND(SUM(CASE WHEN `매출액` > 0 THEN `매출액` ELSE 0 END) / 10000.0, 2) AS sales_m,
                    ROUND((SUM(CASE WHEN `매출액` > 0 THEN `매출액` ELSE 0 END)
                          - SUM(CASE WHEN `매출액` > 0 THEN COALESCE(`매출원가`,0) ELSE 0 END)) / 10000.0, 2) AS gp_m,
+                   -- GP율 계산용 원단위(반올림 전) 금액 — 소액 품목이 0.00백만으로 반올림돼도
+                   -- GP%는 실제 금액 기준으로 정확히 산출되도록 별도 보존
+                   SUM(CASE WHEN `매출액` > 0 THEN `매출액` ELSE 0 END) AS sales_raw,
+                   (SUM(CASE WHEN `매출액` > 0 THEN `매출액` ELSE 0 END)
+                    - SUM(CASE WHEN `매출액` > 0 THEN COALESCE(`매출원가`,0) ELSE 0 END)) AS gp_raw,
                    COALESCE(SUM(CASE WHEN `매출액` > 0 THEN CAST(`매출수량` AS BIGINT) ELSE 0 END), 0) AS sales_qty,
                    COALESCE(SUM(CASE WHEN `매출액` = 0 AND `매출수량` > 0 THEN CAST(`매출수량` AS BIGINT) ELSE 0 END), 0) AS sample_qty
             FROM {main.T_MAIN}
@@ -3095,7 +3100,11 @@ async def action_matnr_sales(
         sales_qty = int(r.get("sales_qty") or 0)
         sample_qty= int(r.get("sample_qty") or 0)
         net_qty   = sales_qty
-        gp_rate   = round(gp_m / sales_m * 100, 1) if sales_m > 0 else 0.0
+        # GP%는 0.00백만으로 반올림된 표시값이 아니라, 반올림 전 원단위 실제 금액으로 계산
+        # (예: 매출 20,000원/GP 4,000원 → 표시는 0.02백만/0.00백만 이지만 GP율은 정확히 20%)
+        sales_raw = float(r.get("sales_raw") or 0)
+        gp_raw    = float(r.get("gp_raw") or 0)
+        gp_rate   = round(gp_raw / sales_raw * 100, 1) if sales_raw > 0 else 0.0
         # 자재명: 실적 쿼리 우선, 없으면 전체 name_map fallback
         matnr_name = str(r.get("matnr_name") or nr.get("matnr_name") or "-")
         # 설정판가: SQLite 판가 우선, 없으면 T_MAIN 평균단가 fallback
