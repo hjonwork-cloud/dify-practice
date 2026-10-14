@@ -135,12 +135,6 @@
 .kpi-cal-cell.today{box-shadow:inset 0 0 0 2px #2563eb;}
 .kpi-cal-cell .d{font-size:.78rem;}
 .kpi-cal-cell .c{font-size:.65rem;margin-top:1px;color:#16a34a;font-weight:700;}
-.kpi-cal-cell.selected{background:#2563eb;color:#fff;}
-.kpi-cal-cell.selected .c{color:#bfdbfe;}
-.kpi-day-detail{margin-top:.8rem;}
-.kpi-day-detail table{width:100%;border-collapse:collapse;font-size:.78rem;}
-.kpi-day-detail th{background:#f1f5f9;color:#475569;padding:.35rem .5rem;text-align:left;font-weight:600;}
-.kpi-day-detail td{padding:.35rem .5rem;border-bottom:1px solid #f3f4f6;}
 </style>
 
 <div class="portal-heading">
@@ -866,8 +860,7 @@
         '<div class="ttl" id="kpiCalTitle-' + mode + '"></div>' +
         '<div class="kpi-cal-nav"><button type="button" id="kpiCalNext-' + mode + '">▶</button></div>' +
       '</div>' +
-      '<div class="kpi-cal-grid" id="kpiCalGrid-' + mode + '"></div>' +
-      '<div class="kpi-day-detail" id="kpiDayDetail-' + mode + '"><span style="color:#9ca3af;font-size:.78rem;">▸ 날짜를 클릭하면 해당일 활동 상세가 표시됩니다.</span></div>';
+      '<div class="kpi-cal-grid" id="kpiCalGrid-' + mode + '"></div>';
     document.getElementById('kpiCalPrev-' + mode).onclick = function(){ kpiNavCalendar(mode, -1); };
     document.getElementById('kpiCalNext-' + mode).onclick = function(){ kpiNavCalendar(mode, 1); };
   }
@@ -909,37 +902,12 @@
       var dstr = p.y + '-' + String(p.m).padStart(2, '0') + '-' + String(d2).padStart(2, '0');
       var cnt = days[dstr] || 0;
       var isToday = isCurMonth && d2 === today.getDate();
-      var isFuture = isCurMonth && d2 > today.getDate();
       var cls = 'kpi-cal-cell' + (cnt > 0 ? ' has-act' : '') + (isToday ? ' today' : '');
-      var dayKey = dstr.replace(/-/g, '');
-      html += '<div class="' + cls + '"' + (cnt > 0 && !isFuture ? ' onclick="kpiShowDayDetail(this,\'' + mode + '\',\'' + dayKey + '\')"' : '') + '>' +
+      html += '<div class="' + cls + '">' +
         '<span class="d">' + d2 + '</span>' + (cnt > 0 ? '<span class="c">' + cnt + '건</span>' : '') + '</div>';
     }
     grid.innerHTML = html;
   }
-
-  window.kpiShowDayDetail = function(el, mode, dayStr){
-    document.querySelectorAll('#kpiCalGrid-' + mode + ' .kpi-cal-cell').forEach(function(c){ c.classList.remove('selected'); });
-    if (el) el.classList.add('selected');
-    var box = document.getElementById('kpiDayDetail-' + mode);
-    if (box) box.innerHTML = '<span style="color:#9ca3af;font-size:.78rem;">⏳ 불러오는 중...</span>';
-    fetch('/portal/kpi-data?mode=day_detail&day=' + dayStr + kpiScopeParams(mode), {credentials: 'same-origin'})
-      .then(function(r){ return r.json(); })
-      .then(function(data){
-        if (!box) return;
-        var items = data.items || [];
-        if (!items.length) { box.innerHTML = '<span style="color:#9ca3af;font-size:.78rem;">해당일 활동 내역이 없습니다.</span>'; return; }
-        var html = '<table><thead><tr><th>시각</th><th>담당자</th><th>가맹점</th><th>브랜드</th><th>구분</th></tr></thead><tbody>';
-        items.forEach(function(it){
-          html += '<tr><td>' + (it.created_at || '').slice(11, 19) + '</td><td>' + (it.emp_name || '') + '</td>' +
-            '<td>' + (it.customer_name || '') + '</td><td>' + (it.brand_name || '') + '</td>' +
-            '<td>' + (it.action_type || '') + '</td></tr>';
-        });
-        html += '</tbody></table>';
-        box.innerHTML = html;
-      })
-      .catch(function(){ if (box) box.innerHTML = '<span style="color:#ef4444;font-size:.78rem;">불러오기 실패</span>'; });
-  };
 
   // ---- 관리자 KPI 테이블/필터 ----
   window.kpiAdminFilterChanged = function(){
