@@ -1,5 +1,7 @@
 {% extends 'portal_base.html' %}{% block title %}상세·액션 — {{ report.brand.brand_name if report.brand else '브랜드 없음' }}{% endblock %}{% block content %}
-<script>const PORTAL_READONLY = {{ 'true' if user and user.role == 'readonly_all' else 'false' }};</script>
+<script>const PORTAL_READONLY = {{ 'true' if user and user.role == 'readonly_all' else 'false' }};
+const PORTAL_DM_DISABLED = {{ 'true' if dm_send_disabled else 'false' }};
+const PORTAL_DM_DISABLED_MESSAGE = {{ (dm_send_disabled_message or '') | tojson }};</script>
 <style>
 /* ── 컴팩트 헤더 ── */
 .action-page-header{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;padding:.75rem 0 .5rem;border-bottom:1px solid #e5e7eb;margin-bottom:.75rem;}
@@ -173,6 +175,13 @@
     });
   </script>
 </div>
+
+{% if dm_send_disabled %}
+<div style="display:flex;align-items:center;gap:.6rem;background:#fef3c7;border:1px solid #fde68a;border-radius:.6rem;padding:.7rem 1rem;margin-bottom:.9rem;font-size:.85rem;color:#92400e;">
+  <span style="font-size:1.1rem;">⏸</span>
+  <div><b>DM 발송 기능이 일시 중단되었습니다.</b> {{ dm_send_disabled_message }} (판가 등록만 위한 "판가만 SAP 등록" 기능은 계속 사용할 수 있습니다.)</div>
+</div>
+{% endif %}
 
 <!-- 컴팩트 요약 바 -->
 <form method="get" action="/portal/brand-report/action" class="action-compact-bar">
@@ -567,13 +576,20 @@
           ℹ️ <b>조회 전용 계정</b>입니다. DM 발송 및 판가 설정 기능은 사용할 수 없습니다.
         </div>`;
     } else {
+      const dmDisabledNotice = PORTAL_DM_DISABLED ? `
+        <div style="margin:.4rem 0;padding:.55rem .85rem;background:#fef3c7;border:1px solid #fde68a;
+                    border-radius:.45rem;font-size:.8rem;color:#92400e;">
+          ⏸ <b>DM 발송 기능 일시 중단</b> — ${PORTAL_DM_DISABLED_MESSAGE}
+        </div>` : '';
+      const dmBtnDisabledAttr = PORTAL_DM_DISABLED ? 'disabled title="DM 발송 기능이 일시 중단되었습니다"' : '';
       actionFooter.innerHTML = `
       <div class="action-section-title" style="margin-top:.6rem;">DM 메시지</div>
       ${_dmLockedEditorHtml(`priceDmText_${uid}`, 'dm-preview-area', _dmStripCompliance(dmMsg), optoutLink, 10)}
-      ${isOptout ? `<div style="margin:.4rem 0;padding:.5rem .8rem;background:#fee2e2;border:1px solid #fecaca;border-radius:.4rem;font-size:.8rem;color:#b91c1c;">🚫 수신거부 등록 고객입니다. DM 발송이 불가합니다.</div>` : ''}
+      ${dmDisabledNotice}
+      ${(!PORTAL_DM_DISABLED && isOptout) ? `<div style="margin:.4rem 0;padding:.5rem .8rem;background:#fee2e2;border:1px solid #fecaca;border-radius:.4rem;font-size:.8rem;color:#b91c1c;">🚫 수신거부 등록 고객입니다. DM 발송이 불가합니다.</div>` : ''}
       <div class="price-btn-row" style="justify-content:space-between;">
         <div class="price-btn-row" style="margin:0;">
-          <button class="action-send-btn dm-only-btn" type="button" ${isOptout ? 'disabled title="수신거부 고객"' : ''}
+          <button class="action-send-btn dm-only-btn" type="button" ${PORTAL_DM_DISABLED ? dmBtnDisabledAttr : (isOptout ? 'disabled title="수신거부 고객"' : '')}
               onclick="window._doSendDmOnly_${uid}(this)">
             💬 DM만 발송
           </button>
@@ -583,7 +599,7 @@
               onclick="window._doSendPriceOnly_${uid}(this)">
             📋 판가만 SAP 등록
           </button>
-          <button class="action-send-btn price-send" type="button" ${isOptout ? 'disabled title="수신거부 고객"' : ''}
+          <button class="action-send-btn price-send" type="button" ${PORTAL_DM_DISABLED ? dmBtnDisabledAttr : (isOptout ? 'disabled title="수신거부 고객"' : '')}
               onclick="window._doSendPriceDm_${uid}(this)">
             💰 판가 등록 + DM 발송
           </button>
@@ -594,6 +610,7 @@
     }
     pricePanel.appendChild(actionFooter);
 
+
     // ── 발송 버튼 wrapper: guardConfirmed + confirm 팝업 ─────────
     window[`_doSendPriceOnly_${uid}`] = function(btn) {
       if (!guardConfirmed(uid)) return;
@@ -601,6 +618,7 @@
       window.sendPriceOnly(uid, custCode, custName, brandCode, brandName, plantCode, btn);
     };
     window[`_doSendDmOnly_${uid}`] = function(btn) {
+      if (PORTAL_DM_DISABLED) { alert(PORTAL_DM_DISABLED_MESSAGE); return; }
       if (isOptout) { alert('수신거부 등록 고객입니다. DM을 발송할 수 없습니다.'); return; }
       if (!guardConfirmed(uid)) return;
       window._openDmModal({
@@ -611,6 +629,7 @@
       });
     };
     window[`_doSendPriceDm_${uid}`] = function(btn) {
+      if (PORTAL_DM_DISABLED) { alert(PORTAL_DM_DISABLED_MESSAGE); return; }
       if (isOptout) { alert('수신거부 등록 고객입니다. DM을 발송할 수 없습니다.'); return; }
       if (!guardConfirmed(uid)) return;
       window._openDmModal({

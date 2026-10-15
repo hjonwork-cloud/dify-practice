@@ -48,6 +48,14 @@ _DM_SEND_HOUR_START = 8   # 발송가능 시작시각(포함) — 오전 08:00
 _DM_SEND_HOUR_END = 20    # 발송가능 종료시각(미포함) — 오후 08:00 (20:00 이후 불가)
 _KST = ZoneInfo("Asia/Seoul")  # Azure App Service(Linux)는 컨테이너 OS가 UTC라 naive now()로는 시간대가 어긋난다.
 
+# ── DM 발송 기능 긴급 중단 스위치 ──────────────────────────────────────
+# 법적 요소(정보통신망법 등) 검토를 위해 내부 리스크관리팀과 논의 중인 동안
+# DM 발송 기능 전체를 서버 단에서 차단한다. 별도 공지 후 이 값을 False로 되돌리면
+# 즉시 재개된다. (화면 버튼 비활성화는 UX일 뿐이며, 여기서 서버 단에서도 함께
+# 차단해야 직접 API 호출로 우회 발송되는 것을 막을 수 있다.)
+DM_SEND_DISABLED = True
+DM_SEND_DISABLED_MESSAGE = "법적 요소 검토로 인해 DM 발송 기능이 일시 중단되었습니다. 별도 공지 시까지 발송이 제한됩니다."
+
 # ── 팀 리더: 자신의 팀 전체 데이터 조회 가능 ──────────────────────────
 _TEAM_LEADERS: dict[str, str] = {
     "20115003": "외식1팀",   # 손상웅
@@ -409,6 +417,8 @@ def _render(request: Request, name: str, **context) -> HTMLResponse:
         "asset_v": _asset_version(),
         "sms_ext_version": _sms_ext_version(),
         "sms_ext": _sms_ext_config(),
+        "dm_send_disabled": DM_SEND_DISABLED,
+        "dm_send_disabled_message": DM_SEND_DISABLED_MESSAGE,
         **context,
     })
     return HTMLResponse(html)
@@ -1103,7 +1113,9 @@ def _apply_ad_compliance(message: str, customer_code: str) -> str:
 
 
 def _dm_block_reason(customer_code: str, phone: str, scheduled_at: str) -> str:
-    """DM 발송 차단 사유 (수신거부 고객 / 발송가능시간 외). 없으면 빈 문자열."""
+    """DM 발송 차단 사유 (긴급 중단 스위치 / 수신거부 고객 / 발송가능시간 외). 없으면 빈 문자열."""
+    if DM_SEND_DISABLED:
+        return DM_SEND_DISABLED_MESSAGE
     try:
         if portal_db.is_customer_optout(customer_code, phone):
             return "수신거부 등록 고객입니다. DM을 발송할 수 없습니다."
