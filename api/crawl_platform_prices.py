@@ -577,28 +577,47 @@ def _get_todaysales_sellers() -> list[dict]:
     ]
 
 
-def _todaysales_fetch_page(seller_id: str, page_number: int) -> dict | None:
-    try:
-        resp = requests.get(
-            TODAYSALES_SEARCH_URL,
-            headers=TODAYSALES_HEADERS,
-            params={
-                "hasTotalCount": "true",
-                "order.by": "POPULAR",
-                "order.direction": "DESC",
-                "partnerNo": seller_id,
-                "pageNumber": page_number,
-                "pageSize": TODAYSALES_PAGE_SIZE,
-                "categoryNos": TODAYSALES_CATEGORY_NO,
-            },
-            timeout=15,
-        )
-        print(f"  [오늘얼마 HTTP] seller={seller_id} page={page_number} status={resp.status_code}")
-        resp.raise_for_status()
-        return resp.json()
-    except Exception as e:
-        print(f"  ⚠ 오늘얼마 요청 실패 (seller={seller_id} page={page_number}): {type(e).__name__}: {e}")
-        return None
+def _todaysales_fetch_page(seller_id: str, page_number: int, max_retries: int = 3) -> dict | None:
+    """오늘얼마 상품 목록 1페이지 조회. 일시적 오류(타임아웃/레이트리밋/네트워크 오류)에
+    대비해 최대 max_retries회 재시도한다 (백오프: 1s, 2s, 4s).
+
+    ── 배경 ──────────────────────────────────────────────────────────────
+    과거에는 1회 요청 실패 시 바로 None을 반환했고, 호출부(_crawl_todaysales_per_seller)가
+    이를 "더 이상 페이지 없음"과 동일하게 취급해 해당 셀러의 나머지 페이지를 전부
+    건너뛰었다. 대용량 셀러(페이지 수가 많은 셀러)일수록 일시적 오류를 만날 확률이
+    높아, 특정 셀러만 수집량이 크게 줄어드는 증상(예: 300건에서 멈춤 = 3페이지째
+    실패)의 핵심 원인이었다. 재시도를 넣어 일시적 오류를 흡수한다.
+    """
+    last_err: Exception | None = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            resp = requests.get(
+                TODAYSALES_SEARCH_URL,
+                headers=TODAYSALES_HEADERS,
+                params={
+                    "hasTotalCount": "true",
+                    "order.by": "POPULAR",
+                    "order.direction": "DESC",
+                    "partnerNo": seller_id,
+                    "pageNumber": page_number,
+                    "pageSize": TODAYSALES_PAGE_SIZE,
+                    "categoryNos": TODAYSALES_CATEGORY_NO,
+                },
+                timeout=15,
+            )
+            print(f"  [오늘얼마 HTTP] seller={seller_id} page={page_number} status={resp.status_code}"
+                  + (f" (재시도 {attempt}/{max_retries})" if attempt > 1 else ""))
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as e:
+            last_err = e
+            print(f"  ⚠ 오늘얼마 요청 실패 (seller={seller_id} page={page_number}, "
+                  f"시도 {attempt}/{max_retries}): {type(e).__name__}: {e}")
+            if attempt < max_retries:
+                time.sleep(2 ** (attempt - 1))  # 1s, 2s, 4s ...
+    print(f"  ✗ 오늘얼마 요청 최종 실패 (seller={seller_id} page={page_number}, "
+          f"{max_retries}회 재시도 후 포기): {type(last_err).__name__ if last_err else ''}")
+    return None
 
 
 def _todaysales_item_to_record(item: dict, seller_id: str, seller_name: str) -> dict:
@@ -795,8 +814,12 @@ def _crawl_food_per_seller(test_mode: bool, only_ids: set | None = None):
 
 
 def _crawl_todaysales_per_seller(test_mode: bool, only_ids: set | None = None):
-    """오늘얼마 셀러별 (seller_id, records) 제너레이터.
-    only_ids: 수집할 seller_id 집합 (None이면 전체)"""
+    """오늘얼마 셀러별 (seller_id, seller_name, records, incomplete) 제너레이터.
+    only_ids: 수집할 seller_id 집합 (None이면 전체)
+    incomplete: 재시도 후에도 일부 페이지 수집에 실패해 완전히 수집되지 못했는지 여부.
+                True인 경우 main()에서 failed_sellers에 기록해 리포트 메일에 노출한다
+                (과거에는 이 경우에도 조용히 성공으로 취급되어 특정 셀러만 수집량이
+                크게 줄어도 아무도 알아챌 수 없었다)."""
     sellers = _get_todaysales_sellers()
     if test_mode:
         sellers = sellers[:1]
@@ -807,10 +830,12 @@ def _crawl_todaysales_per_seller(test_mode: bool, only_ids: set | None = None):
         print(f"\n[오늘얼마] {s['name']} (id={s['id']})")
         first = _todaysales_fetch_page(s["id"], 1)
         if not first:
-            print("  ✗ 첫 페이지 실패, 건너뜀")
+            print("  ✗ 첫 페이지 실패 (재시도 포함), 건너뜀")
+            yield s["id"], s["name"], [], True
             continue
         page_count = first.get("pageCount", 1) if not test_mode else 1
         seller_records = []
+        incomplete = False
         print(f"  총 {first.get('totalCount', 0)}개 / {page_count}페이지")
         for page_no in range(1, page_count + 1):
             if page_no == 1:
@@ -819,12 +844,15 @@ def _crawl_todaysales_per_seller(test_mode: bool, only_ids: set | None = None):
                 time.sleep(0.5)
                 data = _todaysales_fetch_page(s["id"], page_no)
                 if not data:
+                    incomplete = True
+                    print(f"  ✗ page {page_no}/{page_count} 수집 실패 (재시도 포함) — "
+                          f"나머지 {page_count - page_no + 1}페이지 중단")
                     break
                 items = data.get("items", [])
             for item in items:
                 seller_records.append(_todaysales_item_to_record(item, s["id"], s["name"]))
             print(f"  page {page_no}: 누적 {len(seller_records)}개")
-        yield s["id"], s["name"], seller_records
+        yield s["id"], s["name"], seller_records, incomplete
 
 
 def main():
@@ -963,9 +991,16 @@ def main():
 
     if run_todaysales:
         todaysales_ids = seller_filter.get("todaysales")
-        for seller_id, seller_name, records in _crawl_todaysales_per_seller(test_mode=args.test, only_ids=todaysales_ids):
+        for seller_id, seller_name, records, incomplete in _crawl_todaysales_per_seller(test_mode=args.test, only_ids=todaysales_ids):
             if todaysales_ids and seller_id not in todaysales_ids:
                 continue
+            if incomplete:
+                # 재시도까지 모두 실패해 일부(또는 전체) 페이지를 수집하지 못함 —
+                # 조용히 넘어가지 않고 리포트 메일에 노출되도록 failed_sellers에 기록
+                failed_sellers.append(
+                    f"todaysales/{seller_name} (일부 페이지 수집 실패, {len(records)}건만 수집됨)"
+                )
+                print(f"  ⚠ 오늘얼마 {seller_name}({seller_id}): 수집 불완전 — {len(records)}건만 확보")
             if not records:
                 continue
             try:

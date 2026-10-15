@@ -173,10 +173,24 @@ def _run_single_platform(flag: str, platform_key: str, suffix: str, timeout_sec:
         if mail_fn is None:
             logger.warning(f"[scheduler] {platform_key} 메일 미발송(발송 함수 없음)")
             return
-        try:
-            mail_fn(report)
-        except Exception as e:
-            logger.error(f"[scheduler] {platform_key} 메일 발송 중 예외: {e}")
+        # 일시적 SMTP 오류(네트워크 순단, 서버 일시 거부 등)로 메일이 통째로
+        # 누락되는 것을 막기 위해 최대 3회까지 재시도한다 (백오프: 3s, 8s).
+        # 과거에는 1회 실패 시 로그만 남기고 끝나, "크롤링은 됐는데 메일이
+        # 안 온다"는 증상이 재현 불가능한 채로 묻히는 경우가 있었다.
+        max_retries = 3
+        for attempt in range(1, max_retries + 1):
+            try:
+                ok = mail_fn(report)
+                if ok:
+                    if attempt > 1:
+                        logger.info(f"[scheduler] {platform_key} 메일 재시도 성공 ({attempt}/{max_retries})")
+                    return
+                logger.error(f"[scheduler] {platform_key} 메일 발송 실패 반환 (시도 {attempt}/{max_retries})")
+            except Exception as e:
+                logger.error(f"[scheduler] {platform_key} 메일 발송 중 예외 (시도 {attempt}/{max_retries}): {e}")
+            if attempt < max_retries:
+                time.sleep(3 * (attempt ** 2))  # 3s, 12s ...
+        logger.error(f"[scheduler] {platform_key} 메일 발송 {max_retries}회 모두 실패 — 완료 메일 미발송")
 
     try:
         result = subprocess.run(
