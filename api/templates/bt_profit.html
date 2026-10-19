@@ -16,7 +16,7 @@
       <button class="pm-btn pm-btn-ghost pm-btn-sm" onclick="csv()">CSV</button></div></div>
   <div class="muted" style="margin-bottom:.4rem">GP 하한가 = 구매가 ÷ (1 − {{ bt_params.gp_alert }}%) · 승 가격 = 최저 경쟁 실수취 × (1 − 밴드) · 추천가 = 승 가격이 하한 이상이면 승 가격, 아니면 하한가 · 플랫폼 판매가 = 가격 × VAT ÷ (1 − 당사 수수료)</div>
   <div class="scroll-x"><table class="pm-table" style="font-size:.76rem">
-    <thead><tr><th>SKU</th><th>카테고리</th><th class="num">수요/일</th><th class="num">구매가</th><th class="num">SAP 단가</th><th class="num">GP</th><th class="num">현 판매가</th>
+    <thead><tr><th>SKU</th><th>카테고리</th><th class="num">수요/일</th><th class="num">구매가</th><th class="num">평균 판매단가<div class="muted">VAT 제외</div></th><th class="num">GP</th><th class="num">현 판매가</th>
       <th>최저 경쟁</th><th>판정</th><th class="num">GP 하한가</th><th class="num">승 가격</th><th class="num">추천가</th><th class="num">변동</th><th class="num">추천 GP</th><th class="num">추천 판매가</th><th>비고</th></tr></thead>
     <tbody id="tb"></tbody></table></div>
   <div class="pager" id="pg"></div>
@@ -55,7 +55,7 @@ function draw(){
   pager(document.getElementById('pg'),R.length,S,PAGE,p=>{PAGE=p;draw();});
 }
 function csv(){toCSV(rows(),[['상품코드',r=>r.product_code],['상품명',r=>r.product_name],['카테고리',r=>r.category],['과세',r=>r.tax_class],['수요/일',r=>r.demand_daily],
-  ['구매가',r=>r.buy_price],['SAP단가',r=>r.our_price],['GP%',r=>r.gp_pct],['현판매가',r=>r.list_price],['최저경쟁셀러',r=>r.comp_seller],['최저실수취',r=>r.comp_net],
+  ['구매가',r=>r.buy_price],['평균판매단가(VAT제외)',r=>r.our_price],['GP%',r=>r.gp_pct],['현판매가',r=>r.list_price],['최저경쟁셀러',r=>r.comp_seller],['최저실수취',r=>r.comp_net],
   ['판정',r=>V_LABEL[r.verdict]],['격차%',r=>r.diff_pct],['GP하한가',r=>r.floor],['승가격',r=>r.win_price],['추천가',r=>r.rec_price],['변동%',r=>r.rec_change_pct],
   ['추천GP%',r=>r.rec_gp],['추천판매가',r=>r.rec_list_price],['비고',r=>r.note]],`수익성_추천가_${PF}.csv`);}
 document.querySelectorAll('#pfTabs button').forEach(b=>b.onclick=()=>{PF=b.dataset.p;document.querySelectorAll('#pfTabs button').forEach(x=>x.classList.toggle('on',x===b));load();});

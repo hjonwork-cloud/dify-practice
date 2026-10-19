@@ -29,8 +29,8 @@
     const k=(l,v,s,c='')=>`<div class="kpi ${c}"><div class="l">${l}</div><div class="v">${v}</div><div class="s">${s||''}</div></div>`;
     document.getElementById('kpis').innerHTML=
       k('운영 SKU (확정)', (j.active_cnt||0).toLocaleString(), `막힘 ${sc.blocked||0} · 수기제외 ${sc.excluded||0} · 5140 ${sc.group5140||0}`,'green')+
-      k('예상 일수량 (전체센터)', num(j.demand_total,0), `일 예상매출 ${man(j.revenue_daily)}원 (SAP 단가)`)+
-      k('평균 GP (SAP 단가)', j.gp_avg===null?'-':j.gp_avg+'%', `매출가중 ${j.gp_wavg??'-'}% · 경보 ${j.gp_alert_cnt} SKU`, j.gp_avg!==null&&j.gp_avg<BT_PARAMS.gp_alert?'red':'')+
+      k('예상 일수량 (전체센터)', num(j.demand_total,0), `일 예상매출 ${man(j.revenue_daily)}원 (평균 판매단가)`)+
+      k('평균 GP (평균 판매단가)', j.gp_avg===null?'-':j.gp_avg+'%', `매출가중 ${j.gp_wavg??'-'}% · 경보 ${j.gp_alert_cnt} SKU`, j.gp_avg!==null&&j.gp_avg<BT_PARAMS.gp_alert?'red':'')+
       k('오늘 수발주 변동', ev.total||0, `막힘 ${ev.block||0} · 열림 ${ev.open||0} · 신규 ${ev.new||0}`, ev.red?'red':'')+
       k('미확인 이벤트', ev.unacked||0, `🔴 ${ev.red||0}건`, ev.unacked?'amber':'')+
       k('미매핑 운영 SKU', (j.unmapped_active||0).toLocaleString(), '3개 플랫폼 모두 매핑 없음', j.unmapped_active?'amber':'');
@@ -49,7 +49,7 @@
     if(j.gp_alert_cnt) todo.push(`<li>GP ${BT_PARAMS.gp_alert}% 미만 SKU <b>${j.gp_alert_cnt}</b>건 → <a href="${BT}/profit">수익성</a></li>`);
     todo.push(`<li class="muted">최근 스냅샷: ${lr?esc(lr.started_at)+' · '+esc(lr.status)+' · '+esc(lr.message||''):'아직 없음'}</li>`);
     document.getElementById('todo').outerHTML=`<ul style="font-size:.84rem;line-height:1.9;padding-left:1.1rem;">${todo.join('')}</ul>`;
-    document.getElementById('riskTbl').innerHTML=`<thead><tr><th>SKU</th><th>플랫폼·셀러</th><th class="num">SAP 단가</th><th class="num">경쟁 실수취가</th><th class="num">차이</th><th class="num">예상 일수량</th><th class="num">일 매출</th></tr></thead><tbody>`+
+    document.getElementById('riskTbl').innerHTML=`<thead><tr><th>SKU</th><th>플랫폼·셀러</th><th class="num">평균 판매단가<div class="muted">VAT 제외</div></th><th class="num">경쟁 실수취가</th><th class="num">차이</th><th class="num">예상 일수량</th><th class="num">일 매출</th></tr></thead><tbody>`+
       (j.risks||[]).map(r=>`<tr><td><span class="code">${esc(r.product_code)}</span> ${esc(r.product_name)}</td><td>${pfBadge(r.platform)} ${esc(r.seller)}</td>
         <td class="num">${won(r.our_price)}</td><td class="num">${won(r.comp_net)}</td><td class="num gp-alert">${pct(r.diff_pct)}</td>
         <td class="num">${num(r.demand_daily,1)}</td><td class="num">${won(r.stake)}</td></tr>`).join('')+

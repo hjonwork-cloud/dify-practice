@@ -65,13 +65,21 @@ function apply(){
   VIEW.sort((a,b)=>(b.demand_daily||0)-(a.demand_daily||0));
   PAGE=1; render();
 }
-function bestCell(b){ if(!b) return '<span class="muted">-</span>';
-  return `${vBadge(b.verdict)} <span class="num">${won(b.comp_net)}</span><div class="muted">${esc(b.seller)} · ${pct(b.diff_pct)}</div>`; }
+function bestCell(b,r){ if(!b) return '<span class="muted">-</span>';
+  // 실수취 = 셀러 판매가(VAT 포함) × (1−수수료) ÷ VAT ÷ 배수  → VAT 제외 기준으로 당사 평균 판매단가와 동일 선상 비교
+  const tip=`셀러 판매가(VAT 포함) ${won(b.comp_price)}`
+    +` × (1−수수료 ${b.fee_pct}%)`
+    +` ÷ VAT ${(r&&r.tax_class==='면세')?'1.0 (면세)':'1.1'}`
+    +(b.multiplier&&b.multiplier!==1?` ÷ 배수 ${b.multiplier}`:'')
+    +` = 실수취 ${won(b.comp_net)} (VAT 제외)`
+    +`\n당사 평균 판매단가 ${won(r?r.our_price:null)} (VAT 제외)`
+    +`\n격차 = (${won(b.comp_net)} − ${won(r?r.our_price:null)}) ÷ ${won(b.comp_net)} = ${pct(b.diff_pct)}`;
+  return `<span title="${esc(tip)}">${vBadge(b.verdict)} <span class="num">${won(b.comp_net)}</span><div class="muted">${esc(b.seller)} · ${pct(b.diff_pct)}</div></span>`; }
 function render(){
   const rows=VIEW.slice((PAGE-1)*SIZE,PAGE*SIZE);
   document.getElementById('tbl').innerHTML=`<thead><tr><th><input type="checkbox" onclick="document.querySelectorAll('.ck').forEach(c=>c.checked=this.checked)"></th>
     <th>상태</th><th>SKU (3배치)</th><th>대분류</th><th class="num">예상 일수량<div class="muted">전체센터 · 센터/배치별</div></th>
-    <th class="num">SAP 단가</th><th class="num">구매가</th><th class="num">GP</th><th class="num">매핑<div class="muted">배민/오늘/식봄</div></th>
+    <th class="num">평균 판매단가<div class="muted">VAT 제외</div></th><th class="num">구매가</th><th class="num">GP</th><th class="num">매핑<div class="muted">배민/오늘/식봄</div></th>
     <th>배민상회 최강</th><th>오늘얼마 최강</th></tr></thead><tbody>`+
     rows.map(r=>{const mc=r.map_cnt||{};
       return `<tr style="cursor:pointer" onclick="if(event.target.type!=='checkbox')openSku('${esc(r.product_code)}')">
@@ -79,7 +87,7 @@ function render(){
       <td class="muted">${esc(r.category||'')}</td><td class="num">${demHtml(r.demand_daily,r.demand_plants,4)}</td>
       <td class="num">${won(r.our_price)}${r.price_src==='twin'?'<div class="twin">1배치 단가</div>':''}</td><td class="num">${won(r.buy_price)}</td><td class="num">${gpTxt(r.gp_pct)}</td>
       <td class="num">${mc.baemin||0} / ${mc.todaysales||0} / ${mc.foodspring||0}</td>
-      <td>${bestCell(r.best&&r.best.baemin)}</td><td>${bestCell(r.best&&r.best.todaysales)}</td></tr>`;}).join('')+
+      <td>${bestCell(r.best&&r.best.baemin,r)}</td><td>${bestCell(r.best&&r.best.todaysales,r)}</td></tr>`;}).join('')+
     (rows.length?'':'<tr><td colspan="11" class="muted">해당 없음</td></tr>')+'</tbody>';
   pager(document.getElementById('pager'),VIEW.length,SIZE,PAGE,p=>{PAGE=p;render();});
 }
@@ -94,7 +102,7 @@ async function openSku(code){
       <button class="pm-btn pm-btn-ghost pm-btn-sm" style="float:right" onclick="document.getElementById('mBg').style.display='none'">닫기</button></h3>
       ${s.twin_code?`<div class="twin">[N] 3배치 ↔ 1배치 쌍둥이 ${esc(s.twin_code)} ${esc(s.twin_name)} — 매핑·수요는 두 코드 합산</div>`:''}
       <div class="kpis" style="margin-top:.6rem">
-        <div class="kpi"><div class="l">SAP 단가 / 구매가</div><div class="v" style="font-size:1.1rem">${won(s.our_price)} / ${won(s.buy_price)}</div><div class="s">GP ${s.gp_pct??'-'}% · ${esc(s.tax_class)}</div></div>
+        <div class="kpi"><div class="l">평균 판매단가(VAT 제외) / 구매가</div><div class="v" style="font-size:1.1rem">${won(s.our_price)} / ${won(s.buy_price)}</div><div class="s">GP ${s.gp_pct??'-'}% · ${esc(s.tax_class)}</div></div>
         <div class="kpi"><div class="l">예상 일수량 (전체센터)</div><div class="v" style="font-size:1.1rem">${num(s.demand_daily,1)}</div><div class="s">${(s.demand_plants||[]).map(p=>esc(p.label)+' '+num(p.daily,1)).join(' · ')||'실적 없음'}</div></div>
         <div class="kpi"><div class="l">수발주</div><div class="v" style="font-size:1.1rem">사용보류 ${esc(s.use_hold||'-')}</div><div class="s">자재그룹 ${esc(s.material_group)} ${esc(s.product_group)}</div></div>
       </div>
@@ -128,7 +136,7 @@ async function unmap(id,code){if(!confirm('이 매핑을 해제할까요?'))retu
 function exportCsv(){
   toCSV(VIEW,[['상태',r=>ST_LABEL[r.status]],['상품코드',r=>r.product_code],['상품명',r=>r.product_name],['1배치코드',r=>r.twin_code],
     ['대분류',r=>r.category],['예상일수량',r=>r.demand_daily],['센터별',r=>(r.demand_plants||[]).map(p=>p.label+':'+p.daily).join(' | ')],
-    ['SAP단가',r=>r.our_price],['구매가',r=>r.buy_price],['GP%',r=>r.gp_pct],
+    ['평균판매단가(VAT제외)',r=>r.our_price],['구매가',r=>r.buy_price],['GP%',r=>r.gp_pct],
     ['매핑_배민',r=>(r.map_cnt||{}).baemin],['매핑_오늘얼마',r=>(r.map_cnt||{}).todaysales],['매핑_식봄',r=>(r.map_cnt||{}).foodspring],
     ['배민_판정',r=>r.best&&r.best.baemin?r.best.baemin.verdict:''],['배민_실수취가',r=>r.best&&r.best.baemin?r.best.baemin.comp_net:''],
     ['오늘_판정',r=>r.best&&r.best.todaysales?r.best.todaysales.verdict:''],['오늘_실수취가',r=>r.best&&r.best.todaysales?r.best.todaysales.comp_net:'']],

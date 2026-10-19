@@ -75,7 +75,7 @@ function render(){
     return `<div class="q-sku ${q.status==='done'?'done':''}">
       <div style="display:flex;gap:1rem;align-items:flex-start;flex-wrap:wrap">
         <div style="flex:1;min-width:260px">${skuName(s)}</div>
-        <div class="muted">SAP <b>${won(s.our_price)}</b> · ${esc(s.tax_class||'')} · GP ${gpTxt(s.gp_pct)}</div>
+        <div class="muted">평균판매단가 <b>${won(s.our_price)}</b> · ${esc(s.tax_class||'')} · GP ${gpTxt(s.gp_pct)}</div>
         <div style="min-width:160px">${demHtml(s.demand_daily,s.demand_plants,4)}</div>
         <a class="pm-btn pm-btn-ghost pm-btn-sm" href="${BT}/mapping?sku=${encodeURIComponent(s.product_code)}">상세 매핑 ›</a>
       </div>${body}</div>`;}).join('')||'<div class="bt-loading">미매핑 SKU 없음 🎉</div>';

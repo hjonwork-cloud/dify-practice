@@ -6,7 +6,7 @@
 <div class="kpis" id="kpis"></div>
 <div class="pm-card">
   <div class="pm-card-head"><span class="pm-card-title">셀러별 경쟁 현황</span>
-    <span class="muted">셀러당 SKU별 최저 실수취 라인 기준 · 패배 위험액 = 패 SKU의 일 예상매출(수요×SAP 단가) · 출혈승 = 승이지만 GP &lt; {{ bt_params.gp_alert }}%</span></div>
+    <span class="muted">셀러당 SKU별 최저 실수취 라인 기준 · 패배 위험액 = 패 SKU의 일 예상매출(수요×평균 판매단가) · 출혈승 = 승이지만 GP &lt; {{ bt_params.gp_alert }}%</span></div>
   <div style="display:flex;gap:.5rem;margin-bottom:.6rem">
     <input id="kw" class="pm-input" style="max-width:240px" placeholder="셀러명 검색">
     <label style="font-size:.8rem;align-self:center"><input type="checkbox" id="minOv" checked> 겹침 3개 이상</label>
@@ -22,7 +22,7 @@
 <div class="bt-modal-bg" id="md" onclick="if(event.target===this)this.style.display='none'">
   <div class="bt-modal"><div style="display:flex;justify-content:space-between"><h3 id="mdT"></h3><button class="pm-btn pm-btn-ghost pm-btn-sm" onclick="md.style.display='none'">닫기</button></div>
     <div class="scroll-x"><table class="pm-table" style="font-size:.78rem">
-      <thead><tr><th>SKU</th><th>셀러 상품</th><th class="num">셀러 판매가</th><th class="num">수수료</th><th class="num">배수</th><th class="num">실수취</th><th class="num">SAP 단가</th>
+      <thead><tr><th>SKU</th><th>셀러 상품</th><th class="num">셀러 판매가</th><th class="num">수수료</th><th class="num">배수</th><th class="num">실수취</th><th class="num">평균 판매단가<div class="muted">VAT 제외</div></th>
         <th class="num">격차</th><th>판정</th><th class="num">GP</th><th class="num">맞추면 GP</th><th class="num">수요/일</th></tr></thead>
       <tbody id="mdB"></tbody></table></div></div>
 </div>

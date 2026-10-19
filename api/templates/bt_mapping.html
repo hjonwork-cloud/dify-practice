@@ -60,7 +60,7 @@ async function searchOur(){
   const j=await btGet(`/api/our-skus?keyword=${encodeURIComponent(kw)}&unmapped_pf=${un}&status=${st}&limit=150`); renderMeta(j);
   document.getElementById('oList').innerHTML=j.rows.map(r=>`<div class="it ${SKU&&SKU.product_code===r.product_code?'sel':''}" data-c="${esc(r.product_code)}">
     ${stBadge(r.status)} ${skuName(r)}
-    <div style="display:flex;gap:.8rem;margin-top:.25rem;flex-wrap:wrap"><span>SAP ${won(r.our_price)}</span><span>구매 ${won(r.buy_price)}</span><span>GP ${gpTxt(r.gp_pct)}</span>
+    <div style="display:flex;gap:.8rem;margin-top:.25rem;flex-wrap:wrap"><span>평균판매단가 ${won(r.our_price)}</span><span>구매 ${won(r.buy_price)}</span><span>GP ${gpTxt(r.gp_pct)}</span>
     <span>매핑 배민 ${r.map_cnt.baemin} · 오늘 ${r.map_cnt.todaysales} · 식봄 ${r.map_cnt.foodspring}</span></div>
     ${demHtml(r.demand_daily,r.demand_plants,5)}</div>`).join('')||'<div class="bt-loading">결과 없음</div>';
   document.querySelectorAll('#oList .it').forEach(el=>el.onclick=()=>pick(j.rows.find(r=>r.product_code===el.dataset.c)));
@@ -74,7 +74,7 @@ async function pick(r){
       <label><input type="radio" name="tgt" value="${esc(r.twin_code)}" checked> 1배치 ${esc(r.twin_code)} (권장 — 기존 메뉴와 공유)</label>
       <label style="margin-left:.6rem"><input type="radio" name="tgt" value="${esc(r.product_code)}"> 3배치 ${esc(r.product_code)}</label></div>`:'';
   box.innerHTML=`<div style="font-weight:700">${skuName(r)}</div>${tgt}
-    <div class="muted" style="margin:.3rem 0">현재 매핑 ${SKU_DETAIL.lines.length}건 · 판정은 SAP 단가 ${won(r.our_price)} 기준</div>
+    <div class="muted" style="margin:.3rem 0">현재 매핑 ${SKU_DETAIL.lines.length}건 · 판정은 평균 판매단가(VAT 제외) ${won(r.our_price)} 기준</div>
     <table class="pm-table" style="font-size:.76rem"><tbody>${SKU_DETAIL.lines.map(l=>`<tr><td>${pfBadge(l.platform)}</td><td>${esc(l.seller)}</td><td>${esc(l.ext_name)}</td>
       <td class="num">${won(l.comp_net)}</td><td>${vBadge(l.verdict)}</td><td class="muted">${l.tag}×${l.multiplier}</td>
       <td><button class="pm-btn pm-btn-ghost pm-btn-sm" onclick="unmap(${l.mapping_id})">해제</button></td></tr>`).join('')||'<tr><td class="muted">매핑 없음</td></tr>'}</tbody></table>`;

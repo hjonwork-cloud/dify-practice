@@ -28,7 +28,7 @@ async function load(){
   document.getElementById('kpis').innerHTML=k('운영 SKU',J.active_cnt.toLocaleString(),'커버리지 분모')+
     ['baemin','todaysales','foodspring'].map(pf=>{const b=J.by_platform[pf];return k(PF_LABEL[pf]+' 매핑률',b.rate+'%',`${b.mapped} SKU · 가격확인 ${b.priced} · 수요커버 ${b.demand_cover}%`,b.rate<30?'red':b.rate<60?'amber':'green');}).join('');
   sellers();
-  document.getElementById('uTbl').innerHTML='<thead><tr><th>SKU</th><th>대분류</th><th class="num">예상 일수량</th><th class="num">SAP 단가</th><th></th></tr></thead><tbody>'+
+  document.getElementById('uTbl').innerHTML='<thead><tr><th>SKU</th><th>대분류</th><th class="num">예상 일수량</th><th class="num">평균 판매단가</th><th></th></tr></thead><tbody>'+
     J.unmapped.map(r=>`<tr><td><span class="code">${esc(r.product_code)}</span> ${esc(r.product_name)}</td><td class="muted">${esc(r.category||'')}</td>
       <td class="num">${num(r.demand_daily,1)}</td><td class="num">${won(r.our_price)}</td>
       <td><a class="pm-btn pm-btn-ghost pm-btn-sm" href="${BT}/mapping?sku=${encodeURIComponent(r.product_code)}">매핑</a></td></tr>`).join('')+'</tbody>';

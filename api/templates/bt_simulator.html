@@ -34,7 +34,7 @@ input.ovr.set{border-color:#f59e0b;background:#fffbeb;}
       <div class="pm-card-head"><span class="pm-card-title">② 가격 시나리오</span></div>
       <div class="ctl">
         <span>방식</span>
-        <select id="mode" class="pm-input"><option value="match">경쟁 최저가 대비 승 가격(밴드 아래)</option><option value="pct">SAP 단가 일괄 ±%</option><option value="gp">목표 GP%</option></select>
+        <select id="mode" class="pm-input"><option value="match">경쟁 최저가 대비 승 가격(밴드 아래)</option><option value="pct">평균 판매단가 일괄 ±%</option><option value="gp">목표 GP%</option></select>
         <span id="valL">조정 %</span><input id="val" type="number" step="0.5" value="0" class="pm-input">
         <span>GP 하한 %</span><input id="gpFloor" type="number" step="0.5" value="{{ bt_params.gp_alert }}" class="pm-input">
         <span></span><label style="font-size:.76rem"><input type="checkbox" id="keepWin" checked> 이미 승인 SKU는 현재가 유지</label>
@@ -65,7 +65,7 @@ input.ovr.set{border-color:#f59e0b;background:#fffbeb;}
           <button class="pm-btn pm-btn-ghost pm-btn-sm" onclick="clearOvr()">수기 조정 초기화</button>
           <button class="pm-btn pm-btn-ghost pm-btn-sm" onclick="csv()">CSV</button></div></div>
       <div class="scroll-x"><table class="pm-table" style="font-size:.76rem">
-        <thead><tr><th>SKU</th><th class="num">수요/일</th><th class="num">구매가</th><th class="num">SAP 단가</th><th>최저 경쟁(실수취)</th><th>현재</th>
+        <thead><tr><th>SKU</th><th class="num">수요/일</th><th class="num">구매가</th><th class="num">평균 판매단가<div class="muted">VAT 제외</div></th><th>최저 경쟁(실수취)</th><th>현재</th>
           <th class="num">시나리오가</th><th class="num">변동</th><th>시나리오</th><th class="num">GP</th><th class="num">플랫폼 판매가</th><th class="num">예상수량 현재→시나리오</th><th class="num">GP액/일 Δ</th></tr></thead>
         <tbody id="tb"></tbody></table></div>
       <div class="pager" id="pg"></div>
@@ -152,7 +152,7 @@ function drawTable(){
 }
 function clearOvr(){OVR={};calc();}
 function csv(){toCSV(rows(),[['상품코드',r=>r.product_code],['상품명',r=>r.product_name],['1배치코드',r=>r.twin_code],['수요/일',r=>r.demand_daily],['구매가',r=>r.buy_price],
-  ['SAP단가',r=>r.our_price],['최저경쟁셀러',r=>r.bestSeller],['최저실수취',r=>r.best],['현재판정',r=>V_LABEL[r.v0]],['시나리오가',r=>r.p],['시나리오판정',r=>V_LABEL[r.v1]],
+  ['평균판매단가(VAT제외)',r=>r.our_price],['최저경쟁셀러',r=>r.bestSeller],['최저실수취',r=>r.best],['현재판정',r=>V_LABEL[r.v0]],['시나리오가',r=>r.p],['시나리오판정',r=>V_LABEL[r.v1]],
   ['시나리오GP%',r=>r.gpPct1&&r.gpPct1.toFixed(1)],['플랫폼판매가',r=>r.list&&Math.round(r.list)],['수량현재',r=>r.q0.toFixed(1)],['수량시나리오',r=>r.q1.toFixed(1)],
   ['GP현재',r=>Math.round(r.gp0)],['GP시나리오',r=>Math.round(r.gp1)]],'셀러시뮬레이션.csv');}
 function scParams(){return {mode:document.getElementById('mode').value,val:V('val'),gpFloor:V('gpFloor'),band:V('band'),conv:V('conv'),rW:V('rW'),rT:V('rT'),rL:V('rL'),

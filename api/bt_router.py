@@ -3,15 +3,16 @@
 prefix: /portal/price-monitor/bt
 
 기준
-  - 운영 SKU(공급): 수발주(ZSDR0017) 플랜트 4121(화성 외식_3배치) · 사용보류≠X · 자재그룹≠5140 · 수기 제외 아님
+  - 운영 SKU(공급): 수발주(ZSDR0017) 플랜트 4121(화성 외식_3배치) · 배치 '03' · 마감시간 22:00 ·
+                   사용보류/삭제구분≠X · 종료일 미경과 · 자재그룹≠5140 · 수기 제외 아님
   - 예상수량(수요): 매출(T_MAIN) 최근 N일(기본 28일) 전체센터 일평균. 3배치 SKU 코드 + [N] 1배치 쌍둥이 코드 합산,
                     센터(플랜트)·배치별 내역 함께 제공. 일평균 = 합계 ÷ 영업일(월~토)
-  - 비교가: SAP 단가(당사 공급가, VAT 제외 — T_MAIN 최근 실적 매출액/수량)
+  - 비교가: 평균 판매단가(VAT 제외 — T_MAIN 최근 2주 실적 매출액 ÷ 매출수량, 당사 공급가)
   - 경쟁사 실수취가 = 판매가 × (1−수수료) ÷ VAT ÷ 배수
       수수료: 배민상회 타사 6.6% · 오늘얼마 4.8% · 식봄 기존 규칙(직배송 6.6 / 싱싱 17.1 / CJ 4.8)
-  - 판정: d = (경쟁사 실수취가 − 당사 SAP 단가) ÷ 경쟁사 실수취가
+  - 판정: d = (경쟁사 실수취가 − 당사 평균 판매단가) ÷ 경쟁사 실수취가
           d ≥ +밴드 → 승 / |d| < 밴드 → 무 / d ≤ −밴드 → 패 (밴드 기본 2%)
-  - 당사 플랫폼 등록가 환산 = SAP 단가 × VAT ÷ (1 − 당사 수수료)  (배민상회 5.5% · 오늘얼마 4.8%)
+  - 당사 플랫폼 등록가 환산 = 평균 판매단가 × VAT ÷ (1 − 당사 수수료)  (배민상회 5.5% · 오늘얼마 4.8%)
 """
 from __future__ import annotations
 
@@ -36,6 +37,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/portal/price-monitor/bt", tags=["price-monitor-bt"])
 
 BT_PLANT = "4121"
+BT_BATCH = "03"          # 3배치
+BT_CUTOFF = "220000"     # 주문 마감시간 22:00 (3배치 실제 운영 대상)
 EXCLUDED_MATERIAL_GROUP = "5140"
 PLATFORMS = ["baemin", "todaysales", "foodspring"]
 FOCUS_PLATFORMS = ["baemin", "todaysales"]
@@ -103,9 +106,12 @@ def _md5(items) -> str:
 # ── 1. 4121 수발주 원천 ─────────────────────────────────────────────────────
 
 def _query_4121() -> list[dict]:
-    """플랜트 4121 수발주 전체(사용보류·자재그룹 무관) — 상태 변화 추적을 위해 전부 수집.
-    4121에는 배치 01/03/04/06 행이 함께 존재하므로 사용보류·삭제·종료일은
-    3배치(배치 '03') 행을 기준으로 판정하고, 03 행이 없는 코드만 전체 행 기준(모두 X일 때 X)으로 본다."""
+    """플랜트 4121 · 배치 '03' · 마감시간 22:00 수발주 전체(사용보류·자재그룹 무관).
+    4121에는 배치 01/03/04/06, 마감시간 00:01/12:00/16:00/17:00/22:00 행이 섞여 있고
+    실제 3배치 운영 대상은 '배치 03 + 마감시간 22:00' 조합뿐이므로 여기서 먼저 걸러낸다.
+    (전체 4121 = 18.5천 코드 → 03/22시 = 6.4천 코드 → 유효·자재그룹≠5140 = 약 2.2천 코드)
+    사용보류·삭제구분·종료일은 이 행들 기준으로 판정하며, 막힘/제외 상태도 변화 추적을 위해
+    모두 수집한 뒤 _classify 단계에서 분류한다."""
     rows = pm._q(f"""
         SELECT
             z.`상품코드`                                AS product_code,
@@ -117,17 +123,17 @@ def _query_4121() -> list[dict]:
             MAX(m.`온도조건`)                           AS temp_cond,
             MAX(COALESCE(m.`세금분류명`, '과세'))        AS tax_class,
             MAX(m.`단위`)                               AS unit,
-            MAX(CASE WHEN z.`배치` = '03' THEN 1 ELSE 0 END) AS has03,
-            COALESCE(
-                MAX(CASE WHEN z.`배치` = '03' THEN
-                    CASE WHEN COALESCE(z.`사용보류`, '') = 'X'
-                           OR COALESCE(z.`삭제구분`, '') = 'X'
-                           OR z.`종료일` < current_date() THEN 'X' ELSE '' END END),
-                MIN(CASE WHEN COALESCE(z.`사용보류`, '') = 'X' THEN 'X' ELSE '' END)
-            )                                           AS use_hold
+            1                                           AS has03,
+            MAX(z.`마감시간`)                            AS cutoff_time,
+            MIN(CASE WHEN COALESCE(z.`사용보류`, '') = 'X'
+                       OR COALESCE(z.`삭제구분`, '') = 'X'
+                       OR z.`종료일` < current_date() THEN 'X' ELSE '' END)
+                                                        AS use_hold
         FROM {pm.T_ZSDR} z
         LEFT JOIN {pm.T_ZMM60} m ON z.`상품코드` = m.`상품코드`
         WHERE z.`플랜트` = '{BT_PLANT}'
+          AND z.`배치`   = '{BT_BATCH}'
+          AND z.`마감시간` = '{BT_CUTOFF}'
         GROUP BY z.`상품코드`
     """) or []
     out = []
@@ -143,14 +149,16 @@ def _query_4121() -> list[dict]:
 
 
 def get_raw(force: bool = False) -> list[dict]:
+    # 캐시 키에 배치·마감시간 조건을 포함 → 기준 변경 시 구 캐시를 자동 폐기
+    key = f"raw4121_b{BT_BATCH}c{BT_CUTOFF}"
     if force:
         data = _query_4121()
         if data:
             ts = time.time()
-            _cache["raw4121"] = (ts, data)
-            pm._disk_set("bt_raw4121", ts, data)
+            _cache[key] = (ts, data)
+            pm._disk_set(f"bt_{key}", ts, data)
         return data
-    return _cached("raw4121", 600, _query_4121, disk_ttl=6 * 3600)
+    return _cached(key, 600, _query_4121, disk_ttl=6 * 3600)
 
 
 # ── 2. [N] 쌍둥이(1배치 코드) 연결 ──────────────────────────────────────────
@@ -329,7 +337,7 @@ def _build_universe() -> dict:
         base = {str(r["product_code"]): r for r in (pm._get_base_prices("ALL") or [])}
     except Exception as e:
         base = {}
-        warnings.append(f"SAP 단가 조회 실패: {e}")
+        warnings.append(f"평균 판매단가 조회 실패: {e}")
 
     by_code: dict[str, list[dict]] = defaultdict(list)
     for m in portal_db.pm_list_all_mappings("ALL"):
@@ -488,7 +496,10 @@ def _best_by_platform(s: dict) -> dict:
         if b is None or ln["comp_net"] < b["comp_net"]:
             best[ln["platform"]] = ln
     return {pf: {"comp_net": b["comp_net"], "seller": b["seller"], "verdict": b["verdict"],
-                 "diff_pct": b["diff_pct"], "match_gp": b["match_gp"]} for pf, b in best.items()}
+                 "diff_pct": b["diff_pct"], "match_gp": b["match_gp"],
+                 # 계산 근거(툴팁용): 실수취 = 판매가(VAT 포함) × (1−수수료) ÷ VAT ÷ 배수
+                 "comp_price": b["comp_price"], "fee_pct": b["fee_pct"],
+                 "multiplier": b["multiplier"]} for pf, b in best.items()}
 
 
 def _sku_row(s: dict) -> dict:

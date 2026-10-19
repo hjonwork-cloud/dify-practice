@@ -10,7 +10,7 @@
     </div>
     <input id="memo" class="pm-input" style="margin-top:.5rem" placeholder="메모 (선택)">
     <button class="pm-btn pm-btn-danger" style="margin-top:.6rem;width:100%;justify-content:center" onclick="add()">제외 등록</button>
-    <div class="muted" style="margin-top:.6rem;line-height:1.6">· 4121 수발주에 없는 코드는 등록되지 않습니다.<br>· 해제 예정일이 되면 자동 해제하지 않고 <b>해제 후보</b>로 표시합니다.<br>· 등록·해제는 SKU 변경 이력에 남습니다.</div>
+    <div class="muted" style="margin-top:.6rem;line-height:1.6">· 4121 3배치(배치 03 · 마감 22:00) 수발주에 없는 코드는 등록되지 않습니다.<br>· 해제 예정일이 되면 자동 해제하지 않고 <b>해제 후보</b>로 표시합니다.<br>· 등록·해제는 SKU 변경 이력에 남습니다.</div>
   </div>
   <div class="pm-card">
     <div class="pm-filterbar">
@@ -28,7 +28,7 @@
 
 {% block bt_scripts %}
 <script>
-document.getElementById('btMeta').innerHTML='<span class="chip">수기 제외 = 4121 기본 리스트(사용보류≠X · 자재그룹≠5140)에서 영업 판단으로 빼는 SKU</span>';
+document.getElementById('btMeta').innerHTML='<span class="chip">수기 제외 = 4121 3배치 기본 리스트(배치 03 · 마감 22:00 · 사용보류≠X · 자재그룹≠5140)에서 영업 판단으로 뺀는 SKU</span>';
 document.getElementById('reason').innerHTML=Object.entries(EX_REASON).map(([k,v])=>`<option value="${k}">${esc(v)}</option>`).join('');
 let ROWS=[];
 async function load(){

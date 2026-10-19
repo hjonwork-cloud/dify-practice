@@ -91,9 +91,9 @@ function renderMeta(j){
   const el=document.getElementById('btMeta'); if(!el||!j) return;
   const cd=Object.entries(j.crawl_dates||{}).map(([k,v])=>`<span class="chip">${PF_LABEL[k]||k} 수집 ${esc(v)}</span>`).join('');
   const w=(j.warnings||[]).map(x=>`<span class="chip warn">⚠ ${esc(x)}</span>`).join('');
-  el.innerHTML=`<span class="chip">기준 4121 · 사용보류≠X · 자재그룹≠5140 · 수기제외 반영</span>`+
+  el.innerHTML=`<span class="chip">기준 4121 · 3배치(배치 03) · 마감 22:00 · 사용보류≠X · 자재그룹≠5140 · 수기제외 반영</span>`+
     `<span class="chip">예상수량 = 전체센터 최근 ${num(BT_PARAMS.demand_days,0)}일 일평균(영업일 ${j.workdays||'-'}일)</span>`+
-    `<span class="chip">비교가 = SAP 단가 · 밴드 ±${num(BT_PARAMS.tie_band_pct,1)}%</span>`+cd+
+    `<span class="chip" title="경쟁사 실수취 = 셀러 판매가(VAT 포함) × (1−플랫폼 수수료) ÷ VAT(과세 1.1 / 면세 1.0) ÷ 배수&#10;당사 평균 판매단가 = SAP 매출액 ÷ 매출수량 (VAT 제외)&#10;→ 양쪽 모두 VAT 제외 공급가액 기준으로 맞춘 뒤 비교">비교가 = 평균 판매단가(VAT 제외) · 경쟁 실수취도 VAT 제외 환산 · 밴드 ±${num(BT_PARAMS.tie_band_pct,1)}%</span>`+cd+
     `<span class="chip">구성 ${esc(j.built_at||'')} (${j.build_sec??'-'}s)</span>`+w+
     `<button class="pm-btn pm-btn-ghost pm-btn-sm" onclick="btRefresh()">↻ 새로고침</button>`;
 }
