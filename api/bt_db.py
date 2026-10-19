@@ -25,6 +25,7 @@ _initialized = False
 #  - 배민상회 당사 수수료 5.5%, 배민상회 타사 6.6%, 오늘얼마 4.8%
 #  - 비교가 = 평균 판매단가(당사 공급가, VAT 제외)
 #  - 승·무·패 밴드 ±2%, 수요 반영률 승 100 / 무 50 / 패 10
+#  - 하한은 공헌이익율 8% (재경 총액 인식 확정 — 수수료는 판관비라 GP율과 기준이 다름)
 DEFAULT_PARAMS: dict[str, float | str] = {
     "fee_our_baemin":      5.5,   # 당사가 배민상회에서 판매 시 수수료(%)
     "fee_our_todaysales":  4.8,   # 당사가 오늘얼마에서 판매 시 수수료(%)
@@ -38,6 +39,8 @@ DEFAULT_PARAMS: dict[str, float | str] = {
     "demand_days":         28,    # 예상수량 산정 기간(일) — 최근 4주
     "gp_alert":            10.0,  # GP 경보(%)
     "gp_warn":             20.0,  # GP 주의(%)
+    "cm_floor_pct":        8.0,   # 공헌이익율 하한(%) — 추천가·시나리오 하한 (목업 FLOOR 동일)
+    "logi_pct":            6.0,   # 물류비율(%) — 공헌이익 산정용 예시값, SAP 실적 전환 전까지
     "alert_email":         "",    # 수발주 🔴 이벤트 알림 수신 메일 (콤마 구분)
 }
 

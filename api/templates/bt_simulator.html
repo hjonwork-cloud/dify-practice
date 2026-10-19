@@ -34,9 +34,13 @@ input.ovr.set{border-color:#f59e0b;background:#fffbeb;}
       <div class="pm-card-head"><span class="pm-card-title">② 가격 시나리오</span></div>
       <div class="ctl">
         <span>방식</span>
-        <select id="mode" class="pm-input"><option value="match">경쟁 최저가 대비 승 가격(밴드 아래)</option><option value="pct">평균 판매단가 일괄 ±%</option><option value="gp">목표 GP%</option></select>
+        <select id="mode" class="pm-input">
+          <option value="comp">⚖ 경쟁가 맞춤 — 등록가 동일</option>
+          <option value="match">경쟁 최저가 대비 승 가격(밴드 아래)</option>
+          <option value="pct">평균 판매단가 일괄 ±%</option>
+          <option value="gp">목표 공헌이익율 %</option></select>
         <span id="valL">조정 %</span><input id="val" type="number" step="0.5" value="0" class="pm-input">
-        <span>GP 하한 %</span><input id="gpFloor" type="number" step="0.5" value="{{ bt_params.gp_alert }}" class="pm-input">
+        <span>공헌이익율 하한 %</span><input id="cmFloor" type="number" step="0.5" value="{{ bt_params.cm_floor_pct }}" class="pm-input">
         <span></span><label style="font-size:.76rem"><input type="checkbox" id="keepWin" checked> 이미 승인 SKU는 현재가 유지</label>
         <span></span><label style="font-size:.76rem"><input type="checkbox" id="noRaise" checked> 인상은 하지 않음(인하만)</label>
       </div>
@@ -48,7 +52,7 @@ input.ovr.set{border-color:#f59e0b;background:#fffbeb;}
         <span>반영률 패 %</span><input id="rL" type="number" value="{{ bt_params.reflect_lose }}" class="pm-input">
         <span>밴드 ±%</span><input id="band" type="number" step="0.5" value="{{ bt_params.tie_band_pct }}" class="pm-input">
       </div>
-      <div class="muted" style="margin-top:.5rem;line-height:1.5">예상수량 = 전체센터 일평균 × 전환계수 × 판정별 반영률.<br>판정 = 선택 셀러 중 최저 실수취가 대비 ±밴드.<br>월 환산 = 일 × 26(월~토).</div>
+      <div class="muted" style="margin-top:.5rem;line-height:1.5">⚖ 경쟁가 맞춤 = 경쟁 최저 <b>등록가</b>와 동일하게 내게 놓고 손익을 계산.<br>공헌이익 = 총액매출 − 원가 − 지급수수료 − 물류비({{ bt_params.logi_pct }}%).<br>예상수량 = 일평균 × 전환계수 × 판정별 반영률 · 월 환산 × 26.</div>
     </div>
     <div class="pm-card">
       <div class="pm-card-head"><span class="pm-card-title">③ 시나리오 저장</span></div>
@@ -65,8 +69,8 @@ input.ovr.set{border-color:#f59e0b;background:#fffbeb;}
           <button class="pm-btn pm-btn-ghost pm-btn-sm" onclick="clearOvr()">수기 조정 초기화</button>
           <button class="pm-btn pm-btn-ghost pm-btn-sm" onclick="csv()">CSV</button></div></div>
       <div class="scroll-x"><table class="pm-table" style="font-size:.76rem">
-        <thead><tr><th>SKU</th><th class="num">수요/일</th><th class="num">구매가</th><th class="num">평균 판매단가<div class="muted">VAT 제외</div></th><th>최저 경쟁(실수취)</th><th>현재</th>
-          <th class="num">시나리오가</th><th class="num">변동</th><th>시나리오</th><th class="num">GP</th><th class="num">플랫폼 판매가</th><th class="num">예상수량 현재→시나리오</th><th class="num">GP액/일 Δ</th></tr></thead>
+        <thead><tr><th>SKU</th><th class="num">수요/일</th><th class="num">구매가</th><th class="num">평균 판매단가<div class="muted">VAT 제외</div></th><th>최저 경쟁</th><th>현재</th>
+          <th class="num">시나리오가</th><th class="num">변동</th><th>시나리오</th><th class="num">GP</th><th class="num">공헌이익율</th><th class="num">당사 등록가</th><th class="num">수량 현재→시나리오</th><th class="num">공헌이익/일 Δ</th></tr></thead>
         <tbody id="tb"></tbody></table></div>
       <div class="pager" id="pg"></div>
     </div>
@@ -75,7 +79,6 @@ input.ovr.set{border-color:#f59e0b;background:#fffbeb;}
 {% endblock %}
 {% block bt_scripts %}
 <script>
-const OUR_FEE={baemin:BT_PARAMS.fee_our_baemin,todaysales:BT_PARAMS.fee_our_todaysales,foodspring:6.6};
 let SELLERS=[], SEL=new Set(), DATA=[], OVR={}, CALC=[], PAGE=1;
 const qs=new URLSearchParams(location.search).get('sellers'); if(qs) qs.split(',').filter(x=>x.includes('|')).forEach(x=>SEL.add(x));
 
@@ -97,30 +100,40 @@ async function loadData(){
 const V=id=>parseFloat(document.getElementById(id).value);
 function judge(p,best,band){if(!p||!best)return 'unknown';const d=(best-p)/best*100;return d>=band?'win':d<=-band?'lose':'tie';}
 function calc(){
-  const mode=document.getElementById('mode').value, val=V('val')||0, gpF=V('gpFloor'), band=V('band')||0, conv=(V('conv')||0)/100;
+  const mode=document.getElementById('mode').value, val=V('val')||0, cmF=V('cmFloor'), band=V('band')||0, conv=(V('conv')||0)/100;
   const rf={win:(V('rW')||0)/100,tie:(V('rT')||0)/100,lose:(V('rL')||0)/100,unknown:(V('rW')||0)/100};
   const keepWin=document.getElementById('keepWin').checked, noRaise=document.getElementById('noRaise').checked;
-  document.getElementById('valL').textContent=mode==='pct'?'조정 %':mode==='gp'?'목표 GP %':'밴드 아래 추가 %';
+  document.getElementById('valL').textContent=mode==='pct'?'조정 %':mode==='gp'?'목표 공헌이익율 %':mode==='comp'?'추가 인하 %':'밴드 아래 추가 %';
   CALC=DATA.map(r=>{
     const comps=r.comps.filter(c=>c.comp_net!=null); const bc=comps.reduce((a,c)=>!a||c.comp_net<a.comp_net?c:a,null);
     const best=bc?bc.comp_net:null, our=r.our_price, buy=r.buy_price;
     const v0=judge(our,best,band);
+    const pf=bc?bc.platform:'baemin', vat=vatOf(r), fee=feeOf(pf);
+    // 경쟁 최저 등록가(1단위 환산, VAT 포함)
+    const compList=bc&&bc.comp_price?bc.comp_price/(bc.multiplier||1):null;
+    // 같은 등록가를 냈을 때 당사 순액 수취액 (수수료율 차이만큼 경쟁사 실수취와 다름)
+    const matchNet=best?best*(1-fee)/(1-(bc.fee_pct||0)/100):null;
+    const floorNet=cmFloorOf(buy,pf,cmF);
     let p=our;
     if(our){
       if(mode==='pct') p=our*(1+val/100);
-      else if(mode==='gp') p=buy?buy/(1-val/100):our;
+      else if(mode==='gp') p=cmFloorOf(buy,pf,val)??our;
+      else if(mode==='comp') p=matchNet?matchNet*(1-val/100):our;
       else if(best&&!(keepWin&&v0==='win')) p=best*(1-(band+val)/100)-0.5;
-      if(isFinite(gpF)&&buy&&mode!=='gp') p=Math.max(p,buy/(1-gpF/100));
+      if(isFinite(floorNet)&&floorNet&&mode!=='gp') p=Math.max(p,floorNet);
       if(noRaise) p=Math.min(p,our);
     }
     const ov=OVR[r.product_code]; if(ov) p=ov;
     p=p?Math.round(p):p;
     const v1=judge(p,best,band), dem=(r.demand_daily||0)*conv;
     const q0=dem*rf[v0], q1=dem*rf[v1];
-    const vat=r.tax_class==='과세'?1.1:1, pf=bc?bc.platform:'baemin';
-    return {...r,best,bestSeller:bc?bc.seller:'',bestPf:pf,v0,v1,p,ovr:!!ov,q0,q1,
-      rev0:q0*(our||0),rev1:q1*(p||0),gp0:buy&&our?q0*(our-buy):0,gp1:buy&&p?q1*(p-buy):0,
-      gpPct1:buy&&p?(p-buy)/p*100:null,list:p?p*vat/(1-OUR_FEE[pf]/100):null};
+    const G0=grossOf(our,pf), G1=grossOf(p,pf);
+    return {...r,best,bestSeller:bc?bc.seller:'',bestPf:pf,compList,matchNet,floorNet,v0,v1,p,ovr:!!ov,q0,q1,
+      rev0:q0*(isGross()?(G0||0):(our||0)), rev1:q1*(isGross()?(G1||0):(p||0)),
+      gp0:buy&&our?q0*((isGross()?G0:our)-buy):0, gp1:buy&&p?q1*((isGross()?G1:p)-buy):0,
+      cm0:buy&&our?q0*(our-buy-(G0||0)*LOGI):0, cm1:buy&&p?q1*(p-buy-(G1||0)*LOGI):0,
+      grev0:q0*(G0||0), grev1:q1*(G1||0),
+      gpPct1:gpPctOf(p,buy,pf), cmPct1:cmPctOf(p,buy,pf), list:listOf(p,pf,vat)};
   });
   drawCmp(); drawTable();
 }
@@ -128,14 +141,18 @@ function sum(k){return CALC.reduce((a,r)=>a+(r[k]||0),0);}
 function cnt(k,v){return CALC.filter(r=>r[k]===v).length;}
 function delta(a,b,fmt=man){const d=b-a;return `<span class="${d>=0?'delta-up':'delta-dn'}">${d>=0?'+':''}${fmt(d)}</span>`;}
 function drawCmp(){
-  const r0=sum('rev0'),r1=sum('rev1'),g0=sum('gp0'),g1=sum('gp1'),q0=sum('q0'),q1=sum('q1');
+  const r0=sum('rev0'),r1=sum('rev1'),g0=sum('gp0'),g1=sum('gp1'),c0=sum('cm0'),c1=sum('cm1'),q0=sum('q0'),q1=sum('q1');
+  const n0=sum('grev0'),n1=sum('grev1');
   const box=(l,a,b,f=man,m=1)=>`<div class="kpi"><div class="l">${l}</div><div class="v">${f(a*m)} → ${f(b*m)}</div><div class="s">${delta(a*m,b*m,f)}</div></div>`;
+  const bl=isGross()?'⊕':'⊖';
   document.getElementById('cmp').innerHTML=
     `<div class="kpi"><div class="l">대상 SKU · 셀러</div><div class="v">${CALC.length.toLocaleString()} · ${SEL.size}</div><div class="s">수기 조정 ${Object.keys(OVR).length}건</div></div>`+
     `<div class="kpi"><div class="l">승/무/패 (현재 → 시나리오)</div><div class="v" style="font-size:.95rem">${cnt('v0','win')}/${cnt('v0','tie')}/${cnt('v0','lose')} → ${cnt('v1','win')}/${cnt('v1','tie')}/${cnt('v1','lose')}</div></div>`+
-    box('예상수량/일',q0,q1,v=>num(v,0))+box('매출/일',r0,r1)+box('GP액/일',g0,g1)+
-    `<div class="kpi"><div class="l">GP율</div><div class="v">${r0?(g0/r0*100).toFixed(1):'-'}% → ${r1?(g1/r1*100).toFixed(1):'-'}%</div></div>`+
-    box('매출/월(×26)',r0,r1,man,26)+box('GP액/월(×26)',g0,g1,man,26);
+    box('예상수량/일',q0,q1,v=>num(v,0))+box(bl+' 매출/일',r0,r1)+box(bl+' GP액/일',g0,g1)+
+    `<div class="kpi"><div class="l">${bl} GP율</div><div class="v">${r0?(g0/r0*100).toFixed(1):'-'}% → ${r1?(g1/r1*100).toFixed(1):'-'}%</div></div>`+
+    box('공헌이익/일',c0,c1)+
+    `<div class="kpi"><div class="l">◎ 공헌이익율</div><div class="v">${n0?(c0/n0*100).toFixed(1):'-'}% → ${n1?(c1/n1*100).toFixed(1):'-'}%</div><div class="s">하한 ${num(BT_PARAMS.cm_floor_pct,1)}%</div></div>`+
+    box('공헌이익/월(×26)',c0,c1,man,26);
 }
 function rows(){const f=document.getElementById('fV').value;
   return CALC.filter(r=>!f||(f==='chg'&&r.v0!==r.v1)||(f==='ovr'&&r.ovr)||r.v1===f);}
@@ -143,23 +160,29 @@ function drawTable(){
   const R=rows(), S=100, pages=Math.max(1,Math.ceil(R.length/S)); if(PAGE>pages)PAGE=1;
   document.getElementById('tb').innerHTML=R.slice((PAGE-1)*S,PAGE*S).map(r=>{const ch=r.p&&r.our_price?(r.p-r.our_price)/r.our_price*100:null;
     return `<tr><td>${skuName(r)}</td><td class="num">${demHtml(r.demand_daily,r.demand_plants,3)}</td><td class="num">${won(r.buy_price)}</td><td class="num">${won(r.our_price)}</td>
-    <td>${pfBadge(r.bestPf)} ${esc(r.bestSeller)}<div class="num" style="text-align:left"><b>${won(r.best)}</b> <span class="muted">(${r.comps.length}곳)</span></div></td><td>${vBadge(r.v0)}</td>
+    <td>${pfBadge(r.bestPf)} ${esc(r.bestSeller)}<div class="num" style="text-align:left"><b>${won(isGross()?r.compList:r.best)}</b> <span class="muted">(${r.comps.length}곳)</span></div></td><td>${vBadge(r.v0)}</td>
     <td class="num"><input class="ovr ${r.ovr?'set':''}" data-c="${esc(r.product_code)}" value="${r.p??''}"></td><td class="num">${pct(ch)}</td><td>${vBadge(r.v1)}</td>
-    <td class="num">${gpTxt(r.gpPct1)}</td><td class="num">${won(r.list)}<div class="muted">${PF_LABEL[r.bestPf]} 수수료 ${OUR_FEE[r.bestPf]}%</div></td>
-    <td class="num">${num(r.q0,1)} → <b>${num(r.q1,1)}</b></td><td class="num">${delta(r.gp0,r.gp1,won)}</td></tr>`;}).join('')||'<tr><td colspan="13" class="bt-loading">없음</td></tr>';
+    <td class="num">${gpTxt(r.gpPct1)}</td><td class="num">${cmTxt(r.cmPct1)}</td>
+    <td class="num ours">${won(r.list)}<div class="muted">경쟁 ${won(r.compList)}</div></td>
+    <td class="num">${num(r.q0,1)} → <b>${num(r.q1,1)}</b></td><td class="num">${delta(r.cm0,r.cm1,won)}</td></tr>`;}).join('')||'<tr><td colspan="14" class="bt-loading">없음</td></tr>';
   document.querySelectorAll('input.ovr').forEach(inp=>inp.onchange=()=>{const v=parseFloat(inp.value);if(v>0)OVR[inp.dataset.c]=v;else delete OVR[inp.dataset.c];calc();});
   pager(document.getElementById('pg'),R.length,S,PAGE,p=>{PAGE=p;drawTable();});
 }
 function clearOvr(){OVR={};calc();}
+window.onBasisChange=()=>{if(CALC.length)calc();};
 function csv(){toCSV(rows(),[['상품코드',r=>r.product_code],['상품명',r=>r.product_name],['1배치코드',r=>r.twin_code],['수요/일',r=>r.demand_daily],['구매가',r=>r.buy_price],
-  ['평균판매단가(VAT제외)',r=>r.our_price],['최저경쟁셀러',r=>r.bestSeller],['최저실수취',r=>r.best],['현재판정',r=>V_LABEL[r.v0]],['시나리오가',r=>r.p],['시나리오판정',r=>V_LABEL[r.v1]],
-  ['시나리오GP%',r=>r.gpPct1&&r.gpPct1.toFixed(1)],['플랫폼판매가',r=>r.list&&Math.round(r.list)],['수량현재',r=>r.q0.toFixed(1)],['수량시나리오',r=>r.q1.toFixed(1)],
-  ['GP현재',r=>Math.round(r.gp0)],['GP시나리오',r=>Math.round(r.gp1)]],'셀러시뮬레이션.csv');}
-function scParams(){return {mode:document.getElementById('mode').value,val:V('val'),gpFloor:V('gpFloor'),band:V('band'),conv:V('conv'),rW:V('rW'),rT:V('rT'),rL:V('rL'),
+  ['평균판매단가(VAT제외)',r=>r.our_price],['최저경쟁셀러',r=>r.bestSeller],['경쟁등록가',r=>r.compList&&Math.round(r.compList)],['경쟁실수취',r=>r.best],
+  ['현재판정',r=>V_LABEL[r.v0]],['시나리오가',r=>r.p],['시나리오판정',r=>V_LABEL[r.v1]],
+  ['시나리오GP%(총액)',r=>r.gpPct1&&r.gpPct1.toFixed(1)],['시나리오공헌이익율%',r=>r.cmPct1&&r.cmPct1.toFixed(1)],
+  ['당사등록가',r=>r.list&&Math.round(r.list)],['공헌이익하한가',r=>r.floorNet&&Math.round(r.floorNet)],
+  ['수량현재',r=>r.q0.toFixed(1)],['수량시나리오',r=>r.q1.toFixed(1)],
+  ['공헌이익현재',r=>Math.round(r.cm0)],['공헌이익시나리오',r=>Math.round(r.cm1)]],'셀러시뮬레이션.csv');}
+function scParams(){return {mode:document.getElementById('mode').value,val:V('val'),cmFloor:V('cmFloor'),band:V('band'),conv:V('conv'),rW:V('rW'),rT:V('rT'),rL:V('rL'),
   keepWin:document.getElementById('keepWin').checked,noRaise:document.getElementById('noRaise').checked,overrides:OVR};}
 async function saveSc(){
   const name=document.getElementById('scName').value.trim(); if(!name||!CALC.length){showToast('데이터 불러온 뒤 시나리오명을 입력하세요','error');return;}
   const summary={sku:CALC.length,rev0:Math.round(sum('rev0')),rev1:Math.round(sum('rev1')),gp0:Math.round(sum('gp0')),gp1:Math.round(sum('gp1')),
+    cm0:Math.round(sum('cm0')),cm1:Math.round(sum('cm1')),basis:BT_BASIS,
     wtl0:[cnt('v0','win'),cnt('v0','tie'),cnt('v0','lose')],wtl1:[cnt('v1','win'),cnt('v1','tie'),cnt('v1','lose')]};
   try{await btPost('/api/scenarios',{name,sellers:[...SEL],params:scParams(),summary});showToast('저장됨','success');loadSc();}catch(e){showToast(e.message,'error');}
 }
@@ -167,7 +190,7 @@ async function loadSc(){
   try{const j=await btGet('/api/scenarios');
     document.getElementById('scList').innerHTML=j.rows.map(s=>{const m=s.summary||{};return `<div style="border-bottom:1px solid #f1f5f9;padding:.3rem 0">
       <b>${esc(s.name)}</b> <span class="muted">${esc((s.created_at||'').slice(0,16))} · ${esc(s.created_by||'')}</span>
-      <div class="muted">셀러 ${(s.sellers||[]).length} · SKU ${m.sku??'-'} · GP/일 ${man(m.gp0)}→${man(m.gp1)}</div>
+      <div class="muted">셀러 ${(s.sellers||[]).length} · SKU ${m.sku??'-'} · 공헌이익/일 ${man(m.cm0??m.gp0)}→${man(m.cm1??m.gp1)}</div>
       <button class="pm-btn pm-btn-ghost pm-btn-sm" data-ld="${s.scenario_id}">불러오기</button> <button class="pm-btn pm-btn-ghost pm-btn-sm" data-dl="${s.scenario_id}">삭제</button></div>`;}).join('')||'<div class="muted">저장된 시나리오 없음</div>';
     document.querySelectorAll('[data-ld]').forEach(b=>b.onclick=()=>applySc(j.rows.find(s=>s.scenario_id==b.dataset.ld)));
     document.querySelectorAll('[data-dl]').forEach(b=>b.onclick=async()=>{if(!confirm('삭제할까요?'))return;await btPost('/api/scenarios/delete',{scenario_id:+b.dataset.dl});loadSc();});
@@ -175,12 +198,12 @@ async function loadSc(){
 }
 async function applySc(s){
   const p=s.params||{}; SEL=new Set(s.sellers||[]); drawSellers();
-  ['mode','val','gpFloor','band','conv','rW','rT','rL'].forEach(k=>{if(p[k]!=null)document.getElementById(k).value=p[k];});
+  ['mode','val','cmFloor','band','conv','rW','rT','rL'].forEach(k=>{if(p[k]!=null)document.getElementById(k).value=p[k];});
   document.getElementById('keepWin').checked=!!p.keepWin; document.getElementById('noRaise').checked=!!p.noRaise;
   document.getElementById('scName').value=s.name;
   await loadData(); OVR=p.overrides||{}; calc();
 }
-['mode','val','gpFloor','band','conv','rW','rT','rL','keepWin','noRaise'].forEach(id=>document.getElementById(id).addEventListener('change',()=>DATA.length&&calc()));
+['mode','val','cmFloor','band','conv','rW','rT','rL','keepWin','noRaise'].forEach(id=>document.getElementById(id).addEventListener('change',()=>DATA.length&&calc()));
 document.getElementById('fV').onchange=()=>{PAGE=1;drawTable();};
 document.getElementById('sPf').onchange=drawSellers; document.getElementById('sKw').oninput=drawSellers;
 (async()=>{

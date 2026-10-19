@@ -38,6 +38,12 @@
 .pager button{border:1px solid #cbd5e1;background:#fff;border-radius:6px;padding:.2rem .6rem;cursor:pointer;font-size:.78rem;}
 .pager button.on{background:var(--pm-blue);color:#fff;border-color:var(--pm-blue);}
 .scroll-x{overflow-x:auto;}
+/* 총액/순액 세그먼트 — 아이콘 중심, Pretendard 상속 */
+.bt-seg{display:inline-flex;border:1px solid #cbd5e1;border-radius:99px;overflow:hidden;background:#fff;font-family:inherit;}
+.bt-seg button{border:0;background:none;padding:.15rem .55rem;font-size:.72rem;cursor:pointer;color:#64748b;font-family:inherit;line-height:1.5;}
+.bt-seg button.on{background:var(--pm-blue);color:#fff;font-weight:700;}
+.vs{color:#cbd5e1;padding:0 .15rem;}
+.ours{color:#1d4ed8;font-weight:700;}
 </style>
 {% block bt_head %}{% endblock %}
 {% endblock %}
@@ -65,6 +71,39 @@ function stBadge(s){return `<span class="badge st-${s}">${ST_LABEL[s]||s}</span>
 function pfBadge(p){return `<span class="badge ${PF_BADGE[p]||'badge-gray'}">${PF_LABEL[p]||esc(p)}</span>`;}
 function gpCls(g){if(g===null||g===undefined)return '';return g<BT_PARAMS.gp_alert?'gp-alert':g<BT_PARAMS.gp_warn?'gp-warn':'gp-ok';}
 function gpTxt(g){return `<span class="${gpCls(g)}">${g===null||g===undefined?'-':Number(g).toFixed(1)+'%'}</span>`;}
+
+/* ── 총액(회계) · 순액(수수료 차감) 환산 ──────────────────────────────────
+   재경팀 검토(09.22): 홈푸드 = 본인 → 판매대가 총액을 매출 인식, 수수료는 판관비.
+   순액 공급가 p 기준으로
+     등록가 L = p × VAT ÷ (1−수수료) · 총액매출 G = L ÷ VAT = p ÷ (1−수수료)
+     공헌이익 = p − 원가 − G×물류비율  (총액/순액 표시와 무관하게 금액은 동일) */
+const OUR_FEE={baemin:BT_PARAMS.fee_our_baemin, todaysales:BT_PARAMS.fee_our_todaysales, foodspring:6.6};
+const LOGI=(BT_PARAMS.logi_pct||0)/100;
+const feeOf=pf=>(OUR_FEE[pf]??6.6)/100;
+const vatOf=r=>(r&&r.tax_class==='면세')?1:1.1;
+function grossOf(net,pf){return net?net/(1-feeOf(pf)):null;}
+function listOf(net,pf,vat){return net?net*vat/(1-feeOf(pf)):null;}
+function gpPctOf(net,buy,pf){const g=grossOf(net,pf);return (g&&buy)?(g-buy)/g*100:null;}
+function cmPctOf(net,buy,pf){const g=grossOf(net,pf);return (g&&buy)?(net-buy-g*LOGI)/g*100:null;}
+/* 공헌이익율 하한을 만족하는 최저 순액 공급가 */
+function cmFloorOf(buy,pf,floorPct){if(!buy)return null;const k=1-((floorPct/100)+LOGI)/(1-feeOf(pf));return k>0?buy/k:null;}
+function cmCls(c){if(c===null||c===undefined)return '';return c<BT_PARAMS.cm_floor_pct?'gp-alert':c<BT_PARAMS.cm_floor_pct*2?'gp-warn':'gp-ok';}
+function cmTxt(c){return `<span class="${cmCls(c)}">${c===null||c===undefined?'-':Number(c).toFixed(1)+'%'}</span>`;}
+
+/* 표시 기준 토글 — 페이지는 window.onBasisChange 를 정의해 재그린링한다 */
+let BT_BASIS=localStorage.getItem('btBasis')||'gross';
+const isGross=()=>BT_BASIS==='gross';
+function setBasis(b){
+  BT_BASIS=b; localStorage.setItem('btBasis',b);
+  document.querySelectorAll('.bt-seg button[data-b]').forEach(x=>x.classList.toggle('on',x.dataset.b===b));
+  if(typeof window.onBasisChange==='function') window.onBasisChange();
+}
+function basisSeg(){
+  if(typeof window.onBasisChange!=='function') return '';
+  return `<span class="bt-seg" title="총액 = 판매대가 전액을 매출 인식, 수수료는 판관비(재경 확정)&#10;순액 = 수수료를 매출에서 차감한 기존 관리 방식&#10;공헌이익 금액은 동일, 매출·GP율 표시만 달라집니다">`
+    +`<button data-b="gross" class="${isGross()?'on':''}" onclick="setBasis('gross')">⊕ 총액</button>`
+    +`<button data-b="net" class="${isGross()?'':'on'}" onclick="setBasis('net')">⊖ 순액</button></span>`;
+}
 /* 예상수량: 전체센터 일평균 + 센터·배치별 작은 칩 (3배치 플랜트는 노란색) */
 function demHtml(total, plants, max=6){
   const chips=(plants||[]).slice(0,max).map(p=>`<span class="${p.plant==='4121'?'b3':''}" title="${esc(p.plant)}">${esc(p.label)} ${num(p.daily,1)}</span>`).join('');
@@ -93,7 +132,8 @@ function renderMeta(j){
   const w=(j.warnings||[]).map(x=>`<span class="chip warn">⚠ ${esc(x)}</span>`).join('');
   el.innerHTML=`<span class="chip">기준 4121 · 3배치(배치 03) · 마감 22:00 · 사용보류≠X · 자재그룹≠5140 · 수기제외 반영</span>`+
     `<span class="chip">예상수량 = 전체센터 최근 ${num(BT_PARAMS.demand_days,0)}일 일평균(영업일 ${j.workdays||'-'}일)</span>`+
-    `<span class="chip" title="경쟁사 실수취 = 셀러 판매가(VAT 포함) × (1−플랫폼 수수료) ÷ VAT(과세 1.1 / 면세 1.0) ÷ 배수&#10;당사 평균 판매단가 = SAP 매출액 ÷ 매출수량 (VAT 제외)&#10;→ 양쪽 모두 VAT 제외 공급가액 기준으로 맞춘 뒤 비교">비교가 = 평균 판매단가(VAT 제외) · 경쟁 실수취도 VAT 제외 환산 · 밴드 ±${num(BT_PARAMS.tie_band_pct,1)}%</span>`+cd+
+    `<span class="chip" title="경쟁사 실수취 = 셀러 판매가(VAT 포함) × (1−플랫폼 수수료) ÷ VAT(과세 1.1 / 면세 1.0) ÷ 배수&#10;당사 평균 판매단가 = SAP 매출액 ÷ 매출수량 (VAT 제외)&#10;→ 양쪽 모두 VAT 제외 공급가액 기준으로 맞춘 뒤 비교">비교가 = 평균 판매단가(VAT 제외) · 밴드 ±${num(BT_PARAMS.tie_band_pct,1)}%</span>`+
+    `<span class="chip" title="공헌이익 = 총액매출 − 매출원가 − 지급수수료 − 물류비(예시 ${num(BT_PARAMS.logi_pct,1)}%)">하한 = 공헌이익율 ${num(BT_PARAMS.cm_floor_pct,1)}%</span>`+basisSeg()+cd+
     `<span class="chip">구성 ${esc(j.built_at||'')} (${j.build_sec??'-'}s)</span>`+w+
     `<button class="pm-btn pm-btn-ghost pm-btn-sm" onclick="btRefresh()">↻ 새로고침</button>`;
 }

@@ -6,7 +6,7 @@
 <div class="kpis" id="kpis"></div>
 <div class="pm-card">
   <div class="pm-card-head"><span class="pm-card-title">셀러별 경쟁 현황</span>
-    <span class="muted">셀러당 SKU별 최저 실수취 라인 기준 · 패배 위험액 = 패 SKU의 일 예상매출(수요×평균 판매단가) · 출혈승 = 승이지만 GP &lt; {{ bt_params.gp_alert }}%</span></div>
+    <span class="muted">셀러당 SKU별 최저 실수취 라인 기준 · 패배 위험액 = 패 SKU의 일 예상매출(수요×평균 판매단가) · 출혈승 = 승이지만 ◎ 공헌이익율 &lt; {{ bt_params.cm_floor_pct }}%</span></div>
   <div style="display:flex;gap:.5rem;margin-bottom:.6rem">
     <input id="kw" class="pm-input" style="max-width:240px" placeholder="셀러명 검색">
     <label style="font-size:.8rem;align-self:center"><input type="checkbox" id="minOv" checked> 겹침 3개 이상</label>
@@ -22,8 +22,8 @@
 <div class="bt-modal-bg" id="md" onclick="if(event.target===this)this.style.display='none'">
   <div class="bt-modal"><div style="display:flex;justify-content:space-between"><h3 id="mdT"></h3><button class="pm-btn pm-btn-ghost pm-btn-sm" onclick="md.style.display='none'">닫기</button></div>
     <div class="scroll-x"><table class="pm-table" style="font-size:.78rem">
-      <thead><tr><th>SKU</th><th>셀러 상품</th><th class="num">셀러 판매가</th><th class="num">수수료</th><th class="num">배수</th><th class="num">실수취</th><th class="num">평균 판매단가<div class="muted">VAT 제외</div></th>
-        <th class="num">격차</th><th>판정</th><th class="num">GP</th><th class="num">맞추면 GP</th><th class="num">수요/일</th></tr></thead>
+      <thead><tr><th>SKU</th><th>셀러 상품</th><th class="num">셀러 등록가</th><th class="num" title="동일 조건으로 맞추면 나오는 당사 등록가 = 평균판매단가 × VAT ÷ (1−당사수수료)">⟷ 당사 등록가</th><th class="num">수수료</th><th class="num">배수</th><th class="num">실수취</th><th class="num">평균 판매단가<div class="muted">VAT 제외</div></th>
+        <th class="num">격차</th><th>판정</th><th class="num">GP</th><th class="num">맞추면 GP</th><th class="num">맞추면 ◎ CM</th><th class="num">수요/일</th></tr></thead>
       <tbody id="mdB"></tbody></table></div></div>
 </div>
 {% endblock %}
@@ -58,13 +58,15 @@ function draw(){
 async function detail(p,s){
   const md=document.getElementById('md'); md.style.display='flex';
   document.getElementById('mdT').innerHTML=`${pfBadge(p)} ${esc(s)} — 겹침 SKU 비교 <a class="pm-btn pm-btn-primary pm-btn-sm" href="${BT}/simulator?sellers=${encodeURIComponent(p+'|'+s)}">시뮬레이션 ›</a>`;
-  const b=document.getElementById('mdB'); b.innerHTML='<tr><td colspan="12" class="bt-loading">불러오는 중…</td></tr>';
+  const b=document.getElementById('mdB'); b.innerHTML='<tr><td colspan="14" class="bt-loading">불러오는 중…</td></tr>';
   try{const j=await btGet(`/api/seller-detail?platform=${p}&seller=${encodeURIComponent(s)}`);
-    b.innerHTML=j.rows.map(r=>`<tr><td><span class="code">${esc(r.product_code)}</span> ${esc(r.product_name)}</td><td>${esc(r.ext_name)}<div class="muted">${r.tag}</div></td>
-      <td class="num">${won(r.comp_price)}</td><td class="num">${r.fee_pct}%</td><td class="num">${r.multiplier}</td><td class="num"><b>${won(r.comp_net)}</b></td>
+    b.innerHTML=j.rows.map(r=>{const ourList=listOf(r.our_price,p,vatOf(r)), compList=r.comp_price/(r.multiplier||1);
+      const dL=(ourList&&compList)?(compList-ourList)/compList*100:null;
+      return `<tr><td><span class="code">${esc(r.product_code)}</span> ${esc(r.product_name)}</td><td>${esc(r.ext_name)}<div class="muted">${r.tag}</div></td>
+      <td class="num"><b>${won(compList)}</b></td><td class="num ours">${won(ourList)}<div class="muted">${pct(dL)}</div></td><td class="num">${r.fee_pct}%</td><td class="num">${r.multiplier}</td><td class="num">${won(r.comp_net)}</td>
       <td class="num">${won(r.our_price)}</td><td class="num">${pct(r.diff_pct)}</td><td>${vBadge(r.verdict)}</td><td class="num">${gpTxt(r.gp_pct)}</td>
-      <td class="num">${gpTxt(r.match_gp)}</td><td class="num">${num(r.demand_daily,1)}</td></tr>`).join('')||'<tr><td colspan="12" class="bt-loading">없음</td></tr>';
-  }catch(e){b.innerHTML=`<tr><td colspan="12" class="bt-loading" style="color:#b91c1c">⚠ ${esc(e.message)}</td></tr>`;}
+      <td class="num">${gpTxt(r.match_gp)}</td><td class="num">${cmTxt(cmPctOf(r.comp_net,r.buy_price,p))}</td><td class="num">${num(r.demand_daily,1)}</td></tr>`;}).join('')||'<tr><td colspan="14" class="bt-loading">없음</td></tr>';
+  }catch(e){b.innerHTML=`<tr><td colspan="14" class="bt-loading" style="color:#b91c1c">⚠ ${esc(e.message)}</td></tr>`;}
 }
 function goSim(){const v=[...document.querySelectorAll('.sc:checked')].map(x=>x.value);if(!v.length){showToast('셀러를 선택하세요','error');return;}
   location.href=BT+'/simulator?sellers='+encodeURIComponent(v.join(','));}
