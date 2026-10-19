@@ -1,0 +1,139 @@
+{% extends "bt_layout.html" %}
+{% block bt_head %}
+<style>
+.split{display:grid;grid-template-columns:1fr 1.15fr;gap:1rem;}
+@media(max-width:1000px){.split{grid-template-columns:1fr;}}
+.list{max-height:420px;overflow-y:auto;display:flex;flex-direction:column;gap:.3rem;margin-top:.6rem;}
+.it{padding:.55rem .75rem;border:1.5px solid #e2e8f0;border-radius:9px;background:#fafafa;cursor:pointer;font-size:.8rem;}
+.it:hover{border-color:#93c5fd;background:#eff6ff;}
+.it.sel{border-color:var(--pm-blue);background:#eff6ff;}
+.it.psel{border-color:#16a34a;background:#f0fdf4;}
+.it.mapped{opacity:.55;}
+.tag-btn{padding:.3rem .8rem;border-radius:20px;border:1.5px solid #d1d5db;background:#fff;font-size:.8rem;cursor:pointer;font-family:inherit;}
+.tag-btn.on{border-color:var(--pm-blue);background:#eff6ff;color:var(--pm-blue);font-weight:700;}
+</style>
+{% endblock %}
+{% block bt_content %}
+<div class="split">
+  <div class="pm-card">
+    <div class="pm-card-head"><span class="pm-card-title">① 3배치 운영 SKU</span><span class="muted">수요(전체센터 일평균) 순</span></div>
+    <div style="display:flex;gap:.4rem;">
+      <input id="okw" class="pm-input" placeholder="코드·상품명 (*와일드카드)">
+      <select id="ounm" class="pm-input" style="max-width:150px"><option value="">매핑 무관</option><option value="baemin">배민 미매핑</option><option value="todaysales">오늘얼마 미매핑</option><option value="foodspring">식봄 미매핑</option></select>
+      <select id="ost" class="pm-input" style="max-width:110px"><option value="active">운영</option><option value="all">전체</option><option value="blocked">막힘</option><option value="excluded">수기제외</option></select>
+    </div>
+    <div class="list" id="oList"><div class="bt-loading">불러오는 중…</div></div>
+    <div id="oSel" style="display:none;margin-top:.8rem;padding:.8rem;border:1.5px solid var(--pm-blue);border-radius:10px;background:#eff6ff;"></div>
+  </div>
+
+  <div class="pm-card">
+    <div class="pm-card-head"><span class="pm-card-title">② 플랫폼 상품 (배민상회 · 오늘얼마 · 식봄)</span>
+      <select id="pf" class="pm-input" style="max-width:120px"><option value="">전체</option><option value="baemin">배민상회</option><option value="todaysales">오늘얼마</option><option value="foodspring">식봄</option></select></div>
+    <input id="pkw" class="pm-input" placeholder="플랫폼 상품명 (*와일드카드) — SKU 선택 시 자동 검색">
+    <div class="list" id="pList"><div class="bt-loading">SKU를 선택하거나 검색하세요</div></div>
+    <hr style="border:none;border-top:1px solid #e2e8f0;margin:.8rem 0">
+    <div style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;">
+      <b style="font-size:.82rem">태그</b>
+      <button class="tag-btn on" data-t="normal">📌 정상</button>
+      <button class="tag-btn" data-t="substitute">🔄 대체</button>
+      <button class="tag-btn" data-t="multiple">✖️ 묶음(배수)</button>
+      <span style="margin-left:.6rem;font-size:.82rem"><b>배수</b> <input id="mult" type="number" step="0.01" min="0.01" value="1" class="pm-input" style="width:80px;display:inline-block"></span>
+      <span class="muted">플랫폼 단가 ÷ 배수 = 우리 단위</span>
+    </div>
+    <div id="preview" style="margin-top:.7rem"></div>
+    <div style="display:flex;justify-content:flex-end;gap:.4rem;margin-top:.5rem">
+      <button class="pm-btn pm-btn-ghost" onclick="clearPlat()">선택 초기화</button>
+      <button class="pm-btn pm-btn-success" id="saveBtn" onclick="save()">✅ 매핑 등록 (즉시 반영)</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block bt_scripts %}
+<script>
+let SKU=null, SKU_DETAIL=null, PSEL=[], TAG='normal', T1=null, T2=null, PRES=[];
+function compFee(p){ if(p.platform==='baemin') return BT_PARAMS.fee_comp_baemin/100; if(p.platform==='todaysales') return BT_PARAMS.fee_comp_todaysales/100; return (p.fee_pct||6.6)/100; }
+function compNet(p,mult){ if(!p.price_sale) return null; const vat=SKU&&SKU.tax_class!=='과세'?1:1.1; return p.price_sale*(1-compFee(p))/vat/(mult||1); }
+function judge(net){ if(!SKU||!SKU.our_price||!net) return ['unknown',null]; const d=(net-SKU.our_price)/net*100; const b=BT_PARAMS.tie_band_pct; return [d>=b?'win':d<=-b?'lose':'tie',d]; }
+
+async function searchOur(){
+  const kw=document.getElementById('okw').value, un=document.getElementById('ounm').value, st=document.getElementById('ost').value;
+  const j=await btGet(`/api/our-skus?keyword=${encodeURIComponent(kw)}&unmapped_pf=${un}&status=${st}&limit=150`); renderMeta(j);
+  document.getElementById('oList').innerHTML=j.rows.map(r=>`<div class="it ${SKU&&SKU.product_code===r.product_code?'sel':''}" data-c="${esc(r.product_code)}">
+    ${stBadge(r.status)} ${skuName(r)}
+    <div style="display:flex;gap:.8rem;margin-top:.25rem;flex-wrap:wrap"><span>SAP ${won(r.our_price)}</span><span>구매 ${won(r.buy_price)}</span><span>GP ${gpTxt(r.gp_pct)}</span>
+    <span>매핑 배민 ${r.map_cnt.baemin} · 오늘 ${r.map_cnt.todaysales} · 식봄 ${r.map_cnt.foodspring}</span></div>
+    ${demHtml(r.demand_daily,r.demand_plants,5)}</div>`).join('')||'<div class="bt-loading">결과 없음</div>';
+  document.querySelectorAll('#oList .it').forEach(el=>el.onclick=()=>pick(j.rows.find(r=>r.product_code===el.dataset.c)));
+  return j;
+}
+async function pick(r){
+  SKU=r; document.querySelectorAll('#oList .it').forEach(el=>el.classList.toggle('sel',el.dataset.c===r.product_code));
+  const box=document.getElementById('oSel'); box.style.display='block'; box.innerHTML='<div class="muted">매핑 불러오는 중…</div>';
+  const j=await btGet('/api/sku/'+encodeURIComponent(r.product_code)); SKU_DETAIL=j.sku;
+  const tgt=r.twin_code?`<div style="margin:.4rem 0;font-size:.8rem"><b>등록 코드</b>
+      <label><input type="radio" name="tgt" value="${esc(r.twin_code)}" checked> 1배치 ${esc(r.twin_code)} (권장 — 기존 메뉴와 공유)</label>
+      <label style="margin-left:.6rem"><input type="radio" name="tgt" value="${esc(r.product_code)}"> 3배치 ${esc(r.product_code)}</label></div>`:'';
+  box.innerHTML=`<div style="font-weight:700">${skuName(r)}</div>${tgt}
+    <div class="muted" style="margin:.3rem 0">현재 매핑 ${SKU_DETAIL.lines.length}건 · 판정은 SAP 단가 ${won(r.our_price)} 기준</div>
+    <table class="pm-table" style="font-size:.76rem"><tbody>${SKU_DETAIL.lines.map(l=>`<tr><td>${pfBadge(l.platform)}</td><td>${esc(l.seller)}</td><td>${esc(l.ext_name)}</td>
+      <td class="num">${won(l.comp_net)}</td><td>${vBadge(l.verdict)}</td><td class="muted">${l.tag}×${l.multiplier}</td>
+      <td><button class="pm-btn pm-btn-ghost pm-btn-sm" onclick="unmap(${l.mapping_id})">해제</button></td></tr>`).join('')||'<tr><td class="muted">매핑 없음</td></tr>'}</tbody></table>`;
+  const base=(r.twin_name||r.product_name||'').replace(/^\[N\]\s*/,'');
+  document.getElementById('pkw').value=base; searchPlat(); preview();
+}
+async function searchPlat(){
+  const kw=document.getElementById('pkw').value.trim(); if(!kw) return;
+  document.getElementById('pList').innerHTML='<div class="bt-loading">검색 중…</div>';
+  const pf=document.getElementById('pf').value;
+  const r=await fetch(`/portal/price-monitor/api/pm-ai/similar?product_name=${encodeURIComponent(kw)}&platform=${pf}`); const j=await r.json();
+  if(j.error){document.getElementById('pList').innerHTML=`<div class="bt-loading" style="color:#b91c1c">⚠ ${esc(j.error)}</div>`;return;}
+  const mapped=new Set((SKU_DETAIL?SKU_DETAIL.lines:[]).map(l=>l.product_key));
+  PRES=(j.data||[]).slice(0,120);
+  document.getElementById('pList').innerHTML=PRES.map((p,i)=>{
+    const net=compNet(p,1), [v,d]=judge(net), mine=mapped.has(p.product_key), sel=PSEL.some(s=>s.product_key===p.product_key);
+    const sim=p.similarity_score??0;
+    return `<div class="it ${sel?'psel':''} ${mine?'mapped':''}" data-i="${i}">
+      ${pfBadge(p.platform)} <b>${esc(p.display_name||p.product_name)}</b> <span style="color:${sim>=70?'#059669':sim>=40?'#d97706':'#9ca3af'};font-weight:700">${sim.toFixed(0)}%</span>
+      ${mine?'<span class="badge badge-ok">이 SKU에 매핑됨</span>':p.is_mapped?'<span class="badge badge-gray">타 상품 매핑됨</span>':''}
+      <div class="muted">${esc(p.platform_seller_name)} · ${esc(p.spec||'')} · 판매가 <b>${won(p.price_sale)}</b> · 수수료 ${(compFee(p)*100).toFixed(1)}% · 실수취 ${won(net)} · ${vBadge(v)} ${pct(d)}</div></div>`;}).join('')||'<div class="bt-loading">결과 없음</div>';
+  document.querySelectorAll('#pList .it').forEach(el=>el.onclick=()=>togglePlat(PRES[+el.dataset.i]));
+}
+function togglePlat(p){
+  if(SKU_DETAIL&&SKU_DETAIL.lines.some(l=>l.product_key===p.product_key)){showToast('이미 이 SKU에 매핑된 상품','error');return;}
+  const i=PSEL.findIndex(s=>s.product_key===p.product_key); if(i>=0)PSEL.splice(i,1); else PSEL.push(p);
+  document.querySelectorAll('#pList .it').forEach(el=>el.classList.toggle('psel',PSEL.some(s=>s.product_key===PRES[+el.dataset.i].product_key)));
+  preview();
+}
+function preview(){
+  const el=document.getElementById('preview'); if(!PSEL.length){el.innerHTML='';return;}
+  const m=parseFloat(document.getElementById('mult').value)||1;
+  el.innerHTML=`<div class="muted" style="margin-bottom:.3rem">등록 미리보기 ${PSEL.length}건 · 태그 ${TAG} · 배수 ${m}</div>`+PSEL.map(p=>{const net=compNet(p,m),[v,d]=judge(net);
+    return `<div style="display:flex;gap:.4rem;align-items:center;font-size:.78rem;padding:.2rem 0">${pfBadge(p.platform)} ${esc(p.platform_seller_name)} · ${esc(p.display_name||p.product_name)}
+      <span style="margin-left:auto" class="num">실수취 ${won(net)}</span> ${vBadge(v)} ${pct(d)}</div>`;}).join('');
+}
+async function save(){
+  if(!SKU||!PSEL.length){showToast('SKU와 플랫폼 상품을 선택하세요','error');return;}
+  const tgt=(document.querySelector('input[name=tgt]:checked')||{}).value||SKU.product_code;
+  const btn=document.getElementById('saveBtn'); btn.disabled=true;
+  try{const j=await btPost('/api/mapping/add',{sku_code:SKU.product_code,target_code:tgt,tag:TAG,multiplier:parseFloat(document.getElementById('mult').value)||1,
+      items:PSEL.map(p=>({product_key:p.product_key,platform:p.platform,seller_name:p.platform_seller_name||'',platform_seller_id:p.platform_seller_id||'',platform_product_id:p.platform_product_id||''}))});
+    showToast(`${j.added}건 등록 (코드 ${j.target_code})`,'success'); PSEL=[]; await pick(SKU); searchOur();
+  }catch(e){showToast(e.message,'error');}
+  btn.disabled=false;
+}
+async function unmap(id){if(!confirm('매핑을 해제할까요?'))return;try{await btPost('/api/mapping/remove',{mapping_ids:[id]});showToast('해제됨','success');pick(SKU);}catch(e){showToast(e.message,'error');}}
+function clearPlat(){PSEL=[];preview();searchPlat();}
+document.querySelectorAll('.tag-btn').forEach(b=>b.onclick=()=>{TAG=b.dataset.t;document.querySelectorAll('.tag-btn').forEach(x=>x.classList.toggle('on',x===b));if(TAG!=='multiple')document.getElementById('mult').value=1;preview();});
+document.getElementById('mult').oninput=preview;
+document.getElementById('okw').oninput=()=>{clearTimeout(T1);T1=setTimeout(searchOur,350);};
+['ounm','ost'].forEach(id=>document.getElementById(id).onchange=searchOur);
+document.getElementById('pkw').oninput=()=>{clearTimeout(T2);T2=setTimeout(searchPlat,400);};
+document.getElementById('pf').onchange=searchPlat;
+(async()=>{
+  const q=new URLSearchParams(location.search).get('sku');
+  if(q){document.getElementById('okw').value=q;document.getElementById('ost').value='all';}
+  try{const j=await searchOur(); if(q){const r=j.rows.find(x=>x.product_code===q); if(r) pick(r);}}
+  catch(e){document.getElementById('oList').innerHTML=`<div class="bt-loading" style="color:#b91c1c">⚠ ${esc(e.message)}</div>`;}
+})();
+</script>
+{% endblock %}

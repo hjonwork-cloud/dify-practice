@@ -1,0 +1,101 @@
+{% extends "bt_layout.html" %}
+{% block bt_head %}
+<style>
+.q-sku{border:1.5px solid #e2e8f0;border-radius:12px;padding:.8rem 1rem;margin-bottom:.7rem;background:#fff;}
+.q-sku.done{opacity:.5;}
+.q-cands{margin-top:.5rem;}
+.q-cands td{font-size:.76rem;}
+</style>
+{% endblock %}
+{% block bt_content %}
+<div class="pm-card">
+  <div class="pm-card-head"><span class="pm-card-title">3-1 · AI 매핑 검토 큐</span>
+    <span class="muted">미매핑 운영 SKU(수요 순)별로 유사 상품 후보를 찾아 체크 후 일괄 등록 · [N] 접두어는 제거하고 검색</span></div>
+  <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center">
+    <select id="pf" class="pm-input" style="max-width:150px"><option value="baemin">배민상회 미매핑</option><option value="todaysales">오늘얼마 미매핑</option><option value="foodspring">식봄 미매핑</option></select>
+    <input id="kw" class="pm-input" style="max-width:240px" placeholder="SKU 필터 (코드·이름)">
+    <select id="batch" class="pm-input" style="max-width:110px"><option>10</option><option selected>20</option><option>40</option></select>
+    <label style="font-size:.8rem">최소 유사도 <input id="minSim" type="number" value="40" min="0" max="100" class="pm-input" style="width:70px;display:inline-block">%</label>
+    <button class="pm-btn pm-btn-primary" onclick="loadQueue()">큐 불러오기</button>
+    <span id="qInfo" class="muted"></span>
+  </div>
+</div>
+<div id="queue"><div class="bt-loading">큐 불러오기를 누르세요</div></div>
+<div style="position:sticky;bottom:0;background:#f8fafc;padding:.6rem 0;display:flex;justify-content:flex-end;gap:.5rem;border-top:1px solid #e2e8f0">
+  <span id="selInfo" class="muted" style="align-self:center"></span>
+  <button class="pm-btn pm-btn-success" onclick="saveAll()">✅ 체크한 후보 일괄 등록</button>
+</div>
+{% endblock %}
+{% block bt_scripts %}
+<script>
+let Q=[]; // [{sku, cands:[], status}]
+function compFee(p){ if(p.platform==='baemin') return BT_PARAMS.fee_comp_baemin/100; if(p.platform==='todaysales') return BT_PARAMS.fee_comp_todaysales/100; return (p.fee_pct||6.6)/100; }
+function judge(sku,p){
+  if(!p.price_sale) return [null,'unknown',null];
+  const vat=sku.tax_class==='과세'?1.1:1; const net=p.price_sale*(1-compFee(p))/vat;
+  if(!sku.our_price) return [net,'unknown',null];
+  const d=(net-sku.our_price)/net*100, b=BT_PARAMS.tie_band_pct;
+  return [net, d>=b?'win':d<=-b?'lose':'tie', d];
+}
+async function loadQueue(){
+  const pf=document.getElementById('pf').value, n=+document.getElementById('batch').value, kw=document.getElementById('kw').value;
+  document.getElementById('queue').innerHTML='<div class="bt-loading">미매핑 SKU 조회 중…</div>';
+  try{
+    const j=await btGet(`/api/our-skus?unmapped_pf=${pf}&status=active&keyword=${encodeURIComponent(kw)}&limit=${n}`); renderMeta(j);
+    document.getElementById('qInfo').textContent=`${PF_LABEL[pf]} 미매핑 운영 SKU ${j.total.toLocaleString()}개 중 상위 ${j.rows.length}개`;
+    Q=j.rows.map(s=>({sku:s,cands:null,status:'loading'})); render();
+    for(let i=0;i<Q.length;i+=4){ await Promise.all(Q.slice(i,i+4).map(fetchCands)); render(); }
+  }catch(e){document.getElementById('queue').innerHTML=`<div class="bt-loading" style="color:#b91c1c">⚠ ${esc(e.message)}</div>`;}
+}
+async function fetchCands(q){
+  const pf=document.getElementById('pf').value, minSim=+document.getElementById('minSim').value||0;
+  const name=(q.sku.twin_name||q.sku.product_name||'').replace(/^\[N\]\s*/,'');
+  try{
+    const r=await fetch(`/portal/price-monitor/api/pm-ai/similar?product_name=${encodeURIComponent(name)}&platform=${pf}`);
+    const j=await r.json();
+    q.cands=(j.data||[]).filter(c=>!c.is_mapped&&(c.similarity_score||0)>=minSim).slice(0,8).map(c=>({...c,_chk:false}));
+    // 셀러별 최고 유사도 1건을 기본 체크(70% 이상만)
+    const seen=new Set(); q.cands.forEach(c=>{if(c.similarity_score>=70&&!seen.has(c.platform_seller_name)){c._chk=true;seen.add(c.platform_seller_name);}});
+    q.status='ready';
+  }catch(e){q.cands=[];q.status='error';}
+}
+function render(){
+  document.getElementById('queue').innerHTML=Q.map((q,i)=>{
+    const s=q.sku;
+    let body='';
+    if(q.status==='loading') body='<div class="muted">후보 검색 중…</div>';
+    else if(q.status==='done') body='<div class="muted">✅ 등록 완료</div>';
+    else if(!q.cands.length) body='<div class="muted">후보 없음 — <a href="'+BT+'/mapping?sku='+encodeURIComponent(s.product_code)+'">수동 매핑</a></div>';
+    else body=`<table class="pm-table q-cands"><thead><tr><th></th><th>셀러</th><th>상품명 / 규격</th><th>유사도</th><th class="num">판매가</th><th class="num">수수료</th><th class="num">실수취</th><th>판정</th></tr></thead><tbody>`+
+      q.cands.map((c,k)=>{const [net,v,d]=judge(s,c);
+        return `<tr><td><input type="checkbox" data-q="${i}" data-k="${k}" ${c._chk?'checked':''}></td><td>${esc(c.platform_seller_name)}</td>
+        <td>${esc(c.display_name||c.product_name)}<div class="muted">${esc(c.spec||'')}</div></td>
+        <td style="font-weight:700;color:${c.similarity_score>=70?'#059669':'#d97706'}">${(c.similarity_score||0).toFixed(0)}%</td>
+        <td class="num">${won(c.price_sale)}</td><td class="num">${(compFee(c)*100).toFixed(1)}%</td><td class="num">${won(net)}</td><td>${vBadge(v)} ${pct(d)}</td></tr>`;}).join('')+'</tbody></table>';
+    return `<div class="q-sku ${q.status==='done'?'done':''}">
+      <div style="display:flex;gap:1rem;align-items:flex-start;flex-wrap:wrap">
+        <div style="flex:1;min-width:260px">${skuName(s)}</div>
+        <div class="muted">SAP <b>${won(s.our_price)}</b> · ${esc(s.tax_class||'')} · GP ${gpTxt(s.gp_pct)}</div>
+        <div style="min-width:160px">${demHtml(s.demand_daily,s.demand_plants,4)}</div>
+        <a class="pm-btn pm-btn-ghost pm-btn-sm" href="${BT}/mapping?sku=${encodeURIComponent(s.product_code)}">상세 매핑 ›</a>
+      </div>${body}</div>`;}).join('')||'<div class="bt-loading">미매핑 SKU 없음 🎉</div>';
+  document.querySelectorAll('#queue input[type=checkbox]').forEach(cb=>cb.onchange=()=>{Q[+cb.dataset.q].cands[+cb.dataset.k]._chk=cb.checked;selInfo();});
+  selInfo();
+}
+function selInfo(){const n=Q.reduce((a,q)=>a+(q.status==='ready'?q.cands.filter(c=>c._chk).length:0),0);document.getElementById('selInfo').textContent=`체크 ${n}건 (태그 정상 · 배수 1 · [N]은 1배치 코드에 등록)`;}
+async function saveAll(){
+  const todo=Q.filter(q=>q.status==='ready'&&q.cands.some(c=>c._chk));
+  if(!todo.length){showToast('체크된 후보가 없습니다','error');return;}
+  if(!confirm(`${todo.length}개 SKU에 매핑을 등록할까요?`))return;
+  let ok=0;
+  for(const q of todo){
+    try{await btPost('/api/mapping/add',{sku_code:q.sku.product_code,tag:'normal',multiplier:1,
+        items:q.cands.filter(c=>c._chk).map(c=>({product_key:c.product_key,platform:c.platform,seller_name:c.platform_seller_name||''}))});
+      q.status='done';ok++;}catch(e){showToast(q.sku.product_code+': '+e.message,'error');}
+  }
+  render(); showToast(`${ok}개 SKU 등록 완료`,'success');
+}
+document.getElementById('pf').value=new URLSearchParams(location.search).get('platform')||'baemin';
+btGet('/api/home').then(renderMeta).catch(()=>{});
+</script>
+{% endblock %}

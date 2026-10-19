@@ -1,0 +1,52 @@
+{% extends "bt_layout.html" %}
+{% block bt_content %}
+<div class="kpis" id="kpis"><div class="bt-loading">불러오는 중…</div></div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+  <div class="pm-card">
+    <div class="pm-filterbar"><span class="pm-card-title">셀러별 겹침 SKU</span><span style="flex:1"></span>
+      <select id="pf" class="pm-input" style="max-width:130px"><option value="">전체</option><option value="baemin">배민상회</option><option value="todaysales">오늘얼마</option><option value="foodspring">식봄</option></select></div>
+    <div class="scroll-x" style="max-height:460px;overflow-y:auto"><table class="pm-table" id="sTbl"></table></div>
+  </div>
+  <div class="pm-card">
+    <div class="pm-filterbar"><span class="pm-card-title">미매핑 운영 SKU (배민·오늘얼마 모두 없음, 수요순)</span><span style="flex:1"></span>
+      <a class="pm-btn pm-btn-primary pm-btn-sm" href="/portal/price-monitor/bt/ai-queue">AI 추천 큐 →</a></div>
+    <div class="scroll-x" style="max-height:460px;overflow-y:auto"><table class="pm-table" id="uTbl"></table></div>
+  </div>
+</div>
+<div class="pm-card">
+  <div class="pm-filterbar"><span class="pm-card-title">커버리지 매트릭스 — 수요 상위 SKU × 배민·오늘얼마 셀러 (셀 = 최약 판정)</span>
+    <span style="flex:1"></span><select id="top" class="pm-input" style="max-width:120px"><option>100</option><option selected>150</option><option>300</option></select></div>
+  <div class="scroll-x" style="max-height:620px;overflow:auto"><table class="pm-table" id="mTbl" style="font-size:.74rem"></table></div>
+</div>
+{% endblock %}
+{% block bt_scripts %}
+<script>
+let J=null;
+async function load(){
+  J=await btGet('/api/coverage?top='+document.getElementById('top').value); renderMeta(J);
+  const k=(l,v,s,c='')=>`<div class="kpi ${c}"><div class="l">${l}</div><div class="v">${v}</div><div class="s">${s||''}</div></div>`;
+  document.getElementById('kpis').innerHTML=k('운영 SKU',J.active_cnt.toLocaleString(),'커버리지 분모')+
+    ['baemin','todaysales','foodspring'].map(pf=>{const b=J.by_platform[pf];return k(PF_LABEL[pf]+' 매핑률',b.rate+'%',`${b.mapped} SKU · 가격확인 ${b.priced} · 수요커버 ${b.demand_cover}%`,b.rate<30?'red':b.rate<60?'amber':'green');}).join('');
+  sellers();
+  document.getElementById('uTbl').innerHTML='<thead><tr><th>SKU</th><th>대분류</th><th class="num">예상 일수량</th><th class="num">SAP 단가</th><th></th></tr></thead><tbody>'+
+    J.unmapped.map(r=>`<tr><td><span class="code">${esc(r.product_code)}</span> ${esc(r.product_name)}</td><td class="muted">${esc(r.category||'')}</td>
+      <td class="num">${num(r.demand_daily,1)}</td><td class="num">${won(r.our_price)}</td>
+      <td><a class="pm-btn pm-btn-ghost pm-btn-sm" href="${BT}/mapping?sku=${encodeURIComponent(r.product_code)}">매핑</a></td></tr>`).join('')+'</tbody>';
+  const fs=J.focus_sellers.filter(s=>J.matrix.some(m=>m.cells[s.platform+'|'+s.seller]));
+  document.getElementById('mTbl').innerHTML=`<thead><tr><th style="position:sticky;left:0;background:#f8fafc;z-index:2">SKU</th><th class="num">일수량</th>`+
+    fs.map(s=>`<th title="${esc(s.seller)}" style="writing-mode:vertical-rl;max-height:150px;font-weight:600">${s.platform==='baemin'?'🟦':'🟧'} ${esc(s.seller)}</th>`).join('')+`</tr></thead><tbody>`+
+    J.matrix.map(m=>`<tr><td style="position:sticky;left:0;background:#fff;white-space:nowrap;max-width:260px;overflow:hidden;text-overflow:ellipsis"><a href="${BT}/mapping?sku=${encodeURIComponent(m.product_code)}" class="code">${esc(m.product_code)}</a> ${esc(m.product_name)}</td><td class="num">${num(m.demand_daily,1)}</td>`+
+      fs.map(s=>{const v=m.cells[s.platform+'|'+s.seller];return `<td style="text-align:center">${v?`<span class="badge v-${v}">${V_LABEL[v]}</span>`:'<span class="muted">·</span>'}</td>`;}).join('')+'</tr>').join('')+'</tbody>';
+}
+function sellers(){
+  const pf=document.getElementById('pf').value;
+  const rows=J.sellers.filter(s=>!pf||s.platform===pf);
+  document.getElementById('sTbl').innerHTML='<thead><tr><th>플랫폼</th><th>셀러</th><th class="num">겹침 SKU</th><th class="num">셀러 전체 SKU</th><th class="num">운영 SKU 대비</th><th></th></tr></thead><tbody>'+
+    rows.map(s=>`<tr><td>${pfBadge(s.platform)}</td><td>${esc(s.seller)}</td><td class="num"><b>${s.overlap}</b></td><td class="num">${s.seller_total??'-'}</td>
+      <td class="num">${J.active_cnt?Math.round(s.overlap/J.active_cnt*1000)/10+'%':'-'}</td>
+      <td>${s.overlap?`<a class="pm-btn pm-btn-ghost pm-btn-sm" href="${BT}/simulator?sellers=${encodeURIComponent(s.platform+'|'+s.seller)}">시뮬</a>`:`<a class="pm-btn pm-btn-ghost pm-btn-sm" href="/portal/price-monitor/mapping-workspace">AI 매핑</a>`}</td></tr>`).join('')+'</tbody>';
+}
+document.getElementById('pf').onchange=sellers; document.getElementById('top').onchange=load;
+load().catch(e=>document.getElementById('kpis').innerHTML=`<div class="bt-loading" style="color:#b91c1c">⚠ ${esc(e.message)}</div>`);
+</script>
+{% endblock %}

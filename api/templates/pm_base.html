@@ -21,6 +21,10 @@
     .pm-nav a:hover,.pm-nav a.active{background:rgba(255,255,255,.12);color:#fff;}
     .pm-nav .nav-icon{font-size:.95rem;width:18px;text-align:center;flex-shrink:0;}
     .pm-nav .nav-sep{font-size:.7rem;color:rgba(255,255,255,.35);padding:.75rem .5rem .25rem;text-transform:uppercase;letter-spacing:.06em;}
+    .pm-nav details.bt-nav{display:flex;flex-direction:column;gap:.15rem;}
+    .pm-nav details.bt-nav summary::-webkit-details-marker{display:none;}
+    .pm-nav .bt-sub{font-size:.68rem;color:rgba(255,255,255,.45);padding:.45rem .75rem .1rem;}
+    .pm-nav a.bt-l2{padding:.38rem .75rem .38rem 1.6rem;font-size:.79rem;}
     .pm-main{flex:1;overflow-x:hidden;display:flex;flex-direction:column;}
     .pm-topbar{background:#fff;border-bottom:1px solid #e2e8f0;padding:.75rem 1.5rem;display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-shrink:0;}
     .pm-topbar h1{font-size:1.05rem;font-weight:700;color:#1e293b;}
@@ -95,6 +99,30 @@
       <a href="/portal/price-monitor/competition" class="{% if active_page=='competition' %}active{% endif %}">
         <span class="nav-icon">📊</span> 플랫폼 경쟁분석
       </a>
+      {% set _bt = (active_page or '')[:3] == 'bt_' %}
+      <details class="bt-nav" {% if _bt %}open{% endif %}>
+        <summary class="nav-sep" style="cursor:pointer;list-style:none;color:#fbbf24;">🎯 배민·오늘얼마 시뮬레이터 ▾</summary>
+        <a href="/portal/price-monitor/bt/" class="{% if active_page=='bt_home' %}active{% endif %}"><span class="nav-icon">🏠</span> 홈</a>
+        <div class="bt-sub">① 운영현황</div>
+        <a href="/portal/price-monitor/bt/skus" class="bt-l2 {% if active_page=='bt_skus' %}active{% endif %}">3배치 운영 SKU</a>
+        <a href="/portal/price-monitor/bt/monitor" class="bt-l2 {% if active_page=='bt_monitor' %}active{% endif %}">수발주 변동 모니터</a>
+        <a href="/portal/price-monitor/bt/exclusions" class="bt-l2 {% if active_page=='bt_exclusions' %}active{% endif %}">수기 제외 관리</a>
+        <div class="bt-sub">② 매핑현황</div>
+        <a href="/portal/price-monitor/bt/coverage" class="bt-l2 {% if active_page=='bt_coverage' %}active{% endif %}">커버리지</a>
+        <a href="/portal/price-monitor/bt/mapping" class="bt-l2 {% if active_page=='bt_mapping' %}active{% endif %}">상품별 매핑</a>
+        <a href="/portal/price-monitor/admin/requests" class="bt-l2">변경요청 · 승인 ↗</a>
+        <div class="bt-sub">③ AI매핑</div>
+        <a href="/portal/price-monitor/bt/ai-queue" class="bt-l2 {% if active_page=='bt_ai_queue' %}active{% endif %}">미매핑 큐 · AI 추천</a>
+        <a href="/portal/price-monitor/mapping-workspace" class="bt-l2">셀러별 AI 워크스페이스 ↗</a>
+        <div class="bt-sub">④ 경쟁 시뮬레이션</div>
+        <a href="/portal/price-monitor/bt/competition" class="bt-l2 {% if active_page=='bt_competition' %}active{% endif %}">셀러별 경쟁 현황</a>
+        <a href="/portal/price-monitor/bt/simulator" class="bt-l2 {% if active_page=='bt_simulator' %}active{% endif %}">셀러 시뮬레이터</a>
+        <div class="bt-sub">⑤ 수익성</div>
+        <a href="/portal/price-monitor/bt/profit" class="bt-l2 {% if active_page=='bt_profit' %}active{% endif %}">SKU 수익성 · 추천가</a>
+        <div class="bt-sub">⑥ 알림 · 설정</div>
+        <a href="/portal/price-monitor/bt/settings" class="bt-l2 {% if active_page=='bt_settings' %}active{% endif %}">파라미터 · 알림</a>
+        <a href="/portal/price-monitor/admin/sellers" class="bt-l2">셀러 관리 ↗</a>
+      </details>
       <div class="nav-sep">관리자</div>
       <a href="/portal/price-monitor/admin/requests" class="{% if active_page=='requests' %}active{% endif %}">
         <span class="nav-icon">📋</span> 수정요청 검토

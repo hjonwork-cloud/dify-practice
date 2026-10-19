@@ -1,0 +1,141 @@
+{% extends "bt_layout.html" %}
+{% block bt_content %}
+<div class="pm-card">
+  <div class="bt-tabs" id="stTabs"></div>
+  <div class="pm-filterbar">
+    <input id="kw" class="pm-input" style="max-width:260px" placeholder="코드·상품명 (*와일드카드)">
+    <select id="cat" class="pm-input" style="max-width:170px"><option value="">대분류 전체</option></select>
+    <select id="mapf" class="pm-input" style="max-width:190px">
+      <option value="">매핑 전체</option>
+      <option value="none">미매핑(3개 플랫폼)</option>
+      <option value="no_baemin">배민상회 미매핑</option>
+      <option value="no_todaysales">오늘얼마 미매핑</option>
+      <option value="no_foodspring">식봄 미매핑</option>
+    </select>
+    <select id="vf" class="pm-input" style="max-width:170px">
+      <option value="">판정 전체</option>
+      <option value="baemin:lose">배민 패</option><option value="baemin:tie">배민 무</option><option value="baemin:win">배민 승</option>
+      <option value="todaysales:lose">오늘얼마 패</option><option value="todaysales:tie">오늘얼마 무</option><option value="todaysales:win">오늘얼마 승</option>
+    </select>
+    <label class="muted"><input type="checkbox" id="inc5140"> 5140 포함</label>
+    <span style="flex:1"></span>
+    <button class="pm-btn pm-btn-ghost pm-btn-sm" onclick="exportCsv()">⬇ CSV</button>
+    <button class="pm-btn pm-btn-danger pm-btn-sm" onclick="bulkExclude()">선택 수기 제외</button>
+  </div>
+  <div class="scroll-x"><table class="pm-table" id="tbl"><tbody><tr><td class="bt-loading">불러오는 중…</td></tr></tbody></table></div>
+  <div class="pager" id="pager"></div>
+</div>
+
+<div class="bt-modal-bg" id="mBg" onclick="if(event.target===this)this.style.display='none'">
+  <div class="bt-modal" id="mBody"></div>
+</div>
+{% endblock %}
+
+{% block bt_scripts %}
+<script>
+let ALL=[], VIEW=[], PAGE=1, ST='active'; const SIZE=50;
+const qp=new URLSearchParams(location.search); if(qp.get('status')) ST=qp.get('status');
+async function load(){
+  const j=await btGet('/api/skus?include_5140='+(document.getElementById('inc5140').checked?1:0));
+  renderMeta(j); ALL=j.rows;
+  const cats=[...new Set(ALL.map(r=>r.category).filter(Boolean))].sort();
+  document.getElementById('cat').innerHTML='<option value="">대분류 전체</option>'+cats.map(c=>`<option>${esc(c)}</option>`).join('');
+  tabs(); apply();
+}
+function tabs(){
+  const c={all:ALL.length}; ALL.forEach(r=>c[r.status]=(c[r.status]||0)+1);
+  document.getElementById('stTabs').innerHTML=[['active','운영'],['blocked','막힘'],['excluded','수기제외'],['group5140','5140'],['all','전체']]
+    .map(([k,l])=>`<button class="${ST===k?'on':''}" onclick="ST='${k}';tabs();apply()">${l} ${c[k]||0}</button>`).join('');
+}
+function apply(){
+  const kw=document.getElementById('kw').value.trim().toLowerCase();
+  const toks=kw.includes('*')?kw.split('*').filter(Boolean):(kw?[kw]:[]);
+  const cat=document.getElementById('cat').value, mf=document.getElementById('mapf').value, vf=document.getElementById('vf').value;
+  VIEW=ALL.filter(r=>{
+    if(ST!=='all'&&r.status!==ST) return false;
+    if(cat&&r.category!==cat) return false;
+    const hay=`${r.product_code} ${r.product_name} ${r.twin_code||''} ${r.twin_name||''}`.toLowerCase();
+    if(toks.length&&!toks.every(t=>hay.includes(t))) return false;
+    const mc=r.map_cnt||{};
+    if(mf==='none'&&(r.map_total||0)>0) return false;
+    if(mf.startsWith('no_')&&mc[mf.slice(3)]) return false;
+    if(vf){const [pf,v]=vf.split(':'); if(!(r.best&&r.best[pf]&&r.best[pf].verdict===v)) return false;}
+    return true;
+  });
+  VIEW.sort((a,b)=>(b.demand_daily||0)-(a.demand_daily||0));
+  PAGE=1; render();
+}
+function bestCell(b){ if(!b) return '<span class="muted">-</span>';
+  return `${vBadge(b.verdict)} <span class="num">${won(b.comp_net)}</span><div class="muted">${esc(b.seller)} · ${pct(b.diff_pct)}</div>`; }
+function render(){
+  const rows=VIEW.slice((PAGE-1)*SIZE,PAGE*SIZE);
+  document.getElementById('tbl').innerHTML=`<thead><tr><th><input type="checkbox" onclick="document.querySelectorAll('.ck').forEach(c=>c.checked=this.checked)"></th>
+    <th>상태</th><th>SKU (3배치)</th><th>대분류</th><th class="num">예상 일수량<div class="muted">전체센터 · 센터/배치별</div></th>
+    <th class="num">SAP 단가</th><th class="num">구매가</th><th class="num">GP</th><th class="num">매핑<div class="muted">배민/오늘/식봄</div></th>
+    <th>배민상회 최강</th><th>오늘얼마 최강</th></tr></thead><tbody>`+
+    rows.map(r=>{const mc=r.map_cnt||{};
+      return `<tr style="cursor:pointer" onclick="if(event.target.type!=='checkbox')openSku('${esc(r.product_code)}')">
+      <td><input type="checkbox" class="ck" value="${esc(r.product_code)}"></td><td>${stBadge(r.status)}</td><td>${skuName(r)}</td>
+      <td class="muted">${esc(r.category||'')}</td><td class="num">${demHtml(r.demand_daily,r.demand_plants,4)}</td>
+      <td class="num">${won(r.our_price)}${r.price_src==='twin'?'<div class="twin">1배치 단가</div>':''}</td><td class="num">${won(r.buy_price)}</td><td class="num">${gpTxt(r.gp_pct)}</td>
+      <td class="num">${mc.baemin||0} / ${mc.todaysales||0} / ${mc.foodspring||0}</td>
+      <td>${bestCell(r.best&&r.best.baemin)}</td><td>${bestCell(r.best&&r.best.todaysales)}</td></tr>`;}).join('')+
+    (rows.length?'':'<tr><td colspan="11" class="muted">해당 없음</td></tr>')+'</tbody>';
+  pager(document.getElementById('pager'),VIEW.length,SIZE,PAGE,p=>{PAGE=p;render();});
+}
+async function openSku(code){
+  const bg=document.getElementById('mBg'), body=document.getElementById('mBody');
+  bg.style.display='flex'; body.innerHTML='<div class="bt-loading">불러오는 중…</div>';
+  try{
+    const j=await btGet('/api/sku/'+encodeURIComponent(code)); const s=j.sku;
+    const lines=(s.lines||[]).slice().sort((a,b)=>(a.comp_net??1e12)-(b.comp_net??1e12));
+    const ex=j.exclusion&&j.exclusion.is_active?j.exclusion:null;
+    body.innerHTML=`<h3>${stBadge(s.status)} <span class="code">${esc(s.product_code)}</span> ${esc(s.product_name)}
+      <button class="pm-btn pm-btn-ghost pm-btn-sm" style="float:right" onclick="document.getElementById('mBg').style.display='none'">닫기</button></h3>
+      ${s.twin_code?`<div class="twin">[N] 3배치 ↔ 1배치 쌍둥이 ${esc(s.twin_code)} ${esc(s.twin_name)} — 매핑·수요는 두 코드 합산</div>`:''}
+      <div class="kpis" style="margin-top:.6rem">
+        <div class="kpi"><div class="l">SAP 단가 / 구매가</div><div class="v" style="font-size:1.1rem">${won(s.our_price)} / ${won(s.buy_price)}</div><div class="s">GP ${s.gp_pct??'-'}% · ${esc(s.tax_class)}</div></div>
+        <div class="kpi"><div class="l">예상 일수량 (전체센터)</div><div class="v" style="font-size:1.1rem">${num(s.demand_daily,1)}</div><div class="s">${(s.demand_plants||[]).map(p=>esc(p.label)+' '+num(p.daily,1)).join(' · ')||'실적 없음'}</div></div>
+        <div class="kpi"><div class="l">수발주</div><div class="v" style="font-size:1.1rem">사용보류 ${esc(s.use_hold||'-')}</div><div class="s">자재그룹 ${esc(s.material_group)} ${esc(s.product_group)}</div></div>
+      </div>
+      <div style="display:flex;gap:.4rem;margin-bottom:.6rem;">
+        <a class="pm-btn pm-btn-primary pm-btn-sm" href="${BT}/mapping?sku=${encodeURIComponent(s.product_code)}">🔗 매핑 추가</a>
+        <a class="pm-btn pm-btn-ghost pm-btn-sm" href="/portal/price-monitor/detail/${encodeURIComponent(s.twin_code||s.product_code)}" target="_blank">상세·이력(기존) ↗</a>
+        ${ex?`<button class="pm-btn pm-btn-success pm-btn-sm" onclick="release('${esc(s.product_code)}')">수기 제외 해제 (${esc(EX_REASON[ex.reason_code]||'')})</button>`
+            :(s.status==='active'?`<button class="pm-btn pm-btn-danger pm-btn-sm" onclick="exclude(['${esc(s.product_code)}'])">수기 제외</button>`:'')}
+      </div>
+      <div class="pm-card-title" style="margin:.4rem 0">매핑 · 경쟁 라인 (${lines.length})</div>
+      <div class="scroll-x"><table class="pm-table"><thead><tr><th>플랫폼</th><th>셀러</th><th>경쟁 상품</th><th class="num">판매가</th><th class="num">수수료</th><th class="num">배수</th><th class="num">실수취가</th><th class="num">차이</th><th>판정</th><th class="num">맞출 때 GP</th><th>등록코드</th><th></th></tr></thead><tbody>
+      ${lines.map(l=>`<tr><td>${pfBadge(l.platform)}</td><td>${esc(l.seller)}</td><td>${esc(l.ext_name)}<div class="muted">${esc(l.spec)} ${l.stale?'· 최신 수집 없음':''}</div></td>
+        <td class="num">${won(l.comp_price)}</td><td class="num">${l.fee_pct}%</td><td class="num">${l.multiplier}</td><td class="num"><b>${won(l.comp_net)}</b></td>
+        <td class="num">${pct(l.diff_pct)}</td><td>${vBadge(l.verdict)}</td><td class="num">${gpTxt(l.match_gp)}</td><td class="code">${esc(l.mapped_to)}</td>
+        <td><button class="pm-btn pm-btn-ghost pm-btn-sm" onclick="unmap(${l.mapping_id},'${esc(s.product_code)}')">해제</button></td></tr>`).join('')||'<tr><td colspan="12" class="muted">매핑 없음</td></tr>'}
+      </tbody></table></div>
+      <div class="pm-card-title" style="margin:.8rem 0 .4rem">변경 이력</div>
+      <table class="pm-table"><tbody>${(j.events||[]).map(e=>`<tr><td class="muted">${esc(e.event_ts)}</td><td><span class="badge sev-${e.severity}">${esc(EV_LABEL[e.event_type]||e.event_type)}</span></td><td>${esc(e.before_val||'')} → ${esc(e.after_val||'')}</td><td class="muted">${esc(e.note||'')}</td></tr>`).join('')||'<tr><td class="muted">이력 없음 (스냅샷 기준선 이후 변동 없음)</td></tr>'}</tbody></table>`;
+  }catch(e){body.innerHTML=`<div class="bt-loading" style="color:#b91c1c">⚠ ${esc(e.message)}</div>`;}
+}
+async function exclude(codes){
+  const reason=prompt('제외 사유코드\n'+Object.entries(EX_REASON).map(([k,v])=>k+' = '+v).join('\n'),'not_target'); if(!reason) return;
+  const memo=prompt('메모 (선택)','')??''; const rd=prompt('해제 예정일 YYYY-MM-DD (선택)','')??'';
+  try{const j=await btPost('/api/exclusions/add',{codes,reason_code:reason,memo,release_date:rd});
+    showToast(`제외 ${j.added.length}건`+(j.unknown.length?` · 미확인 ${j.unknown.length}`:''),'success');
+    document.getElementById('mBg').style.display='none'; load();}catch(e){showToast(e.message,'error');}
+}
+function bulkExclude(){const c=[...document.querySelectorAll('.ck:checked')].map(x=>x.value); if(!c.length){showToast('선택된 SKU 없음','error');return;} exclude(c);}
+async function release(code){try{await btPost('/api/exclusions/release',{codes:[code]});showToast('해제 완료','success');document.getElementById('mBg').style.display='none';load();}catch(e){showToast(e.message,'error');}}
+async function unmap(id,code){if(!confirm('이 매핑을 해제할까요?'))return;try{await btPost('/api/mapping/remove',{mapping_ids:[id]});showToast('해제됨','success');openSku(code);}catch(e){showToast(e.message,'error');}}
+function exportCsv(){
+  toCSV(VIEW,[['상태',r=>ST_LABEL[r.status]],['상품코드',r=>r.product_code],['상품명',r=>r.product_name],['1배치코드',r=>r.twin_code],
+    ['대분류',r=>r.category],['예상일수량',r=>r.demand_daily],['센터별',r=>(r.demand_plants||[]).map(p=>p.label+':'+p.daily).join(' | ')],
+    ['SAP단가',r=>r.our_price],['구매가',r=>r.buy_price],['GP%',r=>r.gp_pct],
+    ['매핑_배민',r=>(r.map_cnt||{}).baemin],['매핑_오늘얼마',r=>(r.map_cnt||{}).todaysales],['매핑_식봄',r=>(r.map_cnt||{}).foodspring],
+    ['배민_판정',r=>r.best&&r.best.baemin?r.best.baemin.verdict:''],['배민_실수취가',r=>r.best&&r.best.baemin?r.best.baemin.comp_net:''],
+    ['오늘_판정',r=>r.best&&r.best.todaysales?r.best.todaysales.verdict:''],['오늘_실수취가',r=>r.best&&r.best.todaysales?r.best.todaysales.comp_net:'']],
+    '3배치_운영SKU.csv');
+}
+['kw','cat','mapf','vf'].forEach(id=>document.getElementById(id).addEventListener(id==='kw'?'input':'change',apply));
+document.getElementById('inc5140').onchange=load;
+load().catch(e=>document.getElementById('tbl').innerHTML=`<tbody><tr><td class="bt-loading" style="color:#b91c1c">⚠ ${esc(e.message)}</td></tr></tbody>`);
+</script>
+{% endblock %}

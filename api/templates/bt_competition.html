@@ -1,0 +1,77 @@
+{% extends "bt_layout.html" %}
+{% block bt_content %}
+<div class="bt-tabs" id="pfTabs">
+  <button data-p="" class="on">전체</button><button data-p="baemin">배민상회</button><button data-p="todaysales">오늘얼마</button><button data-p="foodspring">식봄</button>
+</div>
+<div class="kpis" id="kpis"></div>
+<div class="pm-card">
+  <div class="pm-card-head"><span class="pm-card-title">셀러별 경쟁 현황</span>
+    <span class="muted">셀러당 SKU별 최저 실수취 라인 기준 · 패배 위험액 = 패 SKU의 일 예상매출(수요×SAP 단가) · 출혈승 = 승이지만 GP &lt; {{ bt_params.gp_alert }}%</span></div>
+  <div style="display:flex;gap:.5rem;margin-bottom:.6rem">
+    <input id="kw" class="pm-input" style="max-width:240px" placeholder="셀러명 검색">
+    <label style="font-size:.8rem;align-self:center"><input type="checkbox" id="minOv" checked> 겹침 3개 이상</label>
+    <button class="pm-btn pm-btn-primary pm-btn-sm" onclick="goSim()">☑ 선택 셀러로 시뮬레이션 ›</button>
+    <button class="pm-btn pm-btn-ghost pm-btn-sm" onclick="csv()">CSV</button>
+  </div>
+  <div class="scroll-x"><table class="pm-table">
+    <thead><tr><th></th><th>플랫폼</th><th>셀러</th><th class="num">겹침 SKU</th><th class="num">승</th><th class="num">무</th><th class="num">패</th><th class="num">승률</th>
+      <th class="num">평균 격차</th><th class="num">출혈승</th><th class="num">겹침 일매출</th><th class="num">패배 위험액/일</th><th></th></tr></thead>
+    <tbody id="tb"><tr><td colspan="13" class="bt-loading">불러오는 중…</td></tr></tbody></table></div>
+</div>
+
+<div class="bt-modal-bg" id="md" onclick="if(event.target===this)this.style.display='none'">
+  <div class="bt-modal"><div style="display:flex;justify-content:space-between"><h3 id="mdT"></h3><button class="pm-btn pm-btn-ghost pm-btn-sm" onclick="md.style.display='none'">닫기</button></div>
+    <div class="scroll-x"><table class="pm-table" style="font-size:.78rem">
+      <thead><tr><th>SKU</th><th>셀러 상품</th><th class="num">셀러 판매가</th><th class="num">수수료</th><th class="num">배수</th><th class="num">실수취</th><th class="num">SAP 단가</th>
+        <th class="num">격차</th><th>판정</th><th class="num">GP</th><th class="num">맞추면 GP</th><th class="num">수요/일</th></tr></thead>
+      <tbody id="mdB"></tbody></table></div></div>
+</div>
+{% endblock %}
+{% block bt_scripts %}
+<script>
+let PF='', ROWS=[];
+async function load(){
+  document.getElementById('tb').innerHTML='<tr><td colspan="13" class="bt-loading">불러오는 중…</td></tr>';
+  try{const j=await btGet('/api/competition?platform='+PF); renderMeta(j); ROWS=j.sellers;
+    const k=j.kpi, judged=k.win+k.tie+k.lose;
+    document.getElementById('kpis').innerHTML=`
+      <div class="kpi"><div class="l">경쟁 셀러</div><div class="v">${ROWS.length}</div></div>
+      <div class="kpi"><div class="l">셀러×SKU 겹침</div><div class="v">${k.overlap.toLocaleString()}</div></div>
+      <div class="kpi green"><div class="l">승</div><div class="v">${k.win.toLocaleString()}</div><div class="s">${judged?(k.win/judged*100).toFixed(1):'-'}%</div></div>
+      <div class="kpi"><div class="l">무</div><div class="v">${k.tie.toLocaleString()}</div></div>
+      <div class="kpi red"><div class="l">패</div><div class="v">${k.lose.toLocaleString()}</div><div class="s">${judged?(k.lose/judged*100).toFixed(1):'-'}%</div></div>
+      <div class="kpi amber"><div class="l">출혈승</div><div class="v">${k.bleed_win.toLocaleString()}</div></div>`;
+    draw();
+  }catch(e){document.getElementById('tb').innerHTML=`<tr><td colspan="13" class="bt-loading" style="color:#b91c1c">⚠ ${esc(e.message)}</td></tr>`;}
+}
+function filtered(){const kw=document.getElementById('kw').value.trim().toLowerCase(), m=document.getElementById('minOv').checked;
+  return ROWS.filter(r=>(!kw||r.seller.toLowerCase().includes(kw))&&(!m||r.overlap>=3));}
+function draw(){
+  document.getElementById('tb').innerHTML=filtered().map((r,i)=>`<tr>
+    <td><input type="checkbox" class="sc" value="${esc(r.platform+'|'+r.seller)}"></td><td>${pfBadge(r.platform)}</td><td><b>${esc(r.seller)}</b></td>
+    <td class="num">${r.overlap}</td><td class="num" style="color:#15803d">${r.win}</td><td class="num">${r.tie}</td><td class="num" style="color:#b91c1c">${r.lose}</td>
+    <td class="num">${r.win_rate==null?'-':r.win_rate+'%'}</td><td class="num">${pct(r.avg_diff)}</td><td class="num">${r.bleed_win||''}</td>
+    <td class="num">${man(r.revenue_daily)}</td><td class="num" style="color:#b91c1c;font-weight:700">${man(r.stake_lose_daily)}</td>
+    <td><button class="pm-btn pm-btn-ghost pm-btn-sm" data-p="${esc(r.platform)}" data-s="${esc(r.seller)}">상세</button></td></tr>`).join('')||'<tr><td colspan="13" class="bt-loading">없음</td></tr>';
+  document.querySelectorAll('#tb button[data-s]').forEach(b=>b.onclick=()=>detail(b.dataset.p,b.dataset.s));
+}
+async function detail(p,s){
+  const md=document.getElementById('md'); md.style.display='flex';
+  document.getElementById('mdT').innerHTML=`${pfBadge(p)} ${esc(s)} — 겹침 SKU 비교 <a class="pm-btn pm-btn-primary pm-btn-sm" href="${BT}/simulator?sellers=${encodeURIComponent(p+'|'+s)}">시뮬레이션 ›</a>`;
+  const b=document.getElementById('mdB'); b.innerHTML='<tr><td colspan="12" class="bt-loading">불러오는 중…</td></tr>';
+  try{const j=await btGet(`/api/seller-detail?platform=${p}&seller=${encodeURIComponent(s)}`);
+    b.innerHTML=j.rows.map(r=>`<tr><td><span class="code">${esc(r.product_code)}</span> ${esc(r.product_name)}</td><td>${esc(r.ext_name)}<div class="muted">${r.tag}</div></td>
+      <td class="num">${won(r.comp_price)}</td><td class="num">${r.fee_pct}%</td><td class="num">${r.multiplier}</td><td class="num"><b>${won(r.comp_net)}</b></td>
+      <td class="num">${won(r.our_price)}</td><td class="num">${pct(r.diff_pct)}</td><td>${vBadge(r.verdict)}</td><td class="num">${gpTxt(r.gp_pct)}</td>
+      <td class="num">${gpTxt(r.match_gp)}</td><td class="num">${num(r.demand_daily,1)}</td></tr>`).join('')||'<tr><td colspan="12" class="bt-loading">없음</td></tr>';
+  }catch(e){b.innerHTML=`<tr><td colspan="12" class="bt-loading" style="color:#b91c1c">⚠ ${esc(e.message)}</td></tr>`;}
+}
+function goSim(){const v=[...document.querySelectorAll('.sc:checked')].map(x=>x.value);if(!v.length){showToast('셀러를 선택하세요','error');return;}
+  location.href=BT+'/simulator?sellers='+encodeURIComponent(v.join(','));}
+function csv(){toCSV(filtered(),[['플랫폼',r=>PF_LABEL[r.platform]],['셀러',r=>r.seller],['겹침',r=>r.overlap],['승',r=>r.win],['무',r=>r.tie],['패',r=>r.lose],
+  ['승률',r=>r.win_rate],['평균격차%',r=>r.avg_diff],['출혈승',r=>r.bleed_win],['겹침일매출',r=>r.revenue_daily],['패배위험액',r=>r.stake_lose_daily]],'셀러별_경쟁현황.csv');}
+document.querySelectorAll('#pfTabs button').forEach(b=>b.onclick=()=>{PF=b.dataset.p;document.querySelectorAll('#pfTabs button').forEach(x=>x.classList.toggle('on',x===b));load();});
+document.getElementById('kw').oninput=draw; document.getElementById('minOv').onchange=draw;
+load();
+</script>
+{% endblock %}

@@ -630,6 +630,7 @@ def _get_platform_latest(product_keys: list[str] | None = None,
 _FEE_DIRECT   = 0.066   # 직배송: PG 3% + 플랫폼 3% + VAT = 6.6%
 _FEE_SINGSING = 0.171   # 싱싱배송: 직배송 6.6% + 추가 10.5% = 17.1%
 _FEE_CJ       = 0.048   # CJ프레시웨이 예외: 식봄 최대주주로 우대 수수료 4.8%
+_FEE_TODAYSALES = 0.048 # 오늘얼마 판매자 수수료 4.8%
 
 # CJ프레시웨이 예외 셀러 (식봄 플랫폼 한정)
 _CJ_SELLER_NAMES = {"CJ프레시웨이", "cj프레시웨이", "CJ 프레시웨이"}
@@ -646,9 +647,11 @@ PF_CHART_COLORS = {
 
 
 def _get_fee(delivery_type: str = "직배송", platform: str = "", seller_name: str = "") -> float:
-    """수수료율 반환. CJ프레시웨이(식봄)는 4.8% 우대 적용."""
+    """수수료율 반환. CJ프레시웨이(식봄)는 4.8% 우대, 오늘얼마는 4.8% 적용."""
     if platform == "foodspring" and seller_name in _CJ_SELLER_NAMES:
         return _FEE_CJ
+    if platform == "todaysales":
+        return _FEE_TODAYSALES
     if delivery_type == "싱싱배송":
         return _FEE_SINGSING
     return _FEE_DIRECT

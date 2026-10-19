@@ -1,0 +1,66 @@
+{% extends "bt_layout.html" %}
+{% block bt_head %}
+<style>
+.pgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:.6rem 1.2rem;}
+.pgrid label{display:flex;flex-direction:column;gap:.2rem;font-size:.8rem;font-weight:600;}
+.pgrid .d{font-weight:400;color:#94a3b8;font-size:.7rem;}
+.sec{font-weight:700;font-size:.85rem;margin:1rem 0 .4rem;color:#334155;}
+</style>
+{% endblock %}
+{% block bt_content %}
+<div class="pm-card">
+  <div class="pm-card-head"><span class="pm-card-title">6 · 판정·수요 파라미터</span><span class="muted">저장 시 전 화면 즉시 재계산</span></div>
+  <div class="sec">수수료 (%)</div>
+  <div class="pgrid">
+    <label>당사 · 배민상회<input class="pm-input" data-k="fee_our_baemin" type="number" step="0.1"><span class="d">판매가 산출용</span></label>
+    <label>당사 · 오늘얼마<input class="pm-input" data-k="fee_our_todaysales" type="number" step="0.1"></label>
+    <label>타사 · 배민상회<input class="pm-input" data-k="fee_comp_baemin" type="number" step="0.1"><span class="d">경쟁 실수취가 산출용</span></label>
+    <label>타사 · 오늘얼마<input class="pm-input" data-k="fee_comp_todaysales" type="number" step="0.1"></label>
+  </div>
+  <div class="muted">식봄 타사 수수료는 기존 가격모니터 규칙(직배송 6.6% · 싱싱배송 17.1% · CJ 4.8%)을 따릅니다.</div>
+  <div class="sec">판정 · 수요</div>
+  <div class="pgrid">
+    <label>무승부 밴드 ±%<input class="pm-input" data-k="tie_band_pct" type="number" step="0.5"><span class="d">격차 = (경쟁 실수취 − SAP 단가) ÷ 경쟁 실수취</span></label>
+    <label>반영률 · 승 %<input class="pm-input" data-k="reflect_win" type="number"></label>
+    <label>반영률 · 무 %<input class="pm-input" data-k="reflect_tie" type="number"></label>
+    <label>반영률 · 패 %<input class="pm-input" data-k="reflect_lose" type="number"></label>
+    <label>전환계수 %<input class="pm-input" data-k="conversion_pct" type="number" step="5"><span class="d">전체센터 수요 중 플랫폼 주문으로 전환된다고 보는 비율</span></label>
+    <label>예상수량 기간(일)<input class="pm-input" data-k="demand_days" type="number"><span class="d">최근 N일 출고 ÷ 영업일(월~토)</span></label>
+    <label>GP 경보 %<input class="pm-input" data-k="gp_alert" type="number" step="0.5"><span class="d">추천가 하한 · 출혈승 기준</span></label>
+    <label>GP 주의 %<input class="pm-input" data-k="gp_warn" type="number" step="0.5"></label>
+  </div>
+  <div class="sec">7 · 알림</div>
+  <div class="pgrid">
+    <label style="grid-column:1/-1">🔴 수발주 이벤트 알림 메일 (콤마 구분)<input class="pm-input" data-k="alert_email" type="text" placeholder="a@daesang.com, b@daesang.com"><span class="d">매핑된 SKU가 막힘·삭제되면 매시 스냅샷 직후 발송 (SMTP 설정 필요)</span></label>
+  </div>
+  <div style="display:flex;gap:.4rem;justify-content:flex-end;margin-top:1rem">
+    <button class="pm-btn pm-btn-ghost" onclick="reset()">기본값으로</button>
+    <button class="pm-btn pm-btn-success" onclick="save()">저장</button>
+  </div>
+</div>
+<div class="pm-card">
+  <div class="pm-card-head"><span class="pm-card-title">스냅샷 실행 이력 (최근 24)</span><a class="pm-btn pm-btn-ghost pm-btn-sm" href="/portal/price-monitor/bt/monitor">모니터 ›</a></div>
+  <div class="scroll-x"><table class="pm-table" style="font-size:.76rem"><thead><tr><th>run_key</th><th>트리거</th><th>시작</th><th>종료</th><th>상태</th><th class="num">SKU</th><th class="num">운영</th><th class="num">이벤트</th><th>메시지</th></tr></thead>
+    <tbody id="runs"><tr><td colspan="9" class="bt-loading">불러오는 중…</td></tr></tbody></table></div>
+</div>
+{% endblock %}
+{% block bt_scripts %}
+<script>
+let DEF={};
+function fill(P){document.querySelectorAll('[data-k]').forEach(i=>{i.value=P[i.dataset.k]??'';});}
+async function load(){
+  try{const j=await btGet('/api/params'); DEF=j.defaults; fill(j.params);
+    document.getElementById('runs').innerHTML=j.runs.map(r=>`<tr><td class="code">${esc(r.run_key)}</td><td>${esc(r.trigger)}</td><td>${esc(r.started_at)}</td><td>${esc(r.finished_at||'')}</td>
+      <td><span class="badge ${r.status==='ok'?'badge-ok':r.status==='error'?'sev-red':'badge-gray'}">${esc(r.status)}</span></td><td class="num">${r.sku_total??''}</td><td class="num">${r.sku_active??''}</td>
+      <td class="num">${r.event_count??''}</td><td class="muted">${esc(r.message||'')}</td></tr>`).join('')||'<tr><td colspan="9" class="bt-loading">실행 이력 없음</td></tr>';
+  }catch(e){showToast(e.message,'error');}
+}
+async function save(){
+  const p={}; document.querySelectorAll('[data-k]').forEach(i=>{p[i.dataset.k]=i.type==='number'?parseFloat(i.value):i.value.trim();});
+  try{await btPost('/api/params',{params:p});showToast('저장됨 — 화면 재계산','success');setTimeout(()=>location.reload(),600);}catch(e){showToast(e.message,'error');}
+}
+function reset(){if(confirm('기본값으로 채울까요? (저장을 눌러야 반영)'))fill(DEF);}
+btGet('/api/home').then(renderMeta).catch(()=>{});
+load();
+</script>
+{% endblock %}

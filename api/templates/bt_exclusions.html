@@ -1,0 +1,62 @@
+{% extends "bt_layout.html" %}
+{% block bt_content %}
+<div style="display:grid;grid-template-columns:1fr 2fr;gap:1rem;">
+  <div class="pm-card">
+    <div class="pm-card-title" style="margin-bottom:.7rem">수기 제외 등록 (일괄 붙여넣기 가능)</div>
+    <textarea id="codes" class="pm-input" rows="7" placeholder="상품코드 — 줄바꿈·쉼표·탭 구분&#10;엑셀 열 복사 붙여넣기 가능"></textarea>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem;margin-top:.5rem;">
+      <select id="reason" class="pm-input"></select>
+      <input id="rdate" type="date" class="pm-input" title="해제 예정일(선택)">
+    </div>
+    <input id="memo" class="pm-input" style="margin-top:.5rem" placeholder="메모 (선택)">
+    <button class="pm-btn pm-btn-danger" style="margin-top:.6rem;width:100%;justify-content:center" onclick="add()">제외 등록</button>
+    <div class="muted" style="margin-top:.6rem;line-height:1.6">· 4121 수발주에 없는 코드는 등록되지 않습니다.<br>· 해제 예정일이 되면 자동 해제하지 않고 <b>해제 후보</b>로 표시합니다.<br>· 등록·해제는 SKU 변경 이력에 남습니다.</div>
+  </div>
+  <div class="pm-card">
+    <div class="pm-filterbar">
+      <span class="pm-card-title">제외 목록</span>
+      <label class="muted"><input type="checkbox" id="incRel"> 해제 이력 포함</label>
+      <span style="flex:1"></span>
+      <button class="pm-btn pm-btn-success pm-btn-sm" onclick="releaseSel()">선택 해제</button>
+      <button class="pm-btn pm-btn-ghost pm-btn-sm" onclick="exportCsv()">⬇ CSV</button>
+    </div>
+    <div id="due"></div>
+    <div class="scroll-x"><table class="pm-table" id="tbl"></table></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block bt_scripts %}
+<script>
+document.getElementById('btMeta').innerHTML='<span class="chip">수기 제외 = 4121 기본 리스트(사용보류≠X · 자재그룹≠5140)에서 영업 판단으로 빼는 SKU</span>';
+document.getElementById('reason').innerHTML=Object.entries(EX_REASON).map(([k,v])=>`<option value="${k}">${esc(v)}</option>`).join('');
+let ROWS=[];
+async function load(){
+  const j=await btGet('/api/exclusions?include_released='+(document.getElementById('incRel').checked?1:0)); ROWS=j.rows;
+  document.getElementById('due').innerHTML=j.due.length?`<div class="badge badge-warn" style="margin-bottom:.5rem">해제 예정일 도래 ${j.due.length}건 — 확인 후 해제하세요</div>`:'';
+  const today=new Date().toISOString().slice(0,10);
+  document.getElementById('tbl').innerHTML=`<thead><tr><th><input type="checkbox" onclick="document.querySelectorAll('.ck').forEach(c=>c.checked=this.checked)"></th><th>상태</th><th>상품코드</th><th>상품명</th><th>사유</th><th>메모</th><th>해제예정</th><th>등록</th><th>해제</th></tr></thead><tbody>`+
+    ROWS.map(r=>`<tr><td>${r.is_active?`<input type="checkbox" class="ck" value="${esc(r.product_code)}">`:''}</td>
+      <td>${r.is_active?'<span class="badge st-excluded">제외중</span>':'<span class="badge badge-gray">해제</span>'}</td>
+      <td class="code">${esc(r.product_code)}</td><td>${esc(r.product_name||'')}</td><td>${esc(EX_REASON[r.reason_code]||r.reason_code)}</td>
+      <td class="muted">${esc(r.memo||'')}</td><td>${r.release_date?(r.is_active&&r.release_date<=today?'<b style="color:#b45309">'+esc(r.release_date)+'</b>':esc(r.release_date)):''}</td>
+      <td class="muted">${esc(r.created_by||'')} ${esc(r.created_at||'')}</td><td class="muted">${esc(r.released_by||'')} ${esc(r.released_at||'')}</td></tr>`).join('')+
+    (ROWS.length?'':'<tr><td colspan="9" class="muted">제외 SKU 없음</td></tr>')+'</tbody>';
+}
+async function add(){
+  const codes=document.getElementById('codes').value.split(/[\s,;]+/).map(s=>s.trim()).filter(Boolean);
+  if(!codes.length){showToast('상품코드를 입력하세요','error');return;}
+  try{const j=await btPost('/api/exclusions/add',{codes,reason_code:document.getElementById('reason').value,memo:document.getElementById('memo').value,release_date:document.getElementById('rdate').value});
+    showToast(`등록 ${j.added.length}건`+(j.unknown.length?` · 4121 미존재 ${j.unknown.length}건: ${j.unknown.slice(0,5).join(', ')}`:''), j.unknown.length?'error':'success');
+    document.getElementById('codes').value=''; load();}catch(e){showToast(e.message,'error');}
+}
+async function releaseSel(){
+  const c=[...document.querySelectorAll('.ck:checked')].map(x=>x.value); if(!c.length){showToast('선택 없음','error');return;}
+  if(!confirm(c.length+'건을 운영 SKU로 복귀할까요?'))return;
+  try{const j=await btPost('/api/exclusions/release',{codes:c});showToast(`해제 ${j.released}건`,'success');load();}catch(e){showToast(e.message,'error');}
+}
+function exportCsv(){toCSV(ROWS,[['상품코드',r=>r.product_code],['상품명',r=>r.product_name],['사유',r=>EX_REASON[r.reason_code]],['메모',r=>r.memo],['해제예정',r=>r.release_date],['활성',r=>r.is_active],['등록자',r=>r.created_by],['등록일',r=>r.created_at]],'3배치_수기제외.csv');}
+document.getElementById('incRel').onchange=load;
+load().catch(e=>showToast(e.message,'error'));
+</script>
+{% endblock %}

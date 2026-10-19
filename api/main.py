@@ -73,6 +73,14 @@ except Exception as _pm_err:
         return _PT(f"[가격모니터링 로드 실패]\n\n{_pm_load_error}", status_code=500)
 
     app.include_router(_diag)
+
+# ── 배민·오늘얼마 경쟁 시뮬레이터 (가격모니터 하위 메뉴) ─────────────────────
+try:
+    from bt_router import router as _bt_router
+    app.include_router(_bt_router)
+except Exception:
+    import logging as _logging, traceback as _tb
+    _logging.getLogger(__name__).error(f"[bt] 시뮬레이터 라우터 로드 실패:\n{_tb.format_exc()}")
 import admin_db  # VOC 접수 / 공개 FAQ 자동응답
 
 # ── 크롤러 스케줄러 (매일 03:00 KST) ────────────────────────────────────────

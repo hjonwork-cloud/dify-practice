@@ -1,0 +1,433 @@
+"""배민·오늘얼마 경쟁 시뮬레이터(BT) 전용 SQLite 저장소.
+
+portal_db 와 같은 DB 파일(portal_activity.db)을 사용하되 테이블은 bt_ 접두사로 분리한다.
+
+테이블
+  bt_param            : 시뮬레이터 파라미터 (수수료·판정 밴드·반영률·전환율·알림 메일)
+  bt_sku_exclusion    : 3배치 운영 SKU 수기 제외 목록
+  bt_sku_state        : 4121 수발주 최신 상태 (시간당 스냅샷 비교 기준)
+  bt_sku_event        : 상태 변화 이벤트 (열림/막힘/신규/삭제/자재그룹/수기제외/해제)
+  bt_snapshot_run     : 스냅샷 실행 로그 (run_key=YYYYMMDDHH, 중복 실행 방지)
+  bt_sku_daily        : 일 확정 운영 SKU 버전 (snap_date, product_code)
+  bt_sim_scenario     : 시뮬레이션 시나리오 저장
+"""
+from __future__ import annotations
+
+import json
+import threading
+
+import portal_db
+
+_init_lock = threading.Lock()
+_initialized = False
+
+# 파라미터 기본값 (사용자 확정 2026-10-19)
+#  - 배민상회 당사 수수료 5.5%, 배민상회 타사 6.6%, 오늘얼마 4.8%
+#  - 비교가 = SAP 단가(당사 공급가, VAT 제외)
+#  - 승·무·패 밴드 ±2%, 수요 반영률 승 100 / 무 50 / 패 10
+DEFAULT_PARAMS: dict[str, float | str] = {
+    "fee_our_baemin":      5.5,   # 당사가 배민상회에서 판매 시 수수료(%)
+    "fee_our_todaysales":  4.8,   # 당사가 오늘얼마에서 판매 시 수수료(%)
+    "fee_comp_baemin":     6.6,   # 배민상회 타사 셀러 수수료(%)
+    "fee_comp_todaysales": 4.8,   # 오늘얼마 타사 셀러 수수료(%)
+    "tie_band_pct":        2.0,   # 무승부 밴드 ±%
+    "reflect_win":         100.0, # 수요 반영률(%) — 승
+    "reflect_tie":         50.0,  # 수요 반영률(%) — 무
+    "reflect_lose":        10.0,  # 수요 반영률(%) — 패
+    "conversion_pct":      100.0, # 플랫폼 전환율(%) — 전사 수요 중 플랫폼 주문으로 전환 가정
+    "demand_days":         28,    # 예상수량 산정 기간(일) — 최근 4주
+    "gp_alert":            10.0,  # GP 경보(%)
+    "gp_warn":             20.0,  # GP 주의(%)
+    "alert_email":         "",    # 수발주 🔴 이벤트 알림 수신 메일 (콤마 구분)
+}
+
+EXCLUDE_REASONS = {
+    "not_target": "경쟁 대상 아님",
+    "bulk":       "대용량·업소 전용",
+    "eol":        "단종 예정",
+    "quality":    "품질 이슈",
+    "etc":        "기타",
+}
+
+EVENT_LABELS = {
+    "block":     "막힘",
+    "open":      "열림",
+    "new":       "신규 코드",
+    "removed":   "삭제",
+    "group_in":  "자재그룹 5140 편입",
+    "group_out": "자재그룹 5140 이탈",
+    "exclude":   "수기 제외",
+    "release":   "수기 제외 해제",
+}
+
+
+def _connect():
+    return portal_db._connect()
+
+
+def _now() -> str:
+    return portal_db._now()
+
+
+def init() -> None:
+    global _initialized
+    if _initialized:
+        return
+    with _init_lock:
+        if _initialized:
+            return
+        with _connect() as conn:
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS bt_param (
+                    key        TEXT PRIMARY KEY,
+                    value      TEXT,
+                    updated_by TEXT,
+                    updated_at TEXT
+                );
+                CREATE TABLE IF NOT EXISTS bt_sku_exclusion (
+                    product_code TEXT PRIMARY KEY,
+                    product_name TEXT,
+                    reason_code  TEXT NOT NULL DEFAULT 'etc',
+                    memo         TEXT,
+                    release_date TEXT,
+                    is_active    INTEGER NOT NULL DEFAULT 1,
+                    created_by   TEXT,
+                    created_at   TEXT,
+                    released_by  TEXT,
+                    released_at  TEXT
+                );
+                CREATE TABLE IF NOT EXISTS bt_sku_state (
+                    product_code   TEXT PRIMARY KEY,
+                    product_name   TEXT,
+                    material_group TEXT,
+                    use_hold       TEXT,
+                    present        INTEGER NOT NULL DEFAULT 1,
+                    first_seen     TEXT,
+                    last_seen      TEXT,
+                    updated_at     TEXT
+                );
+                CREATE TABLE IF NOT EXISTS bt_sku_event (
+                    event_id     INTEGER PRIMARY KEY AUTOINCREMENT,
+                    event_ts     TEXT NOT NULL,
+                    run_key      TEXT,
+                    product_code TEXT NOT NULL,
+                    product_name TEXT,
+                    event_type   TEXT NOT NULL,
+                    severity     TEXT NOT NULL DEFAULT 'yellow',
+                    before_val   TEXT,
+                    after_val    TEXT,
+                    mapped_cnt   INTEGER DEFAULT 0,
+                    note         TEXT,
+                    ack_by       TEXT,
+                    ack_at       TEXT,
+                    ack_note     TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_bt_event_ts   ON bt_sku_event(event_ts DESC);
+                CREATE INDEX IF NOT EXISTS idx_bt_event_code ON bt_sku_event(product_code, event_ts DESC);
+                CREATE TABLE IF NOT EXISTS bt_snapshot_run (
+                    run_key     TEXT PRIMARY KEY,
+                    trigger     TEXT,
+                    started_at  TEXT,
+                    finished_at TEXT,
+                    status      TEXT,
+                    sku_total   INTEGER,
+                    sku_active  INTEGER,
+                    event_count INTEGER,
+                    message     TEXT
+                );
+                CREATE TABLE IF NOT EXISTS bt_sku_daily (
+                    snap_date    TEXT NOT NULL,
+                    product_code TEXT NOT NULL,
+                    product_name TEXT,
+                    PRIMARY KEY (snap_date, product_code)
+                );
+                CREATE TABLE IF NOT EXISTS bt_sim_scenario (
+                    scenario_id  INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name         TEXT NOT NULL,
+                    platform     TEXT,
+                    sellers_json TEXT,
+                    params_json  TEXT,
+                    summary_json TEXT,
+                    created_by   TEXT,
+                    created_at   TEXT
+                );
+            """)
+        _initialized = True
+
+
+# ── 파라미터 ────────────────────────────────────────────────────────────────
+
+def get_params() -> dict:
+    init()
+    out = dict(DEFAULT_PARAMS)
+    with _connect() as conn:
+        for r in conn.execute("SELECT key, value FROM bt_param").fetchall():
+            k = r["key"]
+            if k not in DEFAULT_PARAMS:
+                continue
+            if isinstance(DEFAULT_PARAMS[k], str):
+                out[k] = r["value"] or ""
+            else:
+                try:
+                    out[k] = float(r["value"])
+                except (TypeError, ValueError):
+                    pass
+    return out
+
+
+def set_params(values: dict, updated_by: str) -> dict:
+    init()
+    now = _now()
+    with _connect() as conn:
+        for k, v in values.items():
+            if k not in DEFAULT_PARAMS:
+                continue
+            if not isinstance(DEFAULT_PARAMS[k], str):
+                try:
+                    v = float(v)
+                except (TypeError, ValueError):
+                    continue
+            conn.execute(
+                """INSERT INTO bt_param(key, value, updated_by, updated_at) VALUES (?,?,?,?)
+                   ON CONFLICT(key) DO UPDATE SET value=excluded.value,
+                       updated_by=excluded.updated_by, updated_at=excluded.updated_at""",
+                (k, str(v), updated_by, now),
+            )
+    return get_params()
+
+
+# ── 수기 제외 ───────────────────────────────────────────────────────────────
+
+def list_exclusions(active_only: bool = True) -> list[dict]:
+    init()
+    sql = "SELECT * FROM bt_sku_exclusion"
+    if active_only:
+        sql += " WHERE is_active=1"
+    sql += " ORDER BY is_active DESC, created_at DESC"
+    with _connect() as conn:
+        return [dict(r) for r in conn.execute(sql).fetchall()]
+
+
+def active_exclusion_codes() -> set[str]:
+    init()
+    with _connect() as conn:
+        rows = conn.execute("SELECT product_code FROM bt_sku_exclusion WHERE is_active=1").fetchall()
+    return {r["product_code"] for r in rows}
+
+
+def add_exclusion(product_code: str, product_name: str, reason_code: str,
+                  memo: str, release_date: str, created_by: str) -> None:
+    init()
+    if reason_code not in EXCLUDE_REASONS:
+        reason_code = "etc"
+    now = _now()
+    with _connect() as conn:
+        conn.execute(
+            """INSERT INTO bt_sku_exclusion(product_code, product_name, reason_code, memo,
+                   release_date, is_active, created_by, created_at, released_by, released_at)
+               VALUES (?,?,?,?,?,1,?,?,NULL,NULL)
+               ON CONFLICT(product_code) DO UPDATE SET product_name=excluded.product_name,
+                   reason_code=excluded.reason_code, memo=excluded.memo,
+                   release_date=excluded.release_date, is_active=1,
+                   created_by=excluded.created_by, created_at=excluded.created_at,
+                   released_by=NULL, released_at=NULL""",
+            (product_code, product_name, reason_code, memo, release_date or None, created_by, now),
+        )
+    add_event(product_code, product_name, "exclude", "yellow",
+              before_val="", after_val=EXCLUDE_REASONS[reason_code],
+              note=f"{memo or ''} (by {created_by})".strip())
+
+
+def release_exclusion(product_code: str, released_by: str) -> bool:
+    init()
+    now = _now()
+    with _connect() as conn:
+        row = conn.execute("SELECT product_name FROM bt_sku_exclusion WHERE product_code=? AND is_active=1",
+                           (product_code,)).fetchone()
+        if not row:
+            return False
+        conn.execute(
+            "UPDATE bt_sku_exclusion SET is_active=0, released_by=?, released_at=? WHERE product_code=?",
+            (released_by, now, product_code),
+        )
+    add_event(product_code, row["product_name"], "release", "yellow",
+              before_val="제외", after_val="운영", note=f"by {released_by}")
+    return True
+
+
+def due_release_codes(today: str) -> list[dict]:
+    """해제 예정일이 도래한 제외 건 (자동 해제하지 않고 후보로만 노출)."""
+    init()
+    with _connect() as conn:
+        rows = conn.execute(
+            """SELECT * FROM bt_sku_exclusion
+               WHERE is_active=1 AND release_date IS NOT NULL AND release_date<>'' AND release_date<=?""",
+            (today,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+# ── 상태 스냅샷 / 이벤트 ────────────────────────────────────────────────────
+
+def load_state() -> dict[str, dict]:
+    init()
+    with _connect() as conn:
+        rows = conn.execute("SELECT * FROM bt_sku_state").fetchall()
+    return {r["product_code"]: dict(r) for r in rows}
+
+
+def save_state(rows: list[dict], missing_codes: list[str]) -> None:
+    """rows: 이번 스냅샷에 존재하는 SKU, missing_codes: 이번에 사라진 SKU."""
+    init()
+    now = _now()
+    with _connect() as conn:
+        for r in rows:
+            conn.execute(
+                """INSERT INTO bt_sku_state(product_code, product_name, material_group, use_hold,
+                       present, first_seen, last_seen, updated_at)
+                   VALUES (?,?,?,?,1,?,?,?)
+                   ON CONFLICT(product_code) DO UPDATE SET product_name=excluded.product_name,
+                       material_group=excluded.material_group, use_hold=excluded.use_hold,
+                       present=1, last_seen=excluded.last_seen, updated_at=excluded.updated_at""",
+                (r["product_code"], r.get("product_name"), r.get("material_group") or "",
+                 r.get("use_hold") or "", now, now, now),
+            )
+        for c in missing_codes:
+            conn.execute("UPDATE bt_sku_state SET present=0, updated_at=? WHERE product_code=?", (now, c))
+
+
+def add_event(product_code: str, product_name: str | None, event_type: str, severity: str,
+              before_val: str = "", after_val: str = "", run_key: str | None = None,
+              mapped_cnt: int = 0, note: str = "") -> None:
+    init()
+    with _connect() as conn:
+        conn.execute(
+            """INSERT INTO bt_sku_event(event_ts, run_key, product_code, product_name, event_type,
+                   severity, before_val, after_val, mapped_cnt, note)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (_now(), run_key, product_code, product_name, event_type, severity,
+             before_val, after_val, mapped_cnt, note),
+        )
+
+
+def list_events(days: int = 7, event_type: str = "", unacked_only: bool = False,
+                product_code: str = "", limit: int = 1000) -> list[dict]:
+    init()
+    where = ["event_ts >= datetime('now','localtime', ?)"]
+    args: list = [f"-{int(days)} days"]
+    if event_type:
+        where.append("event_type=?")
+        args.append(event_type)
+    if unacked_only:
+        where.append("ack_at IS NULL")
+    if product_code:
+        where = ["product_code=?"]
+        args = [product_code]
+    sql = f"SELECT * FROM bt_sku_event WHERE {' AND '.join(where)} ORDER BY event_ts DESC, event_id DESC LIMIT ?"
+    args.append(int(limit))
+    with _connect() as conn:
+        return [dict(r) for r in conn.execute(sql, args).fetchall()]
+
+
+def ack_events(event_ids: list[int], ack_by: str, ack_note: str = "") -> int:
+    init()
+    if not event_ids:
+        return 0
+    now = _now()
+    with _connect() as conn:
+        cur = conn.executemany(
+            "UPDATE bt_sku_event SET ack_by=?, ack_at=?, ack_note=? WHERE event_id=? AND ack_at IS NULL",
+            [(ack_by, now, ack_note, int(i)) for i in event_ids],
+        )
+        return cur.rowcount or 0
+
+
+def try_start_run(run_key: str, trigger: str) -> bool:
+    """run_key 선점. 이미 같은 run_key가 있으면 False (manual 트리거는 접미사로 구분)."""
+    init()
+    with _connect() as conn:
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO bt_snapshot_run(run_key, trigger, started_at, status) VALUES (?,?,?, 'running')",
+            (run_key, trigger, _now()),
+        )
+        return (cur.rowcount or 0) > 0
+
+
+def finish_run(run_key: str, status: str, sku_total: int, sku_active: int,
+               event_count: int, message: str = "") -> None:
+    init()
+    with _connect() as conn:
+        conn.execute(
+            """UPDATE bt_snapshot_run SET finished_at=?, status=?, sku_total=?, sku_active=?,
+                   event_count=?, message=? WHERE run_key=?""",
+            (_now(), status, sku_total, sku_active, event_count, message[:2000], run_key),
+        )
+
+
+def list_runs(limit: int = 48) -> list[dict]:
+    init()
+    with _connect() as conn:
+        return [dict(r) for r in conn.execute(
+            "SELECT * FROM bt_snapshot_run ORDER BY started_at DESC LIMIT ?", (int(limit),)).fetchall()]
+
+
+def has_daily(snap_date: str) -> bool:
+    init()
+    with _connect() as conn:
+        return conn.execute("SELECT 1 FROM bt_sku_daily WHERE snap_date=? LIMIT 1", (snap_date,)).fetchone() is not None
+
+
+def save_daily(snap_date: str, rows: list[dict]) -> None:
+    init()
+    with _connect() as conn:
+        conn.executemany(
+            "INSERT OR IGNORE INTO bt_sku_daily(snap_date, product_code, product_name) VALUES (?,?,?)",
+            [(snap_date, r["product_code"], r.get("product_name")) for r in rows],
+        )
+
+
+def daily_counts(limit: int = 30) -> list[dict]:
+    init()
+    with _connect() as conn:
+        return [dict(r) for r in conn.execute(
+            """SELECT snap_date, COUNT(*) AS cnt FROM bt_sku_daily
+               GROUP BY snap_date ORDER BY snap_date DESC LIMIT ?""", (int(limit),)).fetchall()]
+
+
+# ── 시나리오 ────────────────────────────────────────────────────────────────
+
+def save_scenario(name: str, platform: str, sellers: list, params: dict,
+                  summary: dict, created_by: str) -> int:
+    init()
+    with _connect() as conn:
+        cur = conn.execute(
+            """INSERT INTO bt_sim_scenario(name, platform, sellers_json, params_json, summary_json,
+                   created_by, created_at) VALUES (?,?,?,?,?,?,?)""",
+            (name, platform, json.dumps(sellers, ensure_ascii=False),
+             json.dumps(params, ensure_ascii=False), json.dumps(summary, ensure_ascii=False),
+             created_by, _now()),
+        )
+        return cur.lastrowid
+
+
+def list_scenarios(limit: int = 50) -> list[dict]:
+    init()
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM bt_sim_scenario ORDER BY created_at DESC LIMIT ?", (int(limit),)).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        for k in ("sellers_json", "params_json", "summary_json"):
+            try:
+                d[k[:-5]] = json.loads(d.pop(k) or "null")
+            except Exception:
+                d[k[:-5]] = None
+        out.append(d)
+    return out
+
+
+def delete_scenario(scenario_id: int) -> None:
+    init()
+    with _connect() as conn:
+        conn.execute("DELETE FROM bt_sim_scenario WHERE scenario_id=?", (int(scenario_id),))
