@@ -12,7 +12,7 @@
   <div class="pm-card-head"><span class="pm-card-title">6 · 판정·수요 파라미터</span><span class="muted">저장 시 전 화면 즉시 재계산</span></div>
   <div class="sec">수수료 (%)</div>
   <div class="pgrid">
-    <label>당사 · 배민상회<input class="pm-input" data-k="fee_our_baemin" type="number" step="0.1"><span class="d">판매가 산출용</span></label>
+    <label>당사 · 배민상회<input class="pm-input" data-k="fee_our_baemin" type="number" step="0.1"><span class="d">VAT 포함 고지율 · 등록가 산출 + 브랜드수수료(÷1.1)</span></label>
     <label>당사 · 오늘얼마<input class="pm-input" data-k="fee_our_todaysales" type="number" step="0.1"></label>
     <label>타사 · 배민상회<input class="pm-input" data-k="fee_comp_baemin" type="number" step="0.1"><span class="d">경쟁 실수취가 산출용</span></label>
     <label>타사 · 오늘얼마<input class="pm-input" data-k="fee_comp_todaysales" type="number" step="0.1"></label>
@@ -26,10 +26,24 @@
     <label>반영률 · 패 %<input class="pm-input" data-k="reflect_lose" type="number"></label>
     <label>전환계수 %<input class="pm-input" data-k="conversion_pct" type="number" step="5"><span class="d">전체센터 수요 중 플랫폼 주문으로 전환된다고 보는 비율</span></label>
     <label>예상수량 기간(일)<input class="pm-input" data-k="demand_days" type="number"><span class="d">최근 N일 출고 ÷ 영업일(월~토)</span></label>
-    <label>◎ 공헌이익율 하한 %<input class="pm-input" data-k="cm_floor_pct" type="number" step="0.5"><span class="d">추천가 하한 · 출혈승 기준 · 총액매출 − 원가 − 수수료 − 물류비</span></label>
-    <label>물류비율 %<input class="pm-input" data-k="logi_pct" type="number" step="0.5"><span class="d">총액매출 대비</span></label>
+    <label>◎ 공헌이익율 하한 %<input class="pm-input" data-k="cm_floor_pct" type="number" step="0.5"><span class="d">추천가 하한 · 출혈승 기준</span></label>
     <label>GP 경보 %<input class="pm-input" data-k="gp_alert" type="number" step="0.5"><span class="d">GP 색상 표시용</span></label>
     <label>GP 주의 %<input class="pm-input" data-k="gp_warn" type="number" step="0.5"></label>
+  </div>
+  <div class="sec">손익 구조 — 변동비 (매출액 대비 %)</div>
+  <div class="pgrid">
+    <label>운반비 · 콜당 단가(원)<input class="pm-input" data-k="call_cost" type="number" step="100"><span class="d">운반비율 = 콜당 단가 ÷ 회당 예상 매출액</span></label>
+    <label>회당 예상 매출액(원)<input class="pm-input" data-k="call_revenue" type="number" step="10000"></label>
+    <label>하역비 %<input class="pm-input" data-k="unload_pct" type="number" step="0.01"></label>
+    <label>보험료 % <span class="d">기타1</span><input class="pm-input" data-k="insurance_pct" type="number" step="0.01"></label>
+    <label>포장비 % <span class="d">기타1</span><input class="pm-input" data-k="packing_pct" type="number" step="0.01"></label>
+  </div>
+  <div class="muted">기타1의 브랜드수수료는 플랫폼별 수수료 ÷ 1.1 로 자동 산출됩니다 (고지율이 VAT 포함).</div>
+  <div class="sec">손익 구조 — 고정비 (매출액 대비 %)</div>
+  <div class="pgrid">
+    <label>물류간접비 %<input class="pm-input" data-k="logi_indirect_pct" type="number" step="0.01"></label>
+    <label>기타2 원천 %<input class="pm-input" data-k="other2_pct" type="number" step="0.01"><span class="d">적용 기타2 = 원천 − 공통매입세액</span></label>
+    <label>수수료 공통매입세액 %<input class="pm-input" data-k="vat_credit_pct" type="number" step="0.01"></label>
   </div>
   <div class="sec">7 · 알림</div>
   <div class="pgrid">

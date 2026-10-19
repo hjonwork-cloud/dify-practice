@@ -4,8 +4,12 @@
 <div class="kpis" id="kpis"></div>
 <div class="pm-card">
   <div class="pm-card-head"><span class="pm-card-title">카테고리 요약 <span class="muted" id="catBasis"></span></span><span class="muted" id="feeInfo"></span></div>
-  <div class="scroll-x"><table class="pm-table" style="font-size:.78rem"><thead><tr><th>카테고리</th><th class="num">SKU</th><th class="num">매출/일</th><th class="num">GP액/일</th><th class="num">GP율</th><th class="num" title="공헌이익 = 순액공급가 − 원가 − 물류비">◎ CM율</th><th class="num">패 SKU</th></tr></thead>
-    <tbody id="cat"><tr><td colspan="7" class="bt-loading">불러오는 중…</td></tr></tbody></table></div>
+  <div class="scroll-x"><table class="pm-table" style="font-size:.78rem"><thead><tr><th>카테고리</th><th class="num">SKU</th><th class="num">매출/일</th><th class="num">GP액/일</th><th class="num">GP율</th><th class="num" title="공헌이익 = 매출총이익 − 변동비">◎ CM율</th><th class="num" title="영업이익 = 공헌이익 − 고정비">△ OP율</th><th class="num">패 SKU</th></tr></thead>
+    <tbody id="cat"><tr><td colspan="8" class="bt-loading">불러오는 중…</td></tr></tbody></table></div>
+</div>
+<div class="pm-card">
+  <div class="pm-card-head"><span class="pm-card-title">손익 구조 <span class="muted">일 합계 · VAT 제외 · 총액 인식</span></span><span class="muted" id="pnlNote"></span></div>
+  <div id="pnl"><div class="bt-loading">불러오는 중…</div></div>
 </div>
 <div class="pm-card">
   <div class="pm-card-head"><span class="pm-card-title">SKU별 수익성 · 추천가</span>
@@ -14,47 +18,70 @@
       <select id="fN" class="pm-input" style="max-width:170px"><option value="">추천 전체</option><option>승 가능</option><option>하한 · 무승부권</option><option>승 불가(하한 초과)</option><option>경쟁 없음</option><option>구매가 없음</option></select>
       <select id="fV" class="pm-input" style="max-width:110px"><option value="">판정 전체</option><option value="win">승</option><option value="tie">무</option><option value="lose">패</option><option value="none">경쟁 없음</option></select>
       <button class="pm-btn pm-btn-ghost pm-btn-sm" onclick="csv()">CSV</button></div></div>
-  <div class="muted" style="margin-bottom:.4rem">◎ 하한가 = 공헌이익율 {{ bt_params.cm_floor_pct }}% 를 만족하는 최저 공급가 (물류 {{ bt_params.logi_pct }}% 포함) · 승 가격 = 최저 경쟁 실수취 × (1 − 밴드) · 추천가 = 승 가격이 하한 이상이면 승 가격, 아니면 하한가</div>
+  <div class="muted" style="margin-bottom:.4rem">◎ 하한가 = 공헌이익율 {{ bt_params.cm_floor_pct }}% 를 만족하는 최저 공급가 · 승 가격 = 최저 경쟁 실수취 × (1 − 밴드) · 추천가 = 승 가격이 하한 이상이면 승 가격, 아니면 하한가</div>
   <div class="scroll-x"><table class="pm-table" style="font-size:.76rem">
-    <thead><tr><th>SKU</th><th>카테고리</th><th class="num">수요/일</th><th class="num">구매가</th><th class="num">평균 판매단가<div class="muted">VAT 제외</div></th><th class="num">GP<div class="muted" id="hGp"></div></th><th class="num">◎ CM</th><th class="num">당사 등록가</th>
-      <th>최저 경쟁<div class="muted" id="hCmp"></div></th><th>판정</th><th class="num">◎ 하한가</th><th class="num">승 가격</th><th class="num">추천가</th><th class="num">변동</th><th class="num">추천 ◎ CM</th><th class="num">추천 등록가</th><th>비고</th></tr></thead>
+    <thead><tr><th>SKU</th><th>카테고리</th><th class="num">수요/일</th><th class="num">구매가</th><th class="num">평균 판매단가<div class="muted">VAT 제외</div></th><th class="num">GP<div class="muted" id="hGp"></div></th><th class="num">◎ CM</th><th class="num">△ OP</th><th class="num">당사 등록가</th>
+      <th>최저 경쟁<div class="muted" id="hCmp"></div></th><th>판정</th><th class="num">◎ 하한가</th><th class="num">승 가격</th><th class="num">추천가</th><th class="num">변동</th><th class="num">추천 ◎ CM</th><th class="num">추천 △ OP</th><th class="num">추천 등록가</th><th>비고</th></tr></thead>
     <tbody id="tb"></tbody></table></div>
   <div class="pager" id="pg"></div>
 </div>
 {% endblock %}
 {% block bt_scripts %}
 <script>
-let PF='baemin', ROWS=[], CATS=[], PAGE=1;
+let PF='baemin', ROWS=[], CATS=[], RATES={}, PAGE=1;
 async function load(){
-  document.getElementById('tb').innerHTML='<tr><td colspan="17" class="bt-loading">불러오는 중…</td></tr>';
-  try{const j=await btGet('/api/profit?platform='+PF); renderMeta(j); ROWS=j.rows; CATS=j.categories; PAGE=1;
-    document.getElementById('feeInfo').textContent=`${PF_LABEL[PF]} 당사 수수료 ${j.fee_our_pct}% · 물류 ${BT_PARAMS.logi_pct}%`;
+  document.getElementById('tb').innerHTML='<tr><td colspan="19" class="bt-loading">불러오는 중…</td></tr>';
+  try{const j=await btGet('/api/profit?platform='+PF); renderMeta(j); ROWS=j.rows; CATS=j.categories; RATES=j.rates||{}; PAGE=1;
+    document.getElementById('feeInfo').textContent=`${PF_LABEL[PF]} 수수료 ${j.fee_our_pct}% · 변동비 ${num(RATES.var,2)}% · 고정비 ${num(RATES.fix,2)}%`;
     drawAll();
-  }catch(e){document.getElementById('tb').innerHTML=`<tr><td colspan="17" class="bt-loading" style="color:#b91c1c">⚠ ${esc(e.message)}</td></tr>`;}
+  }catch(e){document.getElementById('tb').innerHTML=`<tr><td colspan="19" class="bt-loading" style="color:#b91c1c">⚠ ${esc(e.message)}</td></tr>`;}
 }
 function drawAll(){
   const G=isGross(), tag=G?'⊕':'⊖';
   document.getElementById('catBasis').textContent=(G?'⊕ 총액':'⊖ 순액')+' · 일 기준';
   document.getElementById('hGp').textContent=G?'총액':'순액';
   document.getElementById('hCmp').textContent=G?'등록가':'실수취';
-  const rev=ROWS.reduce((a,r)=>a+((G?r.gross_rev_daily:r.rev_daily)||0),0);
-  const cost=ROWS.reduce((a,r)=>a+((r.rev_daily||0)-(r.gp_daily||0)),0);
-  const gp=rev-cost, cm=ROWS.reduce((a,r)=>a+((r.gp_daily||0)-(r.gross_rev_daily||0)*LOGI),0);
-  const grossAll=ROWS.reduce((a,r)=>a+(r.gross_rev_daily||0),0);
+  const S=k=>ROWS.reduce((a,r)=>a+(r[k]||0),0);
+  const grossAll=S('gross_rev_daily'), netAll=S('rev_daily');
+  const rev=G?grossAll:netAll, gp=S('gp_daily'), cm=S('cm_daily'), op=S('op_daily');
+  const gpShow=G?gp:(gp-(grossAll-netAll));   // 순액 표시엔 수수료를 매출에서 차감
   const c=n=>ROWS.filter(r=>r.note===n).length;
   document.getElementById('kpis').innerHTML=`
     <div class="kpi"><div class="l">운영 SKU</div><div class="v">${ROWS.length.toLocaleString()}</div></div>
     <div class="kpi"><div class="l">${tag} 매출/일</div><div class="v">${man(rev)}</div><div class="s">월 ${man(rev*26)}</div></div>
-    <div class="kpi"><div class="l">${tag} GP율</div><div class="v">${rev?(gp/rev*100).toFixed(1):'-'}%</div><div class="s">GP/일 ${man(gp)}</div></div>
+    <div class="kpi"><div class="l">${tag} GP율</div><div class="v">${rev?(gpShow/rev*100).toFixed(1):'-'}%</div><div class="s">GP/일 ${man(gpShow)}</div></div>
     <div class="kpi"><div class="l">◎ 공헌이익율</div><div class="v">${grossAll?(cm/grossAll*100).toFixed(1):'-'}%</div><div class="s">${man(cm)}/일 · 하한 ${BT_PARAMS.cm_floor_pct}%</div></div>
+    <div class="kpi"><div class="l">△ 영업이익율</div><div class="v">${grossAll?(op/grossAll*100).toFixed(1):'-'}%</div><div class="s">${man(op)}/일 · 월 ${man(op*26)}</div></div>
     <div class="kpi green"><div class="l">승 가능</div><div class="v">${c('승 가능')}</div></div>
     <div class="kpi amber"><div class="l">하한 · 무승부권</div><div class="v">${c('하한 · 무승부권')}</div></div>
-    <div class="kpi red"><div class="l">승 불가</div><div class="v">${c('승 불가(하한 초과)')}</div></div>
-    <div class="kpi"><div class="l">경쟁 없음</div><div class="v">${c('경쟁 없음')}</div></div>`;
+    <div class="kpi red"><div class="l">승 불가</div><div class="v">${c('승 불가(하한 초과)')}</div></div>`;
   document.getElementById('cat').innerHTML=(CATS||[]).map(x=>{
-    const r0=G?x.gross_rev:x.rev, g0=G?x.gp:(x.rev-(x.gross_rev-x.gp));
-    return `<tr><td>${esc(x.category)}</td><td class="num">${x.cnt}</td><td class="num">${man(r0)}</td><td class="num">${man(g0)}</td><td class="num">${gpTxt(r0?+(g0/r0*100).toFixed(1):null)}</td><td class="num">${cmTxt(x.cm_pct)}</td><td class="num" style="color:#b91c1c">${x.lose||''}</td></tr>`;}).join('');
+    const r0=G?x.gross_rev:x.rev, g0=G?x.gp:(x.gp-(x.gross_rev-x.rev));
+    return `<tr><td>${esc(x.category)}</td><td class="num">${x.cnt}</td><td class="num">${man(r0)}</td><td class="num">${man(g0)}</td><td class="num">${gpTxt(r0?+(g0/r0*100).toFixed(1):null)}</td><td class="num">${cmTxt(x.cm_pct)}</td><td class="num">${opTxt(x.op_pct)}</td><td class="num" style="color:#b91c1c">${x.lose||''}</td></tr>`;}).join('');
+  drawPnl(grossAll);
   draw();
+}
+/* 일 합계 손익 구조 — 비율은 전체 매출액 대비 */
+function drawPnl(grossAll){
+  const S=k=>ROWS.reduce((a,r)=>a+(r[k]||0),0);
+  const cogs=grossAll-S('gp_daily'), gp=S('gp_daily'), cm=S('cm_daily'), op=S('op_daily');
+  const R=RATES, vr=(R.var||0)/100, fr=(R.fix||0)/100;
+  const q=p=>grossAll*p/100;
+  const row=(l,a,cls,ind)=>`<tr class="${cls||''}"><td style="padding-left:${ind?1.1*ind:0.3}rem">${l}</td><td class="num">${man(a)}</td><td class="num">${grossAll?(a/grossAll*100).toFixed(2):'-'}%</td><td class="num">${man(a*26)}</td></tr>`;
+  document.getElementById('pnlNote').textContent=`${PF_LABEL[PF]} · 운반비 = 콜당 ${won(BT_PARAMS.call_cost)}원 ÷ 회당 매출 ${won(BT_PARAMS.call_revenue)}원`;
+  document.getElementById('pnl').innerHTML=`<div class="scroll-x"><table class="pm-table pnl" style="font-size:.78rem;max-width:640px">
+    <thead><tr><th>항목</th><th class="num">금액/일</th><th class="num">%</th><th class="num">월(×26)</th></tr></thead><tbody>`
+    +row('매출액',grossAll,'pnl-h')
+    +row('− 매출원가',cogs,'',1)
+    +row('= 매출총이익',gp,'pnl-k')
+    +row('변동비',q(R.var),'pnl-s')
+    +row('운반비',q(R.freight),'',1)+row('하역비',q(R.unload),'',1)+row('기타1',q(R.etc1),'',1)
+    +row('브랜드수수료',q(R.brand),'',2)+row('보험료',q(R.insurance),'',2)+row('포장비',q(R.packing),'',2)
+    +row('= ◎ 공헌이익',cm,'pnl-k')
+    +row('고정비',q(R.fix),'pnl-s')
+    +row('물류간접비',q(R.indirect),'',1)+row('기타2',q(R.etc2),'',1)
+    +row('= △ 영업이익',op,'pnl-t')
+    +'</tbody></table></div>';
 }
 window.onBasisChange=drawAll;
 function rows(){const kw=document.getElementById('kw').value.trim().toLowerCase(), n=document.getElementById('fN').value, v=document.getElementById('fV').value;
@@ -62,17 +89,19 @@ function rows(){const kw=document.getElementById('kw').value.trim().toLowerCase(
 function draw(){
   const R=rows(), S=100, G=isGross();
   document.getElementById('tb').innerHTML=R.slice((PAGE-1)*S,PAGE*S).map(r=>`<tr><td><span class="code">${esc(r.product_code)}</span> ${esc(r.product_name)}</td><td class="muted">${esc(r.category)}</td>
-    <td class="num">${demHtml(r.demand_daily,r.demand_plants,3)}</td><td class="num">${won(r.buy_price)}</td><td class="num">${won(r.our_price)}</td><td class="num">${gpTxt(G?r.gross_gp_pct:r.gp_pct)}</td><td class="num">${cmTxt(r.cm_pct)}</td><td class="num">${won(r.list_price)}</td>
+    <td class="num">${demHtml(r.demand_daily,r.demand_plants,3)}</td><td class="num">${won(r.buy_price)}</td><td class="num">${won(r.our_price)}</td><td class="num">${gpTxt(G?r.gross_gp_pct:r.gp_pct)}</td>
+    <td class="num" title="${esc(pnlTip(r.our_price,r.buy_price,PF))}">${cmTxt(r.cm_pct)}</td><td class="num" title="${esc(pnlTip(r.our_price,r.buy_price,PF))}">${opTxt(r.op_pct)}</td><td class="num">${won(r.list_price)}</td>
     <td>${esc(r.comp_seller)}<div class="num" style="text-align:left">${won(G?r.comp_list_price:r.comp_net)}</div></td><td>${vBadge(r.verdict)} ${pct(r.diff_pct)}</td>
     <td class="num">${won(r.floor)}</td><td class="num">${won(r.win_price)}</td><td class="num"><b>${won(r.rec_price)}</b></td><td class="num">${pct(r.rec_change_pct)}</td>
-    <td class="num">${cmTxt(r.rec_cm)}</td><td class="num">${won(r.rec_list_price)}</td><td class="muted">${esc(r.note)}</td></tr>`).join('')||'<tr><td colspan="17" class="bt-loading">없음</td></tr>';
+    <td class="num">${cmTxt(r.rec_cm)}</td><td class="num">${opTxt(r.rec_op)}</td><td class="num">${won(r.rec_list_price)}</td><td class="muted">${esc(r.note)}</td></tr>`).join('')||'<tr><td colspan="19" class="bt-loading">없음</td></tr>';
   pager(document.getElementById('pg'),R.length,S,PAGE,p=>{PAGE=p;draw();});
 }
 function csv(){toCSV(rows(),[['상품코드',r=>r.product_code],['상품명',r=>r.product_name],['카테고리',r=>r.category],['과세',r=>r.tax_class],['수요/일',r=>r.demand_daily],
-  ['구매가',r=>r.buy_price],['평균판매단가(VAT제외)',r=>r.our_price],['총액매출단가',r=>r.gross_price],['GP%(순액)',r=>r.gp_pct],['GP%(총액)',r=>r.gross_gp_pct],['공헌이익율%',r=>r.cm_pct],
+  ['구매가',r=>r.buy_price],['평균판매단가(VAT제외)',r=>r.our_price],['매출액단가',r=>r.gross_price],['GP%(순액)',r=>r.gp_pct],['GP%(총액)',r=>r.gross_gp_pct],
+  ['변동비%',r=>r.var_pct],['공헌이익율%',r=>r.cm_pct],['고정비%',r=>r.fix_pct],['영업이익율%',r=>r.op_pct],
   ['당사등록가',r=>r.list_price],['최저경쟁셀러',r=>r.comp_seller],['경쟁등록가',r=>r.comp_list_price],['최저실수취',r=>r.comp_net],
   ['판정',r=>V_LABEL[r.verdict]],['격차%',r=>r.diff_pct],['공헌이익하한가',r=>r.floor],['승가격',r=>r.win_price],['추천가',r=>r.rec_price],['변동%',r=>r.rec_change_pct],
-  ['추천GP%',r=>r.rec_gp],['추천공헌이익율%',r=>r.rec_cm],['추천등록가',r=>r.rec_list_price],['비고',r=>r.note]],`수익성_추천가_${PF}.csv`);}
+  ['추천GP%',r=>r.rec_gp],['추천공헌이익율%',r=>r.rec_cm],['추천영업이익율%',r=>r.rec_op],['추천등록가',r=>r.rec_list_price],['비고',r=>r.note]],`수익성_추천가_${PF}.csv`);}
 document.querySelectorAll('#pfTabs button').forEach(b=>b.onclick=()=>{PF=b.dataset.p;document.querySelectorAll('#pfTabs button').forEach(x=>x.classList.toggle('on',x===b));load();});
 ['kw','fN','fV'].forEach(id=>document.getElementById(id).addEventListener(id==='kw'?'input':'change',()=>{PAGE=1;draw();}));
 load();

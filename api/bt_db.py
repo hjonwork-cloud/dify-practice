@@ -21,16 +21,23 @@ import portal_db
 _init_lock = threading.Lock()
 _initialized = False
 
-# 파라미터 기본값 (사용자 확정 2026-10-19)
-#  - 배민상회 당사 수수료 5.5%, 배민상회 타사 6.6%, 오늘얼마 4.8%
+# 파라미터 기본값 (사용자 확정 2026-10-20)
+#  - 배민상회 당사 수수료 5.5%, 배민상회 타사 6.6%, 오늘얼마 4.9%  ← 모두 VAT 포함 고지율
 #  - 비교가 = 평균 판매단가(당사 공급가, VAT 제외)
 #  - 승·무·패 밴드 ±2%, 수요 반영률 승 100 / 무 50 / 패 10
-#  - 하한은 공헌이익율 8% (재경 총액 인식 확정 — 수수료는 판관비라 GP율과 기준이 다름)
+#  - 손익 구조(총액 인식, VAT 제외)
+#      매출액 G = 등록가 ÷ VAT
+#      매출총이익 = G − 매입원가
+#      변동비  = 운반비(콜당 call_cost ÷ call_revenue) + 하역비 + 기타1(브랜드수수료 + 보험료 + 포장비)
+#      공헌이익  = 매출총이익 − 변동비
+#      고정비  = 물류간접비 + 기타2(other2_pct − vat_credit_pct)
+#      영업이익  = 공헌이익 − 고정비
+#  - 브랜드수수료는 고지율이 VAT 포함이므로 손익 계산 시 ÷VAT 해서 공급가 기준으로 환산
 DEFAULT_PARAMS: dict[str, float | str] = {
-    "fee_our_baemin":      5.5,   # 당사가 배민상회에서 판매 시 수수료(%)
-    "fee_our_todaysales":  4.8,   # 당사가 오늘얼마에서 판매 시 수수료(%)
+    "fee_our_baemin":      5.5,   # 당사가 배민상회에서 판매 시 수수료(%) · VAT 포함
+    "fee_our_todaysales":  4.9,   # 당사가 오늘얼마에서 판매 시 수수료(%) · VAT 포함
     "fee_comp_baemin":     6.6,   # 배민상회 타사 셀러 수수료(%)
-    "fee_comp_todaysales": 4.8,   # 오늘얼마 타사 셀러 수수료(%)
+    "fee_comp_todaysales": 4.9,   # 오늘얼마 타사 셀러 수수료(%)
     "tie_band_pct":        2.0,   # 무승부 밴드 ±%
     "reflect_win":         100.0, # 수요 반영률(%) — 승
     "reflect_tie":         50.0,  # 수요 반영률(%) — 무
@@ -39,8 +46,17 @@ DEFAULT_PARAMS: dict[str, float | str] = {
     "demand_days":         28,    # 예상수량 산정 기간(일) — 최근 4주
     "gp_alert":            10.0,  # GP 경보(%)
     "gp_warn":             20.0,  # GP 주의(%)
-    "cm_floor_pct":        8.0,   # 공헌이익율 하한(%) — 추천가·시나리오 하한 (목업 FLOOR 동일)
-    "logi_pct":            6.0,   # 물류비율(%) — 공헌이익 산정용 예시값, SAP 실적 전환 전까지
+    "cm_floor_pct":        8.0,   # 공헌이익율 하한(%) — 추천가·시나리오 하한
+    # ── 변동비 ──
+    "call_cost":           11000.0,  # 운반비 콜당 단가(원)
+    "call_revenue":        150000.0, # 콜당 예상 매출액(원) — 운반비율 = call_cost ÷ call_revenue
+    "unload_pct":          4.05,  # 하역비율(%)
+    "insurance_pct":       0.0,   # 보험료율(%) — 기타1
+    "packing_pct":         0.06,  # 포장비율(%) — 기타1
+    # ── 고정비 ──
+    "logi_indirect_pct":   1.3,   # 물류간접비율(%)
+    "other2_pct":          2.33,  # 기타2 원천 비율(%)
+    "vat_credit_pct":      0.19,  # 수수료 공통매입세액(%) — 기타2에서 차감
     "alert_email":         "",    # 수발주 🔴 이벤트 알림 수신 메일 (콤마 구분)
 }
 

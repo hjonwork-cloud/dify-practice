@@ -42,6 +42,11 @@
 .bt-seg{display:inline-flex;border:1px solid #cbd5e1;border-radius:99px;overflow:hidden;background:#fff;font-family:inherit;}
 .bt-seg button{border:0;background:none;padding:.15rem .55rem;font-size:.72rem;cursor:pointer;color:#64748b;font-family:inherit;line-height:1.5;}
 .bt-seg button.on{background:var(--pm-blue);color:#fff;font-weight:700;}
+.pnl td,.pnl th{padding:.22rem .45rem;}
+.pnl tr.pnl-h td{background:#f1f5f9;font-weight:700;}
+.pnl tr.pnl-s td{background:#fafafa;font-weight:600;}
+.pnl tr.pnl-k td{background:#dbeafe;font-weight:700;}
+.pnl tr.pnl-t td{background:var(--pm-blue);color:#fff;font-weight:700;}
 .vs{color:#cbd5e1;padding:0 .15rem;}
 .ours{color:#1d4ed8;font-weight:700;}
 </style>
@@ -72,23 +77,83 @@ function pfBadge(p){return `<span class="badge ${PF_BADGE[p]||'badge-gray'}">${P
 function gpCls(g){if(g===null||g===undefined)return '';return g<BT_PARAMS.gp_alert?'gp-alert':g<BT_PARAMS.gp_warn?'gp-warn':'gp-ok';}
 function gpTxt(g){return `<span class="${gpCls(g)}">${g===null||g===undefined?'-':Number(g).toFixed(1)+'%'}</span>`;}
 
-/* ── 총액(회계) · 순액(수수료 차감) 환산 ──────────────────────────────────
-   재경팀 검토(09.22): 홈푸드 = 본인 → 판매대가 총액을 매출 인식, 수수료는 판관비.
+/* ── 총액(회계) 환산 + 손익 구조 ─────────────────────────────────────────
+   재경팀 검토(09.22): 홈푸드 = 본인 → 판매대가 총액을 매출 인식, 수수료는 비용.
    순액 공급가 p 기준으로
-     등록가 L = p × VAT ÷ (1−수수료) · 총액매출 G = L ÷ VAT = p ÷ (1−수수료)
-     공헌이익 = p − 원가 − G×물류비율  (총액/순액 표시와 무관하게 금액은 동일) */
+     등록가 L = p × VAT ÷ (1−수수료) · 매출액 G = L ÷ VAT = p ÷ (1−수수료)
+     매출총이익 = G − 원가
+     변동비   = 운반비 + 하역비 + 기타1(브랜드수수료 + 보험료 + 포장비)
+     공헌이익   = 매출총이익 − 변동비
+     고정비   = 물류간접비 + 기타2
+     영업이익   = 공헌이익 − 고정비
+   ※ 브랜드수수료 고지율(5.5% / 4.9%)은 VAT 포함 → ÷VAT 해서 공급가 기준으로 환산 */
+const VAT=1.1;
 const OUR_FEE={baemin:BT_PARAMS.fee_our_baemin, todaysales:BT_PARAMS.fee_our_todaysales, foodspring:6.6};
-const LOGI=(BT_PARAMS.logi_pct||0)/100;
+const P_=(k,d)=>{const v=parseFloat(BT_PARAMS[k]); return (isNaN(v)?d:v)/100;};
+const CALL_REV=parseFloat(BT_PARAMS.call_revenue)||0;
+const FREIGHT=CALL_REV>0?((parseFloat(BT_PARAMS.call_cost)||0)/CALL_REV):0;
+const UNLOAD=P_('unload_pct',4.05), INSUR=P_('insurance_pct',0), PACK=P_('packing_pct',0.06);
+const INDIRECT=P_('logi_indirect_pct',1.3), ETC2=P_('other2_pct',2.33)-P_('vat_credit_pct',0.19);
+const FIXR=INDIRECT+ETC2;
 const feeOf=pf=>(OUR_FEE[pf]??6.6)/100;
+const brandOf=pf=>feeOf(pf)/VAT;                 /* 브랜드수수료(공급가 기준) */
+const etc1Of=pf=>brandOf(pf)+INSUR+PACK;
+const varOf=pf=>FREIGHT+UNLOAD+etc1Of(pf);       /* 변동비율 */
 const vatOf=r=>(r&&r.tax_class==='면세')?1:1.1;
 function grossOf(net,pf){return net?net/(1-feeOf(pf)):null;}
 function listOf(net,pf,vat){return net?net*vat/(1-feeOf(pf)):null;}
 function gpPctOf(net,buy,pf){const g=grossOf(net,pf);return (g&&buy)?(g-buy)/g*100:null;}
-function cmPctOf(net,buy,pf){const g=grossOf(net,pf);return (g&&buy)?(net-buy-g*LOGI)/g*100:null;}
+function pnlOf(net,buy,pf){
+  const g=grossOf(net,pf); if(!g||!buy) return null;
+  const gp=g-buy, vr=varOf(pf), v=g*vr, cm=gp-v, fx=g*FIXR, op=cm-fx;
+  return {gross:g, cogs:buy, gp, gpPct:gp/g*100,
+    freight:g*FREIGHT, unload:g*UNLOAD, brand:g*brandOf(pf), insur:g*INSUR, pack:g*PACK,
+    etc1:g*etc1Of(pf),
+    varAmt:v, varPct:vr*100, cm, cmPct:cm/g*100,
+    indirect:g*INDIRECT, etc2:g*ETC2, fix:fx, fixPct:FIXR*100, op, opPct:op/g*100};
+}
+function cmPctOf(net,buy,pf){const p=pnlOf(net,buy,pf);return p?p.cmPct:null;}
+function opPctOf(net,buy,pf){const p=pnlOf(net,buy,pf);return p?p.opPct:null;}
 /* 공헌이익율 하한을 만족하는 최저 순액 공급가 */
-function cmFloorOf(buy,pf,floorPct){if(!buy)return null;const k=1-((floorPct/100)+LOGI)/(1-feeOf(pf));return k>0?buy/k:null;}
+function cmFloorOf(buy,pf,floorPct){if(!buy)return null;const k=1-varOf(pf)-(floorPct/100);return k>0?buy*(1-feeOf(pf))/k:null;}
 function cmCls(c){if(c===null||c===undefined)return '';return c<BT_PARAMS.cm_floor_pct?'gp-alert':c<BT_PARAMS.cm_floor_pct*2?'gp-warn':'gp-ok';}
 function cmTxt(c){return `<span class="${cmCls(c)}">${c===null||c===undefined?'-':Number(c).toFixed(1)+'%'}</span>`;}
+function opCls(o){if(o===null||o===undefined)return '';return o<0?'gp-alert':o<BT_PARAMS.cm_floor_pct?'gp-warn':'gp-ok';}
+function opTxt(o){return `<span class="${opCls(o)}">${o===null||o===undefined?'-':Number(o).toFixed(1)+'%'}</span>`;}
+/* 손익 구조 툴팁 — 항목 · 금액 · 비율 */
+function pnlTip(net,buy,pf){
+  const p=pnlOf(net,buy,pf); if(!p) return '손익 산출 불가 (구매가 없음)';
+  const L=(n,a,r)=>`${n} ${won(a)} (${r.toFixed(2)}%)`;
+  return [L('매출액',p.gross,100), L('− 매출원가',p.cogs,p.cogs/p.gross*100), L('= 매출총이익',p.gp,p.gpPct),
+    L('− 운반비',p.freight,FREIGHT*100), L('− 하역비',p.unload,UNLOAD*100),
+    L('− 브랜드수수료',p.brand,brandOf(pf)*100), L('− 보험료',p.insur,INSUR*100), L('− 포장비',p.pack,PACK*100),
+    L('= 공헌이익',p.cm,p.cmPct),
+    L('− 물류간접비',p.indirect,INDIRECT*100), L('− 기타2',p.etc2,ETC2*100),
+    L('= 영업이익',p.op,p.opPct)].join('&#10;');
+}
+/* 손익 구조표 — 플랫폼별 금액 · 비율 (이미지 양식 동일) */
+function pnlTable(net,buy,pfs){
+  pfs=pfs||['baemin','todaysales'];
+  const P=pfs.map(pf=>pnlOf(net,buy,pf));
+  if(!P[0]) return '<div class="muted">구매가가 없어 손익을 산출할 수 없습니다</div>';
+  const r=(label,key,cls,ind)=>`<tr class="${cls||''}"><td style="padding-left:${ind?1.1*ind:0.3}rem">${label}</td>`
+    +P.map(p=>`<td class="num">${won(p[key])}</td><td class="num">${(p[key]/p.gross*100).toFixed(2)}%</td>`).join('')+'</tr>';
+  return `<div class="scroll-x"><table class="pm-table pnl" style="font-size:.78rem;max-width:720px">
+    <thead><tr><th>항목</th>${pfs.map(pf=>`<th class="num" colspan="2">${PF_LABEL[pf]||pf}<div class="muted">수수료 ${num(OUR_FEE[pf],1)}%</div></th>`).join('')}</tr>
+    <tr><th></th>${pfs.map(()=>'<th class="num">금액</th><th class="num">%</th>').join('')}</tr></thead><tbody>`
+    +r('매출액','gross','pnl-h')
+    +r('− 매출원가','cogs','',1)
+    +r('= 매출총이익','gp','pnl-k')
+    +r('변동비','varAmt','pnl-s')
+    +r('운반비','freight','',1)+r('하역비','unload','',1)
+    +r('기타1','etc1','',1)
+    +r('브랜드수수료','brand','',2)+r('보험료','insur','',2)+r('포장비','pack','',2)
+    +r('= ◎ 공헌이익','cm','pnl-k')
+    +r('고정비','fix','pnl-s')
+    +r('물류간접비','indirect','',1)+r('기타2','etc2','',1)
+    +r('= △ 영업이익','op','pnl-t')
+    +'</tbody></table></div>';
+}
 
 /* 표시 기준 토글 — 페이지는 window.onBasisChange 를 정의해 재그린링한다 */
 let BT_BASIS=localStorage.getItem('btBasis')||'gross';
@@ -133,7 +198,7 @@ function renderMeta(j){
   el.innerHTML=`<span class="chip">기준 4121 · 3배치(배치 03) · 마감 22:00 · 사용보류≠X · 자재그룹≠5140 · 수기제외 반영</span>`+
     `<span class="chip">예상수량 = 전체센터 최근 ${num(BT_PARAMS.demand_days,0)}일 일평균(영업일 ${j.workdays||'-'}일)</span>`+
     `<span class="chip" title="경쟁사 실수취 = 셀러 판매가(VAT 포함) × (1−플랫폼 수수료) ÷ VAT(과세 1.1 / 면세 1.0) ÷ 배수&#10;당사 평균 판매단가 = SAP 매출액 ÷ 매출수량 (VAT 제외)&#10;→ 양쪽 모두 VAT 제외 공급가액 기준으로 맞춘 뒤 비교">비교가 = 평균 판매단가(VAT 제외) · 밴드 ±${num(BT_PARAMS.tie_band_pct,1)}%</span>`+
-    `<span class="chip" title="공헌이익 = 총액매출 − 매출원가 − 지급수수료 − 물류비(예시 ${num(BT_PARAMS.logi_pct,1)}%)">하한 = 공헌이익율 ${num(BT_PARAMS.cm_floor_pct,1)}%</span>`+basisSeg()+cd+
+    `<span class="chip" title="공헌이익 = 매출총이익 − 변동비(운반 ${num(FREIGHT*100,2)}% + 하역 ${num(UNLOAD*100,2)}% + 브랜드수수료 + 보험 ${num(INSUR*100,2)}% + 포장 ${num(PACK*100,2)}%)&#10;영업이익 = 공헌이익 − 고정비(물류간접 ${num(INDIRECT*100,2)}% + 기타2 ${num(ETC2*100,2)}%)">◎ 하한 = 공헌이익율 ${num(BT_PARAMS.cm_floor_pct,1)}%</span>`+basisSeg()+cd+
     `<span class="chip">구성 ${esc(j.built_at||'')} (${j.build_sec??'-'}s)</span>`+w+
     `<button class="pm-btn pm-btn-ghost pm-btn-sm" onclick="btRefresh()">↻ 새로고침</button>`;
 }

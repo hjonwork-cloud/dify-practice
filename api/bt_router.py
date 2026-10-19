@@ -315,14 +315,55 @@ def verdict(our: float | None, comp_net: float | None, band: float) -> tuple[str
     return "tie", round(d, 1)
 
 
-# ── 5-1. 총액(회계) 환산 ────────────────────────────────────────────────────
+# ── 5-1. 총액(회계) 환산 + 손익 구조 ────────────────────────────────────────
 #  재경팀 검토 결과(09.22): 홈푸드 = 본인(principal)
-#    → 판매대가 총액을 매출 인식, 플랫폼 수수료는 판관비(지급수수료)
+#    → 판매대가 총액을 매출 인식, 플랫폼 수수료는 비용(브랜드수수료)으로 차감
 #  순액 공급가 p(= 수수료 차감 후 수취액, VAT 제외) 기준으로
 #    등록가(VAT 포함) L = p × VAT ÷ (1 − 수수료)
 #    총액 회계매출(VAT 제외) G = L ÷ VAT = p ÷ (1 − 수수료)
-#    지급수수료(판관비)        = G × 수수료
-#    공헌이익                  = G − 매입원가 − G×수수료 − G×물류비율 = p − 원가 − G×물류비율
+#
+#  손익 구조 (모두 G 대비 비율)
+#    매출총이익 = G − 매입원가
+#    변동비     = 운반비(콜단가÷회당매출) + 하역비 + 기타1(브랜드수수료 + 보험료 + 포장비)
+#    공헌이익   = 매출총이익 − 변동비
+#    고정비     = 물류간접비 + 기타2(원천 − 수수료 공통매입세액)
+#    영업이익   = 공헌이익 − 고정비
+#  ※ 브랜드수수료 고지율(5.5% / 4.9%)은 VAT 포함이므로 ÷VAT 하여 공급가 기준으로 환산
+
+VAT_RATE = 1.1
+
+
+def cost_rates(P: dict, platform: str) -> dict:
+    """플랫폼별 비용률(소수). 매출액 G(VAT 제외) 대비."""
+    def g(k: str, d: float) -> float:
+        try:
+            return float(P.get(k, d)) / 100
+        except (TypeError, ValueError):
+            return d / 100
+
+    fee = our_fee(P, platform)                       # 정산 차감율 (VAT 포함 고지율)
+    try:
+        call_cost = float(P.get("call_cost", 11000) or 0)
+        call_rev = float(P.get("call_revenue", 150000) or 0)
+    except (TypeError, ValueError):
+        call_cost, call_rev = 11000.0, 150000.0
+    freight = (call_cost / call_rev) if call_rev else 0.0
+
+    unload = g("unload_pct", 4.05)
+    brand = fee / VAT_RATE                           # VAT 포함 고지율 → 공급가 기준
+    insurance = g("insurance_pct", 0.0)
+    packing = g("packing_pct", 0.06)
+    etc1 = brand + insurance + packing
+    var = freight + unload + etc1
+
+    indirect = g("logi_indirect_pct", 1.3)
+    etc2 = g("other2_pct", 2.33) - g("vat_credit_pct", 0.19)
+    fix = indirect + etc2
+
+    return {"fee": fee, "freight": freight, "unload": unload, "brand": brand,
+            "insurance": insurance, "packing": packing, "etc1": etc1, "var": var,
+            "indirect": indirect, "etc2": etc2, "fix": fix}
+
 
 def gross_of(net: float | None, fee: float) -> float | None:
     """순액 공급가 → 총액 회계매출(VAT 제외)."""
@@ -334,23 +375,50 @@ def list_of(net: float | None, fee: float, vat: float) -> float | None:
     return None if not net else net * vat / (1 - fee)
 
 
-def cm_pct_of(net: float | None, buy: float | None, fee: float, logi: float) -> float | None:
-    """공헌이익율(%) — 총액매출 대비. 총액/순액 표시와 무관하게 금액 기준은 동일."""
-    g = gross_of(net, fee)
+def pnl_of(net: float | None, buy: float | None, R: dict) -> dict | None:
+    """순액 공급가 1개 기준 손익 (금액·비율)."""
+    g = gross_of(net, R["fee"])
     if not g or not buy:
         return None
-    return round((net - buy - g * logi) / g * 100, 1)
+    gp = g - buy
+    var = g * R["var"]
+    cm = gp - var
+    fix = g * R["fix"]
+    op = cm - fix
+    r = lambda v: round(v / g * 100, 1)  # noqa: E731
+    return {"gross": round(g, 1), "cogs": round(buy, 1),
+            "gp": round(gp, 1), "gp_pct": r(gp),
+            "freight": round(g * R["freight"], 1), "unload": round(g * R["unload"], 1),
+            "brand": round(g * R["brand"], 1), "packing": round(g * R["packing"], 1),
+            "insurance": round(g * R["insurance"], 1),
+            "var": round(var, 1), "var_pct": r(var),
+            "cm": round(cm, 1), "cm_pct": r(cm),
+            "indirect": round(g * R["indirect"], 1), "etc2": round(g * R["etc2"], 1),
+            "fix": round(fix, 1), "fix_pct": r(fix),
+            "op": round(op, 1), "op_pct": r(op)}
 
 
-def cm_floor_price(buy: float | None, fee: float, logi: float, cm_floor: float) -> float | None:
+def cm_pct_of(net: float | None, buy: float | None, R: dict) -> float | None:
+    """공헌이익율(%) — 총액매출 대비."""
+    p = pnl_of(net, buy, R)
+    return p["cm_pct"] if p else None
+
+
+def op_pct_of(net: float | None, buy: float | None, R: dict) -> float | None:
+    """영업이익율(%) — 총액매출 대비."""
+    p = pnl_of(net, buy, R)
+    return p["op_pct"] if p else None
+
+
+def cm_floor_price(buy: float | None, R: dict, cm_floor: float) -> float | None:
     """공헌이익율 하한을 만족하는 최저 순액 공급가.
-       p ≥ 매입원가 ÷ [1 − (공헌이익율하한 + 물류비율) ÷ (1 − 수수료)]"""
+       G×(1−변동비율) − 원가 ≥ 하한×G  →  p = 원가 × (1−수수료) ÷ (1 − 변동비율 − 하한)"""
     if not buy:
         return None
-    k = 1 - (cm_floor + logi) / (1 - fee)
+    k = 1 - R["var"] - cm_floor
     if k <= 0:
         return None
-    return round(buy / k, 1)
+    return round(buy * (1 - R["fee"]) / k, 1)
 
 
 VERDICT_RANK = {"lose": 0, "tie": 1, "win": 2, "unknown": 3}
@@ -525,7 +593,7 @@ def get_universe(force: bool = False) -> dict:
 
 
 def _best_by_platform(s: dict) -> dict:
-    """플랫폼별 최저 실수취가 라인 (= 가장 강한 경쟁자)."""
+    """플랫폼별 최저 실수취가 라인 (= 가장 저가로 거는 경쟁자)."""
     best: dict[str, dict] = {}
     for ln in s["lines"]:
         if ln["comp_net"] is None:
@@ -534,10 +602,16 @@ def _best_by_platform(s: dict) -> dict:
         if b is None or ln["comp_net"] < b["comp_net"]:
             best[ln["platform"]] = ln
     return {pf: {"comp_net": b["comp_net"], "seller": b["seller"], "verdict": b["verdict"],
+                 "platform": pf,
                  "diff_pct": b["diff_pct"], "match_gp": b["match_gp"],
                  # 계산 근거(툴팁용): 실수취 = 판매가(VAT 포함) × (1−수수료) ÷ VAT ÷ 배수
                  "comp_price": b["comp_price"], "fee_pct": b["fee_pct"],
-                 "multiplier": b["multiplier"]} for pf, b in best.items()}
+                 "multiplier": b["multiplier"], "ext_name": b.get("ext_name", ""),
+                 # 해당 셀러가 실제로 올려둔 등록가 (원단위 환산 전 원본 / 1단위 환산)
+                 "seller_price": b["comp_price"],
+                 "seller_unit_price": (round(b["comp_price"] / (b["multiplier"] or 1))
+                                       if b.get("comp_price") else None)}
+            for pf, b in best.items()}
 
 
 def _sku_row(s: dict) -> dict:
@@ -1085,7 +1159,7 @@ def api_competition(request: Request, platform: str = ""):
         return err
     P = U["params"]
     cm_floor = float(P["cm_floor_pct"])
-    logi = float(P["logi_pct"]) / 100
+    RATES = {pf: cost_rates(P, pf) for pf in PLATFORMS}
     sellers = []
     for (pf, sn), lst in _seller_pairs(U, platform).items():
         c = defaultdict(int)
@@ -1094,7 +1168,7 @@ def api_competition(request: Request, platform: str = ""):
             c[ln["verdict"]] += 1
             if ln["diff_pct"] is not None:
                 diffs.append(ln["diff_pct"])
-            cmp_cm = cm_pct_of(s["our_price"], s["buy_price"], our_fee(P, pf), logi)
+            cmp_cm = cm_pct_of(s["our_price"], s["buy_price"], RATES.get(pf) or cost_rates(P, pf))
             if ln["verdict"] == "win" and cmp_cm is not None and cmp_cm < cm_floor:
                 bleed += 1
             amt = (s["demand_daily"] or 0) * (s["our_price"] or 0)
@@ -1209,8 +1283,8 @@ def api_profit(request: Request, platform: str = "baemin"):
     P = U["params"]
     band = float(P["tie_band_pct"])
     cm_floor = float(P["cm_floor_pct"]) / 100
-    logi = float(P["logi_pct"]) / 100
-    fee_our = our_fee(P, platform)
+    R = cost_rates(P, platform)
+    fee_our = R["fee"]
     rows = []
     for s in U["skus"]:
         if s["status"] != "active":
@@ -1219,8 +1293,8 @@ def api_profit(request: Request, platform: str = "baemin"):
         vat = 1.1 if s["tax_class"] == "과세" else 1.0
         best = _best_by_platform(s).get(platform)
         comp = best["comp_net"] if best else None
-        # 하한 = 공헌이익율(총액매출 − 원가 − 지급수수료 − 물류비) 기준
-        floor = cm_floor_price(buy, fee_our, logi, cm_floor)
+        # 하한 = 공헌이익율(매출총이익 − 변동비) 기준
+        floor = cm_floor_price(buy, R, cm_floor)
         win_price = round(comp * (1 - band / 100), 1) if comp else None
         tie_top = round(comp * (1 + band / 100), 1) if comp else None
         rec, note = None, ""
@@ -1234,44 +1308,57 @@ def api_profit(request: Request, platform: str = "baemin"):
             rec, note = floor, "하한 · 무승부권"
         else:
             rec, note = floor, "승 불가(하한 초과)"
+        pl = pnl_of(our, buy, R)
+        pl_rec = pnl_of(rec, buy, R)
+        dem = s["demand_daily"] or 0
         rows.append({
             "product_code": s["product_code"], "product_name": s["product_name"], "category": s["category"],
             "tax_class": s["tax_class"], "our_price": our, "buy_price": buy, "gp_pct": s["gp_pct"],
             "gross_price": round(gross_of(our, fee_our), 1) if our else None,
-            "gross_gp_pct": round((gross_of(our, fee_our) - buy) / gross_of(our, fee_our) * 100, 1) if our and buy else None,
-            "cm_pct": cm_pct_of(our, buy, fee_our, logi),
+            "gross_gp_pct": pl["gp_pct"] if pl else None,
+            "var_pct": pl["var_pct"] if pl else None,
+            "cm_pct": pl["cm_pct"] if pl else None,
+            "fix_pct": pl["fix_pct"] if pl else None,
+            "op_pct": pl["op_pct"] if pl else None,
+            "pnl": pl,
             "list_price": round(list_of(our, fee_our, vat)) if our else None,
             "comp_list_price": round(best["comp_price"] / (best["multiplier"] or 1)) if best and best.get("comp_price") else None,
             "demand_daily": s["demand_daily"], "demand_plants": s["demand_plants"],
             "comp_net": comp, "comp_seller": best["seller"] if best else "",
             "verdict": best["verdict"] if best else "none", "diff_pct": best["diff_pct"] if best else None,
             "floor": floor, "win_price": win_price, "rec_price": rec,
-            "rec_gp": round((gross_of(rec, fee_our) - buy) / gross_of(rec, fee_our) * 100, 1) if rec and buy else None,
-            "rec_cm": cm_pct_of(rec, buy, fee_our, logi),
+            "rec_gp": pl_rec["gp_pct"] if pl_rec else None,
+            "rec_cm": pl_rec["cm_pct"] if pl_rec else None,
+            "rec_op": pl_rec["op_pct"] if pl_rec else None,
             "rec_list_price": round(list_of(rec, fee_our, vat)) if rec else None,
             "rec_change_pct": round((rec - our) / our * 100, 1) if rec and our else None,
             "note": note,
-            "rev_daily": round((s["demand_daily"] or 0) * (our or 0)),
-            "gross_rev_daily": round((s["demand_daily"] or 0) * (gross_of(our, fee_our) or 0)),
-            "gp_daily": round((s["demand_daily"] or 0) * ((our or 0) - (buy or 0))) if our and buy else None,
+            "rev_daily": round(dem * (our or 0)),
+            "gross_rev_daily": round(dem * (gross_of(our, fee_our) or 0)),
+            "gp_daily": round(dem * pl["gp"]) if pl else None,
+            "cm_daily": round(dem * pl["cm"]) if pl else None,
+            "op_daily": round(dem * pl["op"]) if pl else None,
         })
     rows.sort(key=lambda r: -(r["rev_daily"] or 0))
-    cat = defaultdict(lambda: {"cnt": 0, "rev": 0.0, "gross_rev": 0.0, "gp": 0.0, "cm": 0.0, "lose": 0})
+    cat = defaultdict(lambda: {"cnt": 0, "rev": 0.0, "gross_rev": 0.0, "gp": 0.0,
+                               "cm": 0.0, "op": 0.0, "lose": 0})
     for r in rows:
         c = cat[r["category"] or "(미분류)"]
         g = r["gross_rev_daily"] or 0
         c["cnt"] += 1
         c["rev"] += r["rev_daily"] or 0
         c["gross_rev"] += g
-        # 총액 GP = 총액매출 − 매출원가 (수수료는 판관비로 별도)
-        c["gp"] += (g - (r["buy_price"] or 0) * (r["demand_daily"] or 0)) if r["buy_price"] else 0
-        c["cm"] += ((r["gp_daily"] or 0) - g * logi) if r["gp_daily"] else 0
+        c["gp"] += r["gp_daily"] or 0
+        c["cm"] += r["cm_daily"] or 0
+        c["op"] += r["op_daily"] or 0
         c["lose"] += 1 if r["verdict"] == "lose" else 0
     cats = sorted(({"category": k, **v,
                     "gp_pct": round(v["gp"] / v["gross_rev"] * 100, 1) if v["gross_rev"] else None,
-                    "cm_pct": round(v["cm"] / v["gross_rev"] * 100, 1) if v["gross_rev"] else None}
+                    "cm_pct": round(v["cm"] / v["gross_rev"] * 100, 1) if v["gross_rev"] else None,
+                    "op_pct": round(v["op"] / v["gross_rev"] * 100, 1) if v["gross_rev"] else None}
                    for k, v in cat.items()), key=lambda x: -x["gross_rev"])
-    return _ok(_meta(U), platform=platform, fee_our_pct=round(fee_our * 100, 2), rows=rows, categories=cats)
+    return _ok(_meta(U), platform=platform, fee_our_pct=round(fee_our * 100, 2),
+               rates={k: round(v * 100, 4) for k, v in R.items()}, rows=rows, categories=cats)
 
 
 # ── 6·7. 설정 ───────────────────────────────────────────────────────────────
