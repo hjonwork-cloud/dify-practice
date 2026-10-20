@@ -105,6 +105,12 @@ def _md5(items) -> str:
 
 # ── 1. 4121 수발주 원천 ─────────────────────────────────────────────────────
 
+# ZMM60(material_master_d)에 일부 코드(4121/03/22시 기준 162건)가 누락되어 자재그룹이 NULL → 5140 제외가 안 됨.
+# 확장 마스터(materials_master_d, 코드당 1행·자재그룹 99.97% 일치, 동일 컬럼 체계)로
+# 상품명·자재그룹·분류·온도조건·세금분류·단위 모두 누락분만 보완한다.
+T_ZMM60_ALL = "h_hmfo_fsi.gd_fsi_ent.sap_zmm60_materials_master_d"
+
+
 def _query_4121() -> list[dict]:
     """플랜트 4121 · 배치 '03' · 마감시간 22:00 수발주 전체(사용보류·자재그룹 무관).
     4121에는 배치 01/03/04/06, 마감시간 00:01/12:00/16:00/17:00/22:00 행이 섞여 있고
@@ -115,14 +121,14 @@ def _query_4121() -> list[dict]:
     rows = pm._q(f"""
         SELECT
             z.`상품코드`                                AS product_code,
-            COALESCE(MAX(m.`상품명`), MAX(z.`상품명`), z.`상품코드`) AS product_name,
-            MAX(m.`자재그룹`)                           AS material_group,
-            MAX(m.`자재그룹명`)                         AS product_group,
-            MAX(m.`대분류`)                             AS category,
-            MAX(m.`중분류`)                             AS mid_category,
-            MAX(m.`온도조건`)                           AS temp_cond,
-            MAX(COALESCE(m.`세금분류명`, '과세'))        AS tax_class,
-            MAX(m.`단위`)                               AS unit,
+            COALESCE(MAX(m.`상품명`), MAX(m2.`상품명`), MAX(z.`상품명`), z.`상품코드`) AS product_name,
+            COALESCE(MAX(m.`자재그룹`), MAX(m2.`자재그룹`))     AS material_group,
+            COALESCE(MAX(m.`자재그룹명`), MAX(m2.`자재그룹명`)) AS product_group,
+            COALESCE(MAX(m.`대분류`), MAX(m2.`대분류`))         AS category,
+            COALESCE(MAX(m.`중분류`), MAX(m2.`중분류`))         AS mid_category,
+            COALESCE(MAX(m.`온도조건`), MAX(m2.`온도조건`))     AS temp_cond,
+            COALESCE(MAX(m.`세금분류명`), MAX(m2.`세금분류명`), '과세') AS tax_class,
+            COALESCE(MAX(m.`단위`), MAX(m2.`단위`))             AS unit,
             1                                           AS has03,
             MAX(z.`마감시간`)                            AS cutoff_time,
             MIN(CASE WHEN COALESCE(z.`사용보류`, '') = 'X'
@@ -131,6 +137,7 @@ def _query_4121() -> list[dict]:
                                                         AS use_hold
         FROM {pm.T_ZSDR} z
         LEFT JOIN {pm.T_ZMM60} m ON z.`상품코드` = m.`상품코드`
+        LEFT JOIN {T_ZMM60_ALL} m2 ON z.`상품코드` = m2.`상품코드`
         WHERE z.`플랜트` = '{BT_PLANT}'
           AND z.`배치`   = '{BT_BATCH}'
           AND z.`마감시간` = '{BT_CUTOFF}'
@@ -150,7 +157,7 @@ def _query_4121() -> list[dict]:
 
 def get_raw(force: bool = False) -> list[dict]:
     # 캐시 키에 배치·마감시간 조건을 포함 → 기준 변경 시 구 캐시를 자동 폐기
-    key = f"raw4121_b{BT_BATCH}c{BT_CUTOFF}"
+    key = f"raw4121_b{BT_BATCH}c{BT_CUTOFF}_m2"
     if force:
         data = _query_4121()
         if data:
@@ -614,9 +621,58 @@ def _best_by_platform(s: dict) -> dict:
             for pf, b in best.items()}
 
 
-def _sku_row(s: dict) -> dict:
+# ── 6-1. 당사 등록가(플랫폼별) 결정 우선순위 ────────────────────────────────
+#   ① decided : 「상품별·플랫폼별 등록가 결정」 메뉴에서 확정한 가격
+#   ② lowest  : 해당 플랫폼 매핑 중 최저가 셀러의 1단위 등록가
+#   ③ calc    : 평균 판매단가 p 에서 역산 L = p × VAT ÷ (1−수수료)
+#   수익성은 적용 등록가 L 기준 → 순액 공급가 p = L × (1−수수료) ÷ VAT
+
+def _decided_map() -> dict[str, dict[str, dict]]:
+    out: dict[str, dict[str, dict]] = defaultdict(dict)
+    try:
+        for r in bt_db.list_listing_prices():
+            out[str(r["product_code"])][r["platform"]] = r
+    except Exception as e:
+        logger.warning(f"[bt] 등록가 결정 조회 실패: {e}")
+    return out
+
+
+def listing_of(s: dict, best: dict, decided: dict, P: dict) -> dict:
+    vat = 1.1 if (s.get("tax_class") or "과세") == "과세" else 1.0
+    out = {}
+    for pf in FOCUS_PLATFORMS:
+        fee = our_fee(P, pf)
+        d = decided.get(pf) or {}
+        b = best.get(pf) or {}
+        calc = list_of(s.get("our_price"), fee, vat)
+        if d.get("list_price"):
+            L, src = float(d["list_price"]), "decided"
+        elif b.get("seller_unit_price"):
+            L, src = float(b["seller_unit_price"]), "lowest"
+        elif calc:
+            L, src = calc, "calc"
+        else:
+            L, src = None, ""
+        out[pf] = {
+            "list_price": round(L) if L else None,
+            "src": src,
+            "net": round(L * (1 - fee) / vat, 1) if L else None,
+            "calc_price": round(calc) if calc else None,
+            "lowest_price": b.get("seller_unit_price"),
+            "decided_price": d.get("list_price"),
+            "basis": d.get("basis") or "",
+            "memo": d.get("memo") or "",
+            "updated_by": d.get("updated_by") or "",
+            "updated_at": d.get("updated_at") or "",
+        }
+    return out
+
+
+def _sku_row(s: dict, P: dict | None = None, D: dict | None = None) -> dict:
     r = {k: v for k, v in s.items() if k != "lines"}
     r["best"] = _best_by_platform(s)
+    if P is not None:
+        r["listing"] = listing_of(s, r["best"], (D or {}).get(s["product_code"], {}), P)
     return r
 
 
@@ -769,7 +825,8 @@ _PAGES = {
     "ai-queue":    ("bt_ai_queue.html",    "bt_ai_queue",    "3-1 · 미매핑 큐 · AI 추천"),
     "competition": ("bt_competition.html", "bt_competition", "4-1 · 셀러별 경쟁 현황"),
     "simulator":   ("bt_simulator.html",   "bt_simulator",   "4-2 · 셀러 시뮬레이터"),
-    "profit":      ("bt_profit.html",      "bt_profit",      "5 · SKU 수익성 · 추천가"),
+    "profit":      ("bt_profit.html",      "bt_profit",      "5-1 · SKU 수익성 · 추천가"),
+    "listing":     ("bt_listing.html",     "bt_listing",     "5-2 · 상품별·플랫폼별 등록가 결정"),
     "settings":    ("bt_settings.html",    "bt_settings",    "6·7 · 파라미터 · 알림"),
 }
 
@@ -889,7 +946,8 @@ def api_skus(request: Request, include_5140: int = 0):
     U, err = _universe_or_error()
     if err:
         return err
-    rows = [_sku_row(s) for s in U["skus"]]
+    D = _decided_map()
+    rows = [_sku_row(s, U["params"], D) for s in U["skus"]]
     if include_5140:
         for r in get_skus():
             if r["status"] == "group5140":
@@ -911,7 +969,8 @@ def api_sku_detail(request: Request, code: str):
         return JSONResponse({"ok": False, "error": "SKU 없음"}, status_code=404)
     hist = bt_db.list_events(product_code=code)
     excl = next((e for e in bt_db.list_exclusions(active_only=False) if e["product_code"] == code), None)
-    return _ok(_meta(U), sku=s, events=hist, exclusion=excl)
+    listing = listing_of(s, _best_by_platform(s), _decided_map().get(code, {}), U["params"])
+    return _ok(_meta(U), sku={**s, "listing": listing}, events=hist, exclusion=excl)
 
 
 # ── 1-2. 수발주 변동 ────────────────────────────────────────────────────────
@@ -1359,6 +1418,56 @@ def api_profit(request: Request, platform: str = "baemin"):
                    for k, v in cat.items()), key=lambda x: -x["gross_rev"])
     return _ok(_meta(U), platform=platform, fee_our_pct=round(fee_our * 100, 2),
                rates={k: round(v * 100, 4) for k, v in R.items()}, rows=rows, categories=cats)
+
+
+# ── 5-2. 상품별·플랫폼별 등록가 결정 ───────────────────────────────────────
+
+@router.get("/api/listing")
+def api_listing(request: Request):
+    _session(request)
+    U, err = _universe_or_error()
+    if err:
+        return err
+    P = U["params"]
+    D = _decided_map()
+    rows = []
+    for s in U["skus"]:
+        if s["status"] != "active":
+            continue
+        best = _best_by_platform(s)
+        rows.append({
+            **{k: s.get(k) for k in ("product_code", "product_name", "twin_code", "twin_name", "category",
+                                     "tax_class", "our_price", "buy_price", "gp_pct", "demand_daily", "map_cnt")},
+            "best": {pf: best[pf] for pf in FOCUS_PLATFORMS if pf in best},
+            "listing": listing_of(s, best, D.get(s["product_code"], {}), P),
+        })
+    rows.sort(key=lambda r: -(r["demand_daily"] or 0))
+    return _ok(_meta(U), rows=rows, basis_labels=bt_db.LISTING_BASIS)
+
+
+@router.post("/api/listing")
+async def api_listing_save(request: Request):
+    """items = [{product_code, platform, list_price(없으면 해제), basis, memo}]"""
+    sess = _session(request)
+    body = await request.json()
+    valid = {s["product_code"] for s in get_skus()}
+    saved, skipped = 0, 0
+    for it in body.get("items") or []:
+        code = str(it.get("product_code") or "").strip()
+        pf = str(it.get("platform") or "").strip()
+        if code not in valid or pf not in FOCUS_PLATFORMS:
+            skipped += 1
+            continue
+        try:
+            price = float(it.get("list_price") or 0)
+        except (TypeError, ValueError):
+            skipped += 1
+            continue
+        bt_db.set_listing_price(code, pf, round(price) if price > 0 else None,
+                                str(it.get("basis") or "manual"), str(it.get("memo") or "")[:300],
+                                sess.get("emp_code", ""))
+        saved += 1
+    return _ok(saved=saved, skipped=skipped)
 
 
 # ── 6·7. 설정 ───────────────────────────────────────────────────────────────

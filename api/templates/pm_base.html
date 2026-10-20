@@ -13,17 +13,17 @@
     body{font-family:'Pretendard Variable',system-ui,sans-serif;background:#f1f5f9;color:#1e293b;min-height:100vh;}
     /* 레이아웃 */
     .pm-wrapper{display:flex;min-height:100vh;}
-    .pm-sidebar{width:220px;background:linear-gradient(180deg,#0f1e2e 0%,#1a3044 100%);flex-shrink:0;display:flex;flex-direction:column;padding:1.25rem .75rem;}
+    .pm-sidebar{width:220px;background:linear-gradient(180deg,#0b1736 0%,#1d3d8f 58%,#2563eb 100%);flex-shrink:0;display:flex;flex-direction:column;padding:1.25rem .75rem;}
     .pm-logo{color:#fff;font-size:1rem;font-weight:800;padding:.5rem .5rem 1.5rem;border-bottom:1px solid rgba(255,255,255,.1);margin-bottom:1rem;}
     .pm-logo span{color:#38bdf8;}
     .pm-nav{display:flex;flex-direction:column;gap:.25rem;flex:1;}
-    .pm-nav a{display:flex;align-items:center;gap:.6rem;padding:.6rem .75rem;border-radius:10px;color:rgba(255,255,255,.75);text-decoration:none;font-size:.84rem;font-weight:500;transition:all .15s;}
-    .pm-nav a:hover,.pm-nav a.active{background:rgba(255,255,255,.12);color:#fff;}
+    .pm-nav a{display:flex;align-items:center;gap:.6rem;padding:.6rem .75rem;border-radius:10px;color:rgba(255,255,255,.88);text-decoration:none;font-size:.84rem;font-weight:500;transition:all .15s;}
+    .pm-nav a:hover,.pm-nav a.active{background:rgba(255,255,255,.2);color:#fff;}
     .pm-nav .nav-icon{font-size:.95rem;width:18px;text-align:center;flex-shrink:0;}
-    .pm-nav .nav-sep{font-size:.7rem;color:rgba(255,255,255,.35);padding:.75rem .5rem .25rem;text-transform:uppercase;letter-spacing:.06em;}
+    .pm-nav .nav-sep{font-size:.7rem;color:rgba(255,255,255,.55);padding:.75rem .5rem .25rem;text-transform:uppercase;letter-spacing:.06em;}
     .pm-nav details.bt-nav{display:flex;flex-direction:column;gap:.15rem;}
     .pm-nav details.bt-nav summary::-webkit-details-marker{display:none;}
-    .pm-nav .bt-sub{font-size:.68rem;color:rgba(255,255,255,.45);padding:.45rem .75rem .1rem;}
+    .pm-nav .bt-sub{font-size:.68rem;color:#bfdbfe;padding:.45rem .75rem .1rem;}
     .pm-nav a.bt-l2{padding:.38rem .75rem .38rem 1.6rem;font-size:.79rem;}
     .pm-main{flex:1;overflow-x:hidden;display:flex;flex-direction:column;}
     .pm-topbar{background:#fff;border-bottom:1px solid #e2e8f0;padding:.75rem 1.5rem;display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-shrink:0;}
@@ -119,6 +119,7 @@
         <a href="/portal/price-monitor/bt/simulator" class="bt-l2 {% if active_page=='bt_simulator' %}active{% endif %}">셀러 시뮬레이터</a>
         <div class="bt-sub">⑤ 수익성</div>
         <a href="/portal/price-monitor/bt/profit" class="bt-l2 {% if active_page=='bt_profit' %}active{% endif %}">SKU 수익성 · 추천가</a>
+        <a href="/portal/price-monitor/bt/listing" class="bt-l2 {% if active_page=='bt_listing' %}active{% endif %}">등록가 결정</a>
         <div class="bt-sub">⑥ 알림 · 설정</div>
         <a href="/portal/price-monitor/bt/settings" class="bt-l2 {% if active_page=='bt_settings' %}active{% endif %}">파라미터 · 알림</a>
         <a href="/portal/price-monitor/admin/sellers" class="bt-l2">셀러 관리 ↗</a>

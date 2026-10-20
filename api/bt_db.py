@@ -170,6 +170,16 @@ def init() -> None:
                     created_by   TEXT,
                     created_at   TEXT
                 );
+                CREATE TABLE IF NOT EXISTS bt_listing_price (
+                    product_code TEXT NOT NULL,
+                    platform     TEXT NOT NULL,
+                    list_price   REAL NOT NULL,
+                    basis        TEXT,
+                    memo         TEXT,
+                    updated_by   TEXT,
+                    updated_at   TEXT,
+                    PRIMARY KEY (product_code, platform)
+                );
             """)
         _initialized = True
 
@@ -213,6 +223,38 @@ def set_params(values: dict, updated_by: str) -> dict:
                 (k, str(v), updated_by, now),
             )
     return get_params()
+
+
+# ── 상품별·플랫폼별 등록가 결정 ───────────────────────────────────────────
+#  list_price = 플랫폼 등록가(VAT 포함, 1단위). basis = 결정 근거(lowest/floor/manual)
+
+LISTING_BASIS = {"lowest": "최저가 맞춤", "floor": "하한가", "calc": "현재가 역산", "manual": "수기"}
+
+
+def list_listing_prices() -> list[dict]:
+    init()
+    with _connect() as conn:
+        return [dict(r) for r in conn.execute("SELECT * FROM bt_listing_price").fetchall()]
+
+
+def set_listing_price(product_code: str, platform: str, list_price: float | None,
+                      basis: str, memo: str, updated_by: str) -> None:
+    """list_price 가 None/0 이면 결정 해제(삭제)."""
+    init()
+    with _connect() as conn:
+        if not list_price or list_price <= 0:
+            conn.execute("DELETE FROM bt_listing_price WHERE product_code=? AND platform=?",
+                         (product_code, platform))
+            return
+        conn.execute(
+            """INSERT INTO bt_listing_price(product_code, platform, list_price, basis, memo, updated_by, updated_at)
+               VALUES (?,?,?,?,?,?,?)
+               ON CONFLICT(product_code, platform) DO UPDATE SET list_price=excluded.list_price,
+                   basis=excluded.basis, memo=excluded.memo,
+                   updated_by=excluded.updated_by, updated_at=excluded.updated_at""",
+            (product_code, platform, float(list_price), basis if basis in LISTING_BASIS else "manual",
+             memo or "", updated_by, _now()),
+        )
 
 
 # ── 수기 제외 ───────────────────────────────────────────────────────────────

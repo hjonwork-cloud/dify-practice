@@ -5,50 +5,54 @@
 
 {% block head %}
 <style>
-.bt-meta{display:flex;gap:.6rem;flex-wrap:wrap;align-items:center;font-size:.75rem;color:#64748b;margin-bottom:.9rem;}
-.bt-meta .chip{background:#fff;border:1px solid #e2e8f0;border-radius:99px;padding:.15rem .6rem;}
-.bt-meta .warn{background:#fff7ed;border-color:#fed7aa;color:#c2410c;}
+.bt-meta{display:flex;gap:.6rem;flex-wrap:wrap;align-items:center;font-size:.75rem;color:#475569;margin-bottom:.9rem;}
+.bt-meta .chip{background:#eef4ff;border:1px solid #bfd4ff;border-radius:99px;padding:.15rem .6rem;color:#1e40af;}
+.bt-meta .warn{background:#fff3e8;border-color:#ffd8bf;color:#c2410c;}
 .kpis{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:.75rem;margin-bottom:1rem;}
-.kpi{background:#fff;border-radius:12px;padding:.9rem 1rem;box-shadow:0 1px 4px rgba(0,0,0,.06);}
+.kpi{background:linear-gradient(180deg,#ffffff 0%,#f8fbff 100%);border:1px solid #dbeafe;border-radius:12px;padding:.9rem 1rem;box-shadow:0 2px 10px rgba(22,119,255,.08);}
 .kpi .l{font-size:.75rem;color:#64748b;}
 .kpi .v{font-size:1.45rem;font-weight:800;color:#0f172a;margin-top:.15rem;}
 .kpi .s{font-size:.72rem;color:#94a3b8;margin-top:.15rem;}
 .kpi.red .v{color:#b91c1c;} .kpi.green .v{color:#15803d;} .kpi.amber .v{color:#b45309;}
 .v-win{background:#dcfce7;color:#15803d;} .v-tie{background:#e0e7ff;color:#4338ca;}
 .v-lose{background:#fee2e2;color:#b91c1c;} .v-unknown,.v-none{background:#f3f4f6;color:#6b7280;}
-.st-active{background:#dcfce7;color:#15803d;} .st-blocked{background:#fee2e2;color:#b91c1c;}
-.st-excluded{background:#fef3c7;color:#92400e;} .st-group5140{background:#f3f4f6;color:#6b7280;}
-.sev-red{background:#fee2e2;color:#b91c1c;} .sev-yellow{background:#fef3c7;color:#92400e;}
+.st-active{background:#d1fae5;color:#047857;} .st-blocked{background:#fee2e2;color:#b91c1c;}
+.st-excluded{background:#ffedd5;color:#9a3412;} .st-group5140{background:#eef2ff;color:#3730a3;}
+.sev-red{background:#fee2e2;color:#b91c1c;} .sev-yellow{background:#ffedd5;color:#9a3412;}
 .dem{font-weight:700;}
 .dem-chips{display:flex;flex-wrap:wrap;gap:.2rem;margin-top:.15rem;}
-.dem-chips span{font-size:.66rem;color:#64748b;background:#f1f5f9;border-radius:4px;padding:0 .3rem;white-space:nowrap;}
-.dem-chips span.b3{background:#fef9c3;color:#854d0e;}
+.dem-chips span{font-size:.66rem;color:#334155;background:#e0ecff;border-radius:4px;padding:0 .3rem;white-space:nowrap;}
+.dem-chips span.b3{background:#fff1cc;color:#854d0e;}
 .num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;}
 .muted{color:#94a3b8;font-size:.75rem;}
 .code{font-family:ui-monospace,Consolas,monospace;font-size:.78rem;}
 .twin{font-size:.7rem;color:#7c3aed;}
 .bt-loading{padding:2.5rem;text-align:center;color:#94a3b8;font-size:.85rem;}
 .bt-tabs{display:flex;gap:.35rem;margin-bottom:.8rem;flex-wrap:wrap;}
-.bt-tabs button{border:1.5px solid #cbd5e1;background:#fff;border-radius:99px;padding:.3rem .85rem;font-size:.8rem;cursor:pointer;font-family:inherit;}
-.bt-tabs button.on{background:var(--pm-blue);border-color:var(--pm-blue);color:#fff;font-weight:700;}
+.bt-tabs button{border:1.5px solid #bfdbfe;background:#f8fbff;border-radius:99px;padding:.3rem .85rem;font-size:.8rem;cursor:pointer;font-family:inherit;color:#1d4ed8;}
+.bt-tabs button.on{background:linear-gradient(90deg,#1d4ed8 0%,#2563eb 100%);border-color:#1d4ed8;color:#fff;font-weight:700;}
 .bt-modal-bg{position:fixed;inset:0;background:rgba(15,23,42,.45);display:none;align-items:flex-start;justify-content:center;z-index:900;overflow-y:auto;padding:3rem 1rem;}
 .bt-modal{background:#fff;border-radius:14px;max-width:1100px;width:100%;padding:1.25rem 1.4rem;box-shadow:0 10px 40px rgba(0,0,0,.25);}
 .bt-modal h3{font-size:1rem;margin-bottom:.6rem;}
 .pager{display:flex;gap:.3rem;justify-content:center;margin-top:.8rem;}
-.pager button{border:1px solid #cbd5e1;background:#fff;border-radius:6px;padding:.2rem .6rem;cursor:pointer;font-size:.78rem;}
-.pager button.on{background:var(--pm-blue);color:#fff;border-color:var(--pm-blue);}
+.pager button{border:1px solid #bfdbfe;background:#f8fbff;border-radius:6px;padding:.2rem .6rem;cursor:pointer;font-size:.78rem;color:#1d4ed8;}
+.pager button.on{background:linear-gradient(90deg,#1d4ed8 0%,#2563eb 100%);color:#fff;border-color:#1d4ed8;}
 .scroll-x{overflow-x:auto;}
 /* 총액/순액 세그먼트 — 아이콘 중심, Pretendard 상속 */
-.bt-seg{display:inline-flex;border:1px solid #cbd5e1;border-radius:99px;overflow:hidden;background:#fff;font-family:inherit;}
-.bt-seg button{border:0;background:none;padding:.15rem .55rem;font-size:.72rem;cursor:pointer;color:#64748b;font-family:inherit;line-height:1.5;}
-.bt-seg button.on{background:var(--pm-blue);color:#fff;font-weight:700;}
+.bt-seg{display:inline-flex;border:1px solid #bfdbfe;border-radius:99px;overflow:hidden;background:#f8fbff;font-family:inherit;}
+.bt-seg button{border:0;background:none;padding:.15rem .55rem;font-size:.72rem;cursor:pointer;color:#1d4ed8;font-family:inherit;line-height:1.5;}
+.bt-seg button.on{background:linear-gradient(90deg,#1d4ed8 0%,#2563eb 100%);color:#fff;font-weight:700;}
 .pnl td,.pnl th{padding:.22rem .45rem;}
-.pnl tr.pnl-h td{background:#f1f5f9;font-weight:700;}
-.pnl tr.pnl-s td{background:#fafafa;font-weight:600;}
+.pnl tr.pnl-h td{background:#eef4ff;font-weight:700;}
+.pnl tr.pnl-s td{background:#f8fbff;font-weight:600;}
 .pnl tr.pnl-k td{background:#dbeafe;font-weight:700;}
-.pnl tr.pnl-t td{background:var(--pm-blue);color:#fff;font-weight:700;}
+.pnl tr.pnl-t td{background:linear-gradient(90deg,#1d4ed8 0%,#2563eb 100%);color:#fff;font-weight:700;}
 .vs{color:#cbd5e1;padding:0 .15rem;}
 .ours{color:#1d4ed8;font-weight:700;}
+.src{display:inline-block;min-width:1em;margin-right:.1rem;font-weight:700}
+.src-decided{color:#15803d}.src-lowest{color:#c2410c}.src-calc{color:#1d4ed8}
+.lst-cell{border:1px solid #e2e8f0;border-radius:10px;padding:.35rem .4rem;background:#fff}
+.lst-cell.on{border-color:#93c5fd;background:#f0f7ff}
 </style>
 {% block bt_head %}{% endblock %}
 {% endblock %}
@@ -102,6 +106,19 @@ const varOf=pf=>FREIGHT+UNLOAD+etc1Of(pf);       /* 변동비율 */
 const vatOf=r=>(r&&r.tax_class==='면세')?1:1.1;
 function grossOf(net,pf){return net?net/(1-feeOf(pf)):null;}
 function listOf(net,pf,vat){return net?net*vat/(1-feeOf(pf)):null;}
+/* 등록가 L(VAT 포함) → 순액 공급가 p = L × (1−수수료) ÷ VAT */
+function netOfList(L,pf,vat){return L?L*(1-feeOf(pf))/vat:null;}
+/* 당사 등록가 출처: ✔ 결정 → 🏷 최저가 → ↺ 역산 */
+const SRC_ICON={decided:'✔',lowest:'🏷',calc:'↺'};
+const SRC_LABEL={decided:'결정 등록가',lowest:'최저가 셀러 등록가',calc:'평균 판매단가 역산'};
+function srcIco(s){return s?`<span class="src src-${s}" title="${SRC_LABEL[s]||''}">${SRC_ICON[s]||''}</span>`:'';}
+/* SKU.listing[pf] → 적용 등록가·순액 (없으면 역산) */
+function lstOf(r,pf){
+  const x=r&&r.listing&&r.listing[pf];
+  if(x&&x.list_price) return x;
+  const L=listOf(r?r.our_price:null,pf,vatOf(r));
+  return {list_price:L?Math.round(L):null, net:r?r.our_price:null, src:L?'calc':''};
+}
 function gpPctOf(net,buy,pf){const g=grossOf(net,pf);return (g&&buy)?(g-buy)/g*100:null;}
 function pnlOf(net,buy,pf){
   const g=grossOf(net,pf); if(!g||!buy) return null;
@@ -131,15 +148,17 @@ function pnlTip(net,buy,pf){
     L('− 물류간접비',p.indirect,INDIRECT*100), L('− 기타2',p.etc2,ETC2*100),
     L('= 영업이익',p.op,p.opPct)].join('&#10;');
 }
-/* 손익 구조표 — 플랫폼별 금액 · 비율 (이미지 양식 동일) */
-function pnlTable(net,buy,pfs){
+/* 손익 구조표 — 플랫폼별 금액 · 비율 (이미지 양식 동일)
+   net: 숫자(전 플랫폼 동일 순액) 또는 {pf: 순액} · heads: {pf: 헤더 보조 html} */
+function pnlTable(net,buy,pfs,heads){
   pfs=pfs||['baemin','todaysales'];
-  const P=pfs.map(pf=>pnlOf(net,buy,pf));
-  if(!P[0]) return '<div class="muted">구매가가 없어 손익을 산출할 수 없습니다</div>';
+  const nOf=pf=>(net&&typeof net==='object')?net[pf]:net;
+  const P=pfs.map(pf=>pnlOf(nOf(pf),buy,pf));
+  if(!P.some(Boolean)) return '<div class="muted">구매가가 없어 손익을 산출할 수 없습니다</div>';
   const r=(label,key,cls,ind)=>`<tr class="${cls||''}"><td style="padding-left:${ind?1.1*ind:0.3}rem">${label}</td>`
-    +P.map(p=>`<td class="num">${won(p[key])}</td><td class="num">${(p[key]/p.gross*100).toFixed(2)}%</td>`).join('')+'</tr>';
-  return `<div class="scroll-x"><table class="pm-table pnl" style="font-size:.78rem;max-width:720px">
-    <thead><tr><th>항목</th>${pfs.map(pf=>`<th class="num" colspan="2">${PF_LABEL[pf]||pf}<div class="muted">수수료 ${num(OUR_FEE[pf],1)}%</div></th>`).join('')}</tr>
+    +P.map(p=>p?`<td class="num">${won(p[key])}</td><td class="num">${(p[key]/p.gross*100).toFixed(2)}%</td>`:'<td class="num muted">-</td><td></td>').join('')+'</tr>';
+  return `<div class="scroll-x"><table class="pm-table pnl" style="font-size:.78rem;max-width:760px">
+    <thead><tr><th>항목</th>${pfs.map(pf=>`<th class="num" colspan="2">${PF_LABEL[pf]||pf}<div class="muted">${heads&&heads[pf]?heads[pf]:'수수료 '+num(OUR_FEE[pf],1)+'%'}</div></th>`).join('')}</tr>
     <tr><th></th>${pfs.map(()=>'<th class="num">금액</th><th class="num">%</th>').join('')}</tr></thead><tbody>`
     +r('매출액','gross','pnl-h')
     +r('− 매출원가','cogs','',1)

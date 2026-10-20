@@ -1,0 +1,125 @@
+{% extends "bt_layout.html" %}
+{% block bt_content %}
+<div class="pm-card">
+  <div class="pm-card-head"><span class="pm-card-title">상품별·플랫폼별 등록가 결정</span>
+    <div style="display:flex;gap:.35rem;align-items:center;flex-wrap:wrap">
+      <input id="kw" class="pm-input" style="max-width:220px" placeholder="코드·상품명">
+      <select id="cat" class="pm-input" style="max-width:180px"><option value="">대분류 전체</option></select>
+      <label class="muted"><input type="checkbox" id="onlyDec"> 결정가만 보기</label>
+      <button class="pm-btn pm-btn-primary pm-btn-sm" onclick="saveAll()">저장</button>
+      <button class="pm-btn pm-btn-ghost pm-btn-sm" onclick="load()">새로고침</button>
+    </div></div>
+  <div class="muted" style="margin-bottom:.5rem">적용 우선순위: ✔ 결정가 → 🏷 플랫폼 최저가(매핑) → ↺ 평균 판매단가 역산</div>
+  <div class="scroll-x"><table class="pm-table" id="tb" style="font-size:.77rem"><tbody><tr><td class="bt-loading">불러오는 중…</td></tr></tbody></table></div>
+  <div class="pager" id="pg"></div>
+</div>
+{% endblock %}
+
+{% block bt_scripts %}
+<script>
+let ALL=[], VIEW=[], PAGE=1, CHG={}; const SIZE=60;
+function keyOf(code,pf){return code+'|'+pf;}
+function changed(code,pf){return CHG[keyOf(code,pf)]||null;}
+function setChg(code,pf,listPrice,basis,memo){CHG[keyOf(code,pf)]={product_code:code,platform:pf,list_price:listPrice,basis,memo};}
+function curVal(r,pf){const c=changed(r.product_code,pf); return c?c.list_price:(r.listing&&r.listing[pf]?r.listing[pf].decided_price:null);}
+function curMemo(r,pf){const c=changed(r.product_code,pf); return c?c.memo:(r.listing&&r.listing[pf]?r.listing[pf].memo:'');}
+function applied(r,pf){
+  const x=r.listing&&r.listing[pf]?r.listing[pf]:{};
+  const d=curVal(r,pf);
+  if(d&&d>0){
+    const vat=vatOf(r), net=netOfList(d,pf,vat);
+    return {src:'decided', list_price:Math.round(d), net};
+  }
+  return {src:x.src||'calc', list_price:x.list_price, net:x.net};
+}
+async function load(){
+  const j=await btGet('/api/listing'); renderMeta(j); ALL=j.rows||[]; CHG={};
+  const cats=[...new Set(ALL.map(r=>r.category).filter(Boolean))].sort();
+  document.getElementById('cat').innerHTML='<option value="">대분류 전체</option>'+cats.map(c=>`<option>${esc(c)}</option>`).join('');
+  apply();
+}
+function apply(){
+  const kw=document.getElementById('kw').value.trim().toLowerCase();
+  const cat=document.getElementById('cat').value;
+  const onlyDec=document.getElementById('onlyDec').checked;
+  VIEW=ALL.filter(r=>{
+    const hay=(r.product_code+' '+r.product_name).toLowerCase();
+    if(kw && !hay.includes(kw)) return false;
+    if(cat && r.category!==cat) return false;
+    if(onlyDec){
+      const b=curVal(r,'baemin'), t=curVal(r,'todaysales');
+      if(!(b||t)) return false;
+    }
+    return true;
+  });
+  VIEW.sort((a,b)=>(b.demand_daily||0)-(a.demand_daily||0));
+  PAGE=1; render();
+}
+function iCell(r,pf){
+  const v=curVal(r,pf); const m=curMemo(r,pf);
+  const a=applied(r,pf);
+  const cm=cmPctOf(a.net,r.buy_price,pf), op=opPctOf(a.net,r.buy_price,pf);
+  const low=(r.listing&&r.listing[pf]?r.listing[pf].lowest_price:null);
+  const same=(low&&a.list_price)?pct((low-a.list_price)/low*100):'-';
+  const k=keyOf(r.product_code,pf), on=!!CHG[k];
+  return `<div class="lst-cell ${on?'on':''}">
+    <div class="muted">🏷 ${won(low)} · ${srcIco(a.src)} 적용 ${won(a.list_price)} <span class="num">${same}</span></div>
+    <div style="display:flex;gap:.25rem;margin-top:.2rem">
+      <input class="pm-input lst" data-k="${esc(k)}" data-code="${esc(r.product_code)}" data-pf="${pf}" value="${v||''}" placeholder="결정가">
+      <button class="pm-btn pm-btn-ghost pm-btn-sm" data-clear="${esc(k)}" title="결정 해제">✕</button>
+    </div>
+    <div style="display:flex;gap:.25rem;margin-top:.2rem">
+      <input class="pm-input memo" data-m="${esc(k)}" value="${esc(m||'')}" placeholder="메모" maxlength="80">
+      <button class="pm-btn pm-btn-primary pm-btn-sm" data-low="${esc(k)}">🏷</button>
+      <button class="pm-btn pm-btn-primary pm-btn-sm" data-cal="${esc(k)}">↺</button>
+    </div>
+    <div class="muted" style="margin-top:.15rem">◎ ${num(cm,1)}% · △ ${num(op,1)}%</div>
+  </div>`;
+}
+function render(){
+  const rows=VIEW.slice((PAGE-1)*SIZE,PAGE*SIZE);
+  document.getElementById('tb').innerHTML=`<thead><tr><th>SKU</th><th>대분류</th><th class="num">수요/일</th><th class="num">평균 판매단가</th><th class="num">구매가</th>
+    <th>배민상회 등록가 결정</th><th>오늘얼마 등록가 결정</th></tr></thead><tbody>`+
+    rows.map(r=>`<tr><td>${skuName(r)}</td><td class="muted">${esc(r.category||'')}</td><td class="num">${num(r.demand_daily,1)}</td><td class="num">${won(r.our_price)}</td><td class="num">${won(r.buy_price)}</td>
+      <td>${iCell(r,'baemin')}</td><td>${iCell(r,'todaysales')}</td></tr>`).join('')+
+    (rows.length?'':'<tr><td colspan="7" class="muted">해당 없음</td></tr>')+'</tbody>';
+  pager(document.getElementById('pg'),VIEW.length,SIZE,PAGE,p=>{PAGE=p;render();});
+  bindRow();
+}
+function bindRow(){
+  document.querySelectorAll('input.lst').forEach(x=>x.onchange=()=>{
+    const code=x.dataset.code,pf=x.dataset.pf; const v=parseFloat(x.value||'0');
+    const memo=(document.querySelector(`input[data-m="${x.dataset.k}"]`)||{}).value||'';
+    setChg(code,pf,(isNaN(v)||v<=0)?0:Math.round(v),'manual',memo); render();
+  });
+  document.querySelectorAll('input.memo').forEach(x=>x.oninput=()=>{
+    const [code,pf]=x.dataset.m.split('|');
+    const inp=document.querySelector(`input.lst[data-k="${x.dataset.m}"]`);
+    const v=Math.round(parseFloat((inp&&inp.value)||'0')||0);
+    if(changed(code,pf)){ changed(code,pf).memo=x.value; }
+    else if(v>0){ setChg(code,pf,v,'manual',x.value); }
+  });
+  document.querySelectorAll('button[data-clear]').forEach(b=>b.onclick=()=>{
+    const [code,pf]=b.dataset.clear.split('|'); setChg(code,pf,0,'manual',''); render();
+  });
+  document.querySelectorAll('button[data-low]').forEach(b=>b.onclick=()=>{
+    const [code,pf]=b.dataset.low.split('|'); const r=ALL.find(x=>x.product_code===code); if(!r) return;
+    const p=r.listing&&r.listing[pf]?r.listing[pf].lowest_price:null; if(!p) return showToast('최저가 없음','error');
+    setChg(code,pf,Math.round(p),'lowest',curMemo(r,pf)||''); render();
+  });
+  document.querySelectorAll('button[data-cal]').forEach(b=>b.onclick=()=>{
+    const [code,pf]=b.dataset.cal.split('|'); const r=ALL.find(x=>x.product_code===code); if(!r) return;
+    const p=r.listing&&r.listing[pf]?r.listing[pf].calc_price:null; if(!p) return showToast('역산가 없음','error');
+    setChg(code,pf,Math.round(p),'calc',curMemo(r,pf)||''); render();
+  });
+}
+async function saveAll(){
+  const items=Object.values(CHG); if(!items.length) return showToast('변경 없음');
+  try{const j=await btPost('/api/listing',{items}); showToast(`저장 ${j.saved}건`+(j.skipped?` · 건너뜀 ${j.skipped}`:''),'success'); await load();}
+  catch(e){showToast(e.message,'error');}
+}
+['kw','cat','onlyDec'].forEach(id=>document.getElementById(id).addEventListener(id==='kw'?'input':'change',apply));
+{const q=new URLSearchParams(location.search).get('kw'); if(q) document.getElementById('kw').value=q;}
+load().catch(e=>document.getElementById('tb').innerHTML=`<tbody><tr><td class="bt-loading" style="color:#b91c1c">⚠ ${esc(e.message)}</td></tr></tbody>`);
+</script>
+{% endblock %}
