@@ -18,14 +18,17 @@ import os
 import sqlite3
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+KST = timezone(timedelta(hours=9))
 
 logger = logging.getLogger(__name__)
 
 JOURNAL_MODE = os.getenv("SQLITE_JOURNAL_MODE", "DELETE").upper()
 BUSY_TIMEOUT_MS = int(os.getenv("SQLITE_BUSY_TIMEOUT_MS", "10000"))
 BACKUP_KEEP_DAYS = int(os.getenv("SQLITE_BACKUP_KEEP_DAYS", "7"))
+BACKUP_HOUR_KST = int(os.getenv("SQLITE_BACKUP_HOUR_KST", "5"))
 
 _mode_ok: set[str] = set()
 _mode_lock = threading.Lock()
@@ -61,7 +64,7 @@ def backup_once(db_path: Path, backup_dir: Path, tag: str | None = None) -> dict
     if not db_path.exists():
         return {"db": db_path.name, "skipped": "missing"}
     backup_dir.mkdir(parents=True, exist_ok=True)
-    tag = tag or datetime.now().strftime("%Y%m%d")
+    tag = tag or datetime.now(KST).strftime("%Y%m%d")
     dst = backup_dir / f"{db_path.stem}_{tag}.db"
     if dst.exists():
         return {"db": db_path.name, "skipped": "exists", "file": dst.name}
@@ -108,9 +111,10 @@ _started = False
 
 
 def start_backup_scheduler(db_paths: list[Path], backup_dir: Path,
-                           hour: int = 4, first_delay: int = 300) -> None:
-    """매일 hour 시(서버 로컬)에 백업. 기동 후 first_delay 초 뒤 당일 백업이 없으면 1회 수행."""
+                           hour: int | None = None, first_delay: int = 300) -> None:
+    """매일 hour 시(한국시간 KST)에 백업. 기동 후 first_delay 초 뒤 당일 백업이 없으면 1회 수행."""
     global _started
+    hour = BACKUP_HOUR_KST if hour is None else hour
     if _started or os.getenv("SQLITE_BACKUP", "1") != "1":
         return
     _started = True
@@ -130,11 +134,11 @@ def start_backup_scheduler(db_paths: list[Path], backup_dir: Path,
         time.sleep(first_delay)
         while True:
             _run()
-            now = datetime.now()
+            now = datetime.now(KST)
             nxt = now.replace(hour=hour, minute=0, second=0, microsecond=0)
             if nxt <= now:
                 nxt += timedelta(days=1)
             time.sleep(max(60, (nxt - now).total_seconds()))
 
     threading.Thread(target=_loop, daemon=True, name="sqlite-backup").start()
-    logger.info(f"[sqlite-backup] 스케줄러 시작 → {backup_dir} (매일 {hour:02d}시, {BACKUP_KEEP_DAYS}일 보관)")
+    logger.info(f"[sqlite-backup] 스케줄러 시작 → {backup_dir} (매일 KST {hour:02d}시, {BACKUP_KEEP_DAYS}일 보관)")
