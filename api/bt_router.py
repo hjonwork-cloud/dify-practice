@@ -929,7 +929,7 @@ def api_home(request: Request):
     gps = [s["gp_pct"] for s in active if s["gp_pct"] is not None]
     w = [(s["gp_pct"], (s["demand_daily"] or 0) * (s["our_price"] or 0)) for s in active if s["gp_pct"] is not None]
     wsum = sum(x[1] for x in w)
-    ev = bt_db.event_summary(days=1, exclude_5140=True)
+    ev = bt_db.event_summary(days=1, exclude_5140=True, only22=True)
     runs = bt_db.list_runs(1)
     risks.sort(key=lambda r: -r["stake"])
     return _ok(_meta(U),
@@ -1023,13 +1023,15 @@ def _backfill_event_groups() -> None:
 
 
 @router.get("/api/events")
-def api_events(request: Request, days: int = 7, event_type: str = "", unacked: int = 0, fc_ex: int = 1):
+def api_events(request: Request, days: int = 7, event_type: str = "", unacked: int = 0, fc_ex: int = 1,
+               only22: int = 1):
     _session(request)
     _backfill_event_groups()
     days = max(1, min(days, 180))
     return _ok(events=bt_db.list_events(days=days, event_type=event_type,
-                                        unacked_only=bool(unacked), exclude_5140=bool(fc_ex)),
-               summary=bt_db.event_summary(days, exclude_5140=bool(fc_ex)),
+                                        unacked_only=bool(unacked), exclude_5140=bool(fc_ex),
+                                        only22=bool(only22)),
+               summary=bt_db.event_summary(days, exclude_5140=bool(fc_ex), only22=bool(only22)),
                runs=bt_db.list_runs(48), daily=bt_db.daily_counts(30))
 
 

@@ -26,6 +26,7 @@
     <select id="etype" class="pm-input" style="max-width:170px"><option value="">유형 전체</option></select>
     <label class="muted"><input type="checkbox" id="unacked"> 미확인만</label>
     <label class="muted" title="자재그룹 5140(FC전용) 상품의 이벤트를 숨김"><input type="checkbox" id="fcx" checked> FC전용상품 제외(자재그룹 5140)</label>
+    <label class="muted" title="현재 4121·배치 03·마감 22:00 목록에 있는 SKU만 표시 (목록 이탈 이벤트는 항상 포함)"><input type="checkbox" id="only22" checked> 22시 마감품목만 보기</label>
     <span id="evSum" class="muted" style="font-size:.8rem"></span>
     <span style="flex:1"></span>
     <button class="pm-btn pm-btn-success pm-btn-sm" onclick="ackSel()">선택 확인 처리</button>
@@ -47,8 +48,8 @@
 document.getElementById('btMeta').innerHTML='<span class="chip">수발주 변동 모니터 · 기준 플랜트 4121 · 배치 03 · 마감 22:00</span>';
 document.getElementById('etype').innerHTML+=Object.entries(EV_LABEL).map(([k,v])=>`<option value="${k}">${esc(v)}</option>`).join('');
 async function load(){
-  const d=document.getElementById('days').value, t=document.getElementById('etype').value, u=document.getElementById('unacked').checked?1:0, fx=document.getElementById('fcx').checked?1:0;
-  const j=await btGet(`/api/events?days=${d}&event_type=${t}&unacked=${u}&fc_ex=${fx}`);
+  const d=document.getElementById('days').value, t=document.getElementById('etype').value, u=document.getElementById('unacked').checked?1:0, fx=document.getElementById('fcx').checked?1:0, o22=document.getElementById('only22').checked?1:0;
+  const j=await btGet(`/api/events?days=${d}&event_type=${t}&unacked=${u}&fc_ex=${fx}&only22=${o22}`);
   const S=j.summary||{};
   document.getElementById('evSum').innerHTML=`기간 전체 <b>${(S.total||0).toLocaleString()}</b>건 · 미확인 <b>${(S.unacked||0).toLocaleString()}</b>건`+(j.events.length>=1000?' · <span style="color:#b45309">최근 1,000건만 표시</span>':'');
   document.getElementById('evTbl').innerHTML=`<thead><tr><th><input type="checkbox" onclick="document.querySelectorAll('.ck').forEach(c=>c.checked=this.checked)"></th>
@@ -77,7 +78,7 @@ async function runNow(){
   try{const r=await fetch(BT+'/api/snapshot/run',{method:'POST'});const j=await r.json();
     showToast(j.ok?(j.baseline?`기준선 생성 (SKU ${j.sku_total})`:`완료 · 이벤트 ${j.events}건`):'실패: '+j.error, j.ok?'success':'error'); load();}catch(e){showToast(e.message,'error');}
 }
-['days','etype','unacked','fcx'].forEach(id=>document.getElementById(id).onchange=load);
+['days','etype','unacked','fcx','only22'].forEach(id=>document.getElementById(id).onchange=load);
 load().catch(e=>document.getElementById('evTbl').innerHTML=`<tbody><tr><td class="bt-loading" style="color:#b91c1c">⚠ ${esc(e.message)}</td></tr></tbody>`);
 </script>
 {% endblock %}
