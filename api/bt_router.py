@@ -991,9 +991,41 @@ def api_sku_detail(request: Request, code: str):
 
 # ── 1-2. 수발주 변동 ────────────────────────────────────────────────────────
 
+_group_tried: set[str] = set()
+
+
+def _backfill_event_groups() -> None:
+    """이벤트 SKU의 빈 자재그룹을 자재 마스터(ZMM60 → 보완 마스터)에서 채운다.
+    현재 대상 목록(03/22시)에서 빠진 코드는 스냅샷에서 갱신되지 않으므로 여기서 보완.
+    코드당 프로세스 1회만 조회."""
+    try:
+        codes = [c for c in bt_db.event_codes_missing_group()
+                 if c not in _group_tried and re.fullmatch(r"[0-9A-Za-z_-]+", c)]
+        if not codes:
+            return
+        _group_tried.update(codes)
+        inl = ",".join(f"'{c}'" for c in codes[:500])
+        rows = pm._q(f"""
+            SELECT `상품코드` AS c, MAX(`자재그룹`) AS g, 1 AS p FROM {pm.T_ZMM60}
+             WHERE `상품코드` IN ({inl}) GROUP BY 1
+            UNION ALL
+            SELECT `상품코드`, MAX(`자재그룹`), 2 FROM {T_ZMM60_ALL}
+             WHERE `상품코드` IN ({inl}) GROUP BY 1""") or []
+        got: dict[str, str] = {}
+        for r in sorted(rows, key=lambda r: r["p"]):
+            g = str(r.get("g") or "").strip()
+            if g and str(r["c"]) not in got:
+                got[str(r["c"])] = g
+        n = bt_db.fill_state_groups(got)
+        logger.info(f"[bt] 이벤트 자재그룹 보완 {n}/{len(codes)}")
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"[bt] 이벤트 자재그룹 보완 실패: {e}")
+
+
 @router.get("/api/events")
 def api_events(request: Request, days: int = 7, event_type: str = "", unacked: int = 0, fc_ex: int = 1):
     _session(request)
+    _backfill_event_groups()
     days = max(1, min(days, 180))
     return _ok(events=bt_db.list_events(days=days, event_type=event_type,
                                         unacked_only=bool(unacked), exclude_5140=bool(fc_ex)),

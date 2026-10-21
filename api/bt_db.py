@@ -453,6 +453,36 @@ def list_events(days: int = 7, event_type: str = "", unacked_only: bool = False,
     return _read(sql, args)
 
 
+def event_codes_missing_group() -> list[str]:
+    """이벤트가 있는 SKU 중 상태 테이블에 자재그룹이 비어 있는 코드."""
+    init()
+    rows = _read("SELECT DISTINCT e.product_code AS c FROM " + _EVENT_FROM +
+                 " WHERE COALESCE(s.material_group,'')=''", [])
+    return [r["c"] for r in rows]
+
+
+def fill_state_groups(groups: dict[str, str]) -> int:
+    """상태 테이블의 빈 자재그룹만 보완 (present 등 다른 값은 그대로)."""
+    if not groups:
+        return 0
+    init()
+    now = _now()
+    n = 0
+    with _connect() as conn:
+        for code, g in groups.items():
+            if not g:
+                continue
+            cur = conn.execute(
+                """INSERT INTO bt_sku_state(product_code, material_group, use_hold, present, updated_at)
+                   VALUES (?,?,'',0,?)
+                   ON CONFLICT(product_code) DO UPDATE SET material_group=excluded.material_group,
+                       updated_at=excluded.updated_at
+                   WHERE COALESCE(bt_sku_state.material_group,'')=''""",
+                (code, g, now))
+            n += cur.rowcount or 0
+    return n
+
+
 def event_summary(days: int = 1, exclude_5140: bool = False) -> dict:
     """기간 내 이벤트 건수 집계 (LIMIT 없이 전체)."""
     init()

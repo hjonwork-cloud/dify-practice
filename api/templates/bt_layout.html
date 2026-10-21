@@ -77,13 +77,15 @@ function evChange(e){
   if(t==='new'){
     const held=/사용보류=X|막힘/.test(a);
     const m=a.match(/자재그룹[= ]([^·\s]+)/); let mg=m?m[1]:''; if(mg==='-'||mg==='미확인') mg='';
-    mg=mg||e.cur_material_group||'';
-    return `목록 신규 편입 · ${holdTxt(held?'X':'')} · 자재그룹 ${esc(mg||'미확인')}`;
+    mg=e.cur_material_group||mg||'';
+    return `목록 신규 편입 · ${holdTxt(held?'X':'')} · 자재그룹 ${esc(mg||'마스터 없음')}`+curOut(e);
   }
   if(t==='removed') return '목록에 있음 → <b>없음</b>';
   if(t==='group_in'||t==='group_out') return `자재그룹 ${esc(b||'미확인')} → ${esc(a||'미확인')}`;
-  return `${esc(b)} → ${esc(a)}`;
+  return `${esc(b)} → ${esc(a)}`+curOut(e);
 }
+// 현재(최근 스냅샷) 대상 목록(4121·배치 03·마감 22:00)에 없는 코드 표시
+function curOut(e){return e.cur_present===0?' <span class="chip" style="background:#f1f5f9;color:#64748b" title="최근 스냅샷의 4121·배치 03·마감 22:00 목록에 없음">현재 대상 아님</span>':'';}
 
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function won(v){return (v===null||v===undefined||isNaN(v))?'-':Math.round(v).toLocaleString();}
