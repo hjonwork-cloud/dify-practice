@@ -26,10 +26,11 @@ def _now() -> str:
 
 
 def _get_conn() -> sqlite3.Connection:
+    import sqlite_guard
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(DB_PATH), timeout=10)
+    conn = sqlite3.connect(str(DB_PATH), timeout=sqlite_guard.BUSY_TIMEOUT_MS / 1000)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
+    sqlite_guard.configure(conn, DB_PATH)
     conn.execute("PRAGMA foreign_keys=ON")
     return conn
 

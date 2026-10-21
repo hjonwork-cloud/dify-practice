@@ -42,11 +42,11 @@ def _now() -> str:
 
 
 def _connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
+    import sqlite_guard
+    conn = sqlite3.connect(DB_PATH, timeout=sqlite_guard.BUSY_TIMEOUT_MS / 1000)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA busy_timeout=3000")
-    return conn
+    # /home(SMB) 위에서 WAL 은 손상 위험 → DELETE 저널 + busy_timeout (sqlite_guard 참고)
+    return sqlite_guard.configure(conn, DB_PATH)
 
 
 def init_db() -> None:

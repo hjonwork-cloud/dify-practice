@@ -95,6 +95,14 @@ async def _lifespan(app):
     """FastAPI lifespan: 시작 시 스케줄러 ON, 종료 시 OFF"""
     _crawl_scheduler.start()
     _sms_keepalive.start()
+    # SQLite 일일 백업(/home/data/_backup, 7일 보관) — sqlite_guard 참고
+    try:
+        import sqlite_guard as _sg
+        import portal_db as _pdb
+        _sg.start_backup_scheduler([_pdb.DB_PATH, admin_db.DB_PATH], _pdb.DATA_DIR / "_backup")
+    except Exception as _e:
+        import logging as _logging
+        _logging.getLogger(__name__).warning(f"[sqlite-backup] 시작 실패: {_e}")
     yield
     _crawl_scheduler.stop()
     _sms_keepalive.stop()
