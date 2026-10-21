@@ -7,6 +7,17 @@
     시간 단위 원천(PI팀 / DT본부 수발주 확인 쿼리 · RPA)이 확정되면 조회부만 교체합니다.<br>
     🔴 = 매핑(경쟁 판매 대상) SKU의 막힘·삭제 → 셀러센터 판매중지 확인 필요 · 🟡 = 열림·신규·자재그룹 변경·수기 제외
   </div>
+  <details style="margin-top:.4rem;font-size:.8rem;color:#78350f"><summary style="cursor:pointer;font-weight:600">유형별 판정 기준</summary>
+    <table class="pm-table" style="margin-top:.4rem;background:#fff"><tbody>
+      <tr><td><b>막힘(X)</b></td><td>수발주 불가 상태 = <b>사용보류 X</b> 또는 <b>삭제구분 X</b> 또는 <b>종료일 경과</b> (셀 하나라도 해당하면 X) · <b>정상</b> = 세 조건 모두 아님</td></tr>
+      <tr><td><b>막힘</b></td><td>직전 정상 → 이번 막힘(X)</td></tr>
+      <tr><td><b>열림</b></td><td>직전 막힘(X) → 이번 정상 (수발주 다시 가능)</td></tr>
+      <tr><td><b>신규 코드</b></td><td>직전 스냅샷의 4121·배치 03·마감 22:00 목록에 없던 코드가 이번에 나타남. 뒤의 정상/막힘·자재그룹은 <b>편입 시점의 상태</b>(해제됐다는 뜻 아님)</td></tr>
+      <tr><td><b>목록 이탈(삭제)</b></td><td>직전 목록에 있던 코드가 이번 조회에서 빠짐 (수발주 행 자체가 사라짐 — SAP 삭제구분 X는 '막힘'으로 잡힘)</td></tr>
+      <tr><td><b>5140 편입/이탈</b></td><td>자재그룹이 5140(FC전용)으로 바뀜 / 5140에서 다른 그룹으로 바뀜</td></tr>
+      <tr><td><b>대량 변동</b></td><td>한 번에 신규·이탈·그룹변경이 300건 또는 직전 목록의 10%를 넘으면 조회 기준/원천 변경으로 보고 이벤트 없이 기준선만 갱신</td></tr>
+    </tbody></table>
+  </details>
 </div>
 
 <div class="pm-card">
@@ -14,6 +25,8 @@
     <select id="days" class="pm-input" style="max-width:120px"><option value="1">오늘</option><option value="7" selected>7일</option><option value="30">30일</option><option value="90">90일</option></select>
     <select id="etype" class="pm-input" style="max-width:170px"><option value="">유형 전체</option></select>
     <label class="muted"><input type="checkbox" id="unacked"> 미확인만</label>
+    <label class="muted" title="자재그룹 5140(FC전용) 상품의 이벤트를 숨김"><input type="checkbox" id="fcx" checked> FC전용상품 제외(자재그룹 5140)</label>
+    <span id="evSum" class="muted" style="font-size:.8rem"></span>
     <span style="flex:1"></span>
     <button class="pm-btn pm-btn-success pm-btn-sm" onclick="ackSel()">선택 확인 처리</button>
     <button class="pm-btn pm-btn-primary pm-btn-sm" onclick="runNow()">⟳ 지금 수집·비교</button>
@@ -34,16 +47,19 @@
 document.getElementById('btMeta').innerHTML='<span class="chip">수발주 변동 모니터 · 기준 플랜트 4121 · 배치 03 · 마감 22:00</span>';
 document.getElementById('etype').innerHTML+=Object.entries(EV_LABEL).map(([k,v])=>`<option value="${k}">${esc(v)}</option>`).join('');
 async function load(){
-  const d=document.getElementById('days').value, t=document.getElementById('etype').value, u=document.getElementById('unacked').checked?1:0;
-  const j=await btGet(`/api/events?days=${d}&event_type=${t}&unacked=${u}`);
+  const d=document.getElementById('days').value, t=document.getElementById('etype').value, u=document.getElementById('unacked').checked?1:0, fx=document.getElementById('fcx').checked?1:0;
+  const j=await btGet(`/api/events?days=${d}&event_type=${t}&unacked=${u}&fc_ex=${fx}`);
+  const S=j.summary||{};
+  document.getElementById('evSum').innerHTML=`기간 전체 <b>${(S.total||0).toLocaleString()}</b>건 · 미확인 <b>${(S.unacked||0).toLocaleString()}</b>건`+(j.events.length>=1000?' · <span style="color:#b45309">최근 1,000건만 표시</span>':'');
   document.getElementById('evTbl').innerHTML=`<thead><tr><th><input type="checkbox" onclick="document.querySelectorAll('.ck').forEach(c=>c.checked=this.checked)"></th>
-    <th>시각</th><th>등급</th><th>유형</th><th>SKU</th><th>변경</th><th class="num">매핑 수</th><th>메모</th><th>확인</th></tr></thead><tbody>`+
+    <th>시각</th><th>등급</th><th>유형</th><th>SKU</th><th>자재그룹</th><th>변경</th><th class="num">매핑 수</th><th>메모</th><th>확인</th></tr></thead><tbody>`+
     j.events.map(e=>`<tr><td>${e.ack_at?'':`<input type="checkbox" class="ck" value="${e.event_id}">`}</td><td class="muted">${esc(e.event_ts)}</td>
       <td><span class="badge sev-${e.severity}">${e.severity==='red'?'🔴':'🟡'}</span></td><td><b>${esc(EV_LABEL[e.event_type]||e.event_type)}</b></td>
       <td><a href="${BT}/skus?status=all" class="code">${esc(e.product_code)}</a> ${esc(e.product_name||'')}</td>
-      <td>${esc(e.before_val||'')} → ${esc(e.after_val||'')}</td><td class="num">${e.mapped_cnt||0}</td><td class="muted">${esc(e.note||'')}</td>
+      <td class="muted">${esc(e.cur_material_group||'-')}</td>
+      <td>${evChange(e)}</td><td class="num">${e.mapped_cnt||0}</td><td class="muted">${esc(e.note||'')}</td>
       <td class="muted">${e.ack_at?esc(e.ack_by)+' '+esc(e.ack_at)+(e.ack_note?' · '+esc(e.ack_note):''):'<span class="badge badge-warn">미확인</span>'}</td></tr>`).join('')+
-    (j.events.length?'':'<tr><td colspan="9" class="muted">이벤트 없음</td></tr>')+'</tbody>';
+    (j.events.length?'':'<tr><td colspan="10" class="muted">이벤트 없음</td></tr>')+'</tbody>';
   document.getElementById('runTbl').innerHTML='<thead><tr><th>run</th><th>트리거</th><th>시작</th><th>상태</th><th class="num">SKU</th><th class="num">운영</th><th class="num">이벤트</th><th>메시지</th></tr></thead><tbody>'+
     j.runs.map(r=>`<tr><td class="code">${esc(r.run_key)}</td><td>${esc(r.trigger)}</td><td class="muted">${esc(r.started_at)}</td>
       <td>${r.status==='ok'?'<span class="badge badge-ok">ok</span>':r.status==='error'?'<span class="badge badge-alert">error</span>':esc(r.status)}</td>
@@ -61,7 +77,7 @@ async function runNow(){
   try{const r=await fetch(BT+'/api/snapshot/run',{method:'POST'});const j=await r.json();
     showToast(j.ok?(j.baseline?`기준선 생성 (SKU ${j.sku_total})`:`완료 · 이벤트 ${j.events}건`):'실패: '+j.error, j.ok?'success':'error'); load();}catch(e){showToast(e.message,'error');}
 }
-['days','etype','unacked'].forEach(id=>document.getElementById(id).onchange=load);
+['days','etype','unacked','fcx'].forEach(id=>document.getElementById(id).onchange=load);
 load().catch(e=>document.getElementById('evTbl').innerHTML=`<tbody><tr><td class="bt-loading" style="color:#b91c1c">⚠ ${esc(e.message)}</td></tr></tbody>`);
 </script>
 {% endblock %}

@@ -69,6 +69,21 @@ const V_LABEL = {win:'승', tie:'무', lose:'패', unknown:'-', none:'없음'};
 const ST_LABEL = {active:'운영', blocked:'막힘', excluded:'수기제외', group5140:'5140'};
 const EV_LABEL = {{ event_labels | tojson }};
 const EX_REASON = {{ exclude_reasons | tojson }};
+// 수발주 이벤트 '변경' 표시 — X = 사용보류 X 또는 삭제구분 X 또는 종료일 경과(수발주 불가)
+function holdTxt(v){return v==='X'?'<span style="color:#b91c1c;font-weight:600">막힘(X)</span>':'<span style="color:#047857;font-weight:600">정상</span>';}
+function evChange(e){
+  const b=e.before_val||'', a=e.after_val||'', t=e.event_type;
+  if(t==='block'||t==='open') return `${holdTxt(b==='X'?'X':'')} → ${holdTxt(a==='X'?'X':'')}`;
+  if(t==='new'){
+    const held=/사용보류=X|막힘/.test(a);
+    const m=a.match(/자재그룹[= ]([^·\s]+)/); let mg=m?m[1]:''; if(mg==='-'||mg==='미확인') mg='';
+    mg=mg||e.cur_material_group||'';
+    return `목록 신규 편입 · ${holdTxt(held?'X':'')} · 자재그룹 ${esc(mg||'미확인')}`;
+  }
+  if(t==='removed') return '목록에 있음 → <b>없음</b>';
+  if(t==='group_in'||t==='group_out') return `자재그룹 ${esc(b||'미확인')} → ${esc(a||'미확인')}`;
+  return `${esc(b)} → ${esc(a)}`;
+}
 
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function won(v){return (v===null||v===undefined||isNaN(v))?'-':Math.round(v).toLocaleString();}

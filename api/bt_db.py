@@ -76,7 +76,7 @@ EVENT_LABELS = {
     "block":     "막힘",
     "open":      "열림",
     "new":       "신규 코드",
-    "removed":   "삭제",
+    "removed":   "목록 이탈(삭제)",
     "group_in":  "자재그룹 5140 편입",
     "group_out": "자재그룹 5140 이탈",
     "exclude":   "수기 제외",
@@ -422,22 +422,55 @@ def add_event(product_code: str, product_name: str | None, event_type: str, seve
         )
 
 
-def list_events(days: int = 7, event_type: str = "", unacked_only: bool = False,
-                product_code: str = "", limit: int = 1000) -> list[dict]:
-    init()
-    where = ["event_ts >= datetime('now','localtime', ?)"]
+def _event_where(days: int, event_type: str, unacked_only: bool, exclude_5140: bool) -> tuple[list[str], list]:
+    where = ["e.event_ts >= datetime('now','localtime', ?)"]
     args: list = [f"-{int(days)} days"]
     if event_type:
-        where.append("event_type=?")
+        where.append("e.event_type=?")
         args.append(event_type)
     if unacked_only:
-        where.append("ack_at IS NULL")
+        where.append("e.ack_at IS NULL")
+    if exclude_5140:
+        # FC전용상품(자재그룹 5140) 제외 — 현재(최종) 상태의 자재그룹 기준
+        where.append("COALESCE(s.material_group,'') <> '5140'")
+    return where, args
+
+
+_EVENT_FROM = "bt_sku_event e LEFT JOIN bt_sku_state s ON s.product_code = e.product_code"
+
+
+def list_events(days: int = 7, event_type: str = "", unacked_only: bool = False,
+                product_code: str = "", limit: int = 1000, exclude_5140: bool = False) -> list[dict]:
+    """이벤트 목록 + 해당 SKU의 현재 상태(cur_material_group / cur_use_hold / cur_present)."""
+    init()
+    where, args = _event_where(days, event_type, unacked_only, exclude_5140)
     if product_code:
-        where = ["product_code=?"]
-        args = [product_code]
-    sql = f"SELECT * FROM bt_sku_event WHERE {' AND '.join(where)} ORDER BY event_ts DESC, event_id DESC LIMIT ?"
+        where, args = ["e.product_code=?"], [product_code]
+    sql = (f"SELECT e.*, s.material_group AS cur_material_group, s.use_hold AS cur_use_hold, "
+           f"s.present AS cur_present FROM {_EVENT_FROM} WHERE {' AND '.join(where)} "
+           f"ORDER BY e.event_ts DESC, e.event_id DESC LIMIT ?")
     args.append(int(limit))
     return _read(sql, args)
+
+
+def event_summary(days: int = 1, exclude_5140: bool = False) -> dict:
+    """기간 내 이벤트 건수 집계 (LIMIT 없이 전체)."""
+    init()
+    where, args = _event_where(days, "", False, exclude_5140)
+    rows = _read(f"SELECT e.event_type, e.severity, (e.ack_at IS NULL) AS unacked, COUNT(*) AS n "
+                 f"FROM {_EVENT_FROM} WHERE {' AND '.join(where)} GROUP BY 1,2,3", args)
+    out = {"total": 0, "red": 0, "unacked": 0, "unacked_red": 0, "by_type": {}}
+    for r in rows:
+        n = r["n"]
+        out["total"] += n
+        out["by_type"][r["event_type"]] = out["by_type"].get(r["event_type"], 0) + n
+        if r["severity"] == "red":
+            out["red"] += n
+        if r["unacked"]:
+            out["unacked"] += n
+            if r["severity"] == "red":
+                out["unacked_red"] += n
+    return out
 
 
 def ack_events(event_ids: list[int], ack_by: str, ack_note: str = "") -> int:

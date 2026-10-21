@@ -141,7 +141,7 @@ async function openSku(code){
         <td><button class="pm-btn pm-btn-ghost pm-btn-sm" onclick="unmap(${l.mapping_id},'${esc(s.product_code)}')">해제</button></td></tr>`).join('')||'<tr><td colspan="14" class="muted">매핑 없음</td></tr>'}
       </tbody></table></div>
       <div class="pm-card-title" style="margin:.8rem 0 .4rem">변경 이력</div>
-      <table class="pm-table"><tbody>${(j.events||[]).map(e=>`<tr><td class="muted">${esc(e.event_ts)}</td><td><span class="badge sev-${e.severity}">${esc(EV_LABEL[e.event_type]||e.event_type)}</span></td><td>${esc(e.before_val||'')} → ${esc(e.after_val||'')}</td><td class="muted">${esc(e.note||'')}</td></tr>`).join('')||'<tr><td class="muted">이력 없음 (스냅샷 기준선 이후 변동 없음)</td></tr>'}</tbody></table>`;
+      <table class="pm-table"><tbody>${(j.events||[]).map(e=>`<tr><td class="muted">${esc(e.event_ts)}</td><td><span class="badge sev-${e.severity}">${esc(EV_LABEL[e.event_type]||e.event_type)}</span></td><td>${evChange(e)}</td><td class="muted">${esc(e.note||'')}</td></tr>`).join('')||'<tr><td class="muted">이력 없음 (스냅샷 기준선 이후 변동 없음)</td></tr>'}</tbody></table>`;
   }catch(e){body.innerHTML=`<div class="bt-loading" style="color:#b91c1c">⚠ ${esc(e.message)}</div>`;}
 }
 async function exclude(codes){

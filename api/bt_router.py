@@ -214,6 +214,10 @@ def _classify(r: dict, excl: set[str]) -> str:
 
 STATUS_LABEL = {"active": "운영", "blocked": "막힘(사용보류)", "excluded": "수기 제외", "group5140": "자재그룹 5140"}
 
+# 한 번의 스냅샷에서 신규/이탈/그룹변경이 이 수를 넘으면 기준 변경으로 보고 이벤트를 기록하지 않는다.
+MASS_EVENT_MIN = 300
+MASS_EVENT_RATIO = 0.10
+
 
 def get_skus(force: bool = False) -> list[dict]:
     raw = get_raw(force)
@@ -704,7 +708,8 @@ def run_snapshot(run_key: str, trigger: str) -> dict:
                 mc = _mapped(s)
                 hold, mg = s["use_hold"], s["material_group"]
                 if not p or not p.get("present"):
-                    events.append((s, "new", "yellow", "", f"사용보류={hold or '-'} · 자재그룹={mg or '-'}", mc))
+                    events.append((s, "new", "yellow", "",
+                                   f"{'막힘(X)' if hold == 'X' else '정상'} · 자재그룹 {mg or '미확인'}", mc))
                     continue
                 ph = (p.get("use_hold") or "").upper()
                 pmg = p.get("material_group") or ""
@@ -723,6 +728,15 @@ def run_snapshot(run_key: str, trigger: str) -> dict:
                                    "removed", "red" if mc else "yellow", "존재", "삭제", mc))
 
         missing = [c for c, p in prev.items() if p.get("present") and c not in cur]
+        # 대량 변동 가드: 조회 기준(배치·마감 필터, 마스터 보완)이나 원천 적재가 바뀌면
+        # 수천 건의 신규/이탈/그룹변경이 한 번에 잡힌다 → 실제 수발주 변동이 아니므로 기준선만 갱신.
+        n_prev = sum(1 for p in prev.values() if p.get("present"))
+        n_mass = sum(1 for e in events if e[1] in ("new", "removed", "group_in", "group_out"))
+        mass_limit = max(MASS_EVENT_MIN, int(n_prev * MASS_EVENT_RATIO))
+        mass = not baseline and n_mass > mass_limit
+        if mass:
+            logger.warning(f"[bt] snapshot {run_key}: 대량 변동 {n_mass}건(>{mass_limit}) → 기준선 재설정, 이벤트 미기록")
+            events = []
         bt_db.save_state(skus, missing)
         for s, et, sev, bv, av, mc in events:
             bt_db.add_event(s["product_code"], s.get("product_name"), et, sev,
@@ -734,7 +748,9 @@ def run_snapshot(run_key: str, trigger: str) -> dict:
         if now.hour >= 6 and not bt_db.has_daily(today):
             bt_db.save_daily(today, active)
 
-        msg = "기준선 생성" if baseline else f"이벤트 {len(events)}건"
+        msg = ("기준선 생성" if baseline else
+               f"기준선 재설정 (대량 변동 {n_mass}건 — 조회 기준/원천 변경 추정, 이벤트 미기록)" if mass else
+               f"이벤트 {len(events)}건")
         bt_db.finish_run(run_key, "ok", len(skus), len(active), len(events), msg)
         if events:
             invalidate("universe")
@@ -913,7 +929,7 @@ def api_home(request: Request):
     gps = [s["gp_pct"] for s in active if s["gp_pct"] is not None]
     w = [(s["gp_pct"], (s["demand_daily"] or 0) * (s["our_price"] or 0)) for s in active if s["gp_pct"] is not None]
     wsum = sum(x[1] for x in w)
-    ev = bt_db.list_events(days=1)
+    ev = bt_db.event_summary(days=1, exclude_5140=True)
     runs = bt_db.list_runs(1)
     risks.sort(key=lambda r: -r["stake"])
     return _ok(_meta(U),
@@ -926,12 +942,12 @@ def api_home(request: Request):
                gp_alert_cnt=sum(1 for g in gps if g < float(U["params"]["gp_alert"])),
                demand_total=round(sum(s["demand_daily"] or 0 for s in active), 1),
                revenue_daily=round(sum((s["demand_daily"] or 0) * (s["our_price"] or 0) for s in active)),
-               events_today={"total": len(ev),
-                             "red": sum(1 for e in ev if e["severity"] == "red"),
-                             "unacked": sum(1 for e in ev if not e["ack_at"]),
-                             "block": sum(1 for e in ev if e["event_type"] == "block"),
-                             "open": sum(1 for e in ev if e["event_type"] == "open"),
-                             "new": sum(1 for e in ev if e["event_type"] == "new")},
+               events_today={"total": ev["total"],
+                             "red": ev["red"],
+                             "unacked": ev["unacked"],
+                             "block": ev["by_type"].get("block", 0),
+                             "open": ev["by_type"].get("open", 0),
+                             "new": ev["by_type"].get("new", 0)},
                last_run=runs[0] if runs else None,
                due_releases=bt_db.due_release_codes(_now_kst().strftime("%Y-%m-%d")),
                unmapped_active=sum(1 for s in active if not s["map_total"]),
@@ -976,10 +992,12 @@ def api_sku_detail(request: Request, code: str):
 # ── 1-2. 수발주 변동 ────────────────────────────────────────────────────────
 
 @router.get("/api/events")
-def api_events(request: Request, days: int = 7, event_type: str = "", unacked: int = 0):
+def api_events(request: Request, days: int = 7, event_type: str = "", unacked: int = 0, fc_ex: int = 1):
     _session(request)
-    return _ok(events=bt_db.list_events(days=max(1, min(days, 180)), event_type=event_type,
-                                        unacked_only=bool(unacked)),
+    days = max(1, min(days, 180))
+    return _ok(events=bt_db.list_events(days=days, event_type=event_type,
+                                        unacked_only=bool(unacked), exclude_5140=bool(fc_ex)),
+               summary=bt_db.event_summary(days, exclude_5140=bool(fc_ex)),
                runs=bt_db.list_runs(48), daily=bt_db.daily_counts(30))
 
 
