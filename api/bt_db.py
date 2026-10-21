@@ -14,9 +14,13 @@ portal_db 와 같은 DB 파일(portal_activity.db)을 사용하되 테이블은 
 from __future__ import annotations
 
 import json
+import logging
+import sqlite3
 import threading
 
 import portal_db
+
+logger = logging.getLogger(__name__)
 
 _init_lock = threading.Lock()
 _initialized = False
@@ -82,6 +86,52 @@ EVENT_LABELS = {
 
 def _connect():
     return portal_db._connect()
+
+
+# ── 인덱스 손상 자가복구 ─────────────────────────────────────────────────────────
+#  Azure /home(네트워크 공유) 위 SQLite 는 재시작·동시쓰기 중 인덱스가 깨지는 일이 있다
+#  (2026-10-21 실측: idx_bt_event_ts / idx_bt_event_code → "database disk image is malformed").
+#  테이블 데이터는 온전하므로 BT 인덱스만 REINDEX 하면 복구된다.
+
+_BT_INDEXES = ("idx_bt_event_ts", "idx_bt_event_code")
+_heal_lock = threading.Lock()
+
+
+def _reindex_bt(reason: str) -> bool:
+    with _heal_lock:
+        try:
+            with _connect() as conn:
+                for ix in _BT_INDEXES:
+                    conn.execute(f"REINDEX {ix}")
+            logger.warning(f"[bt_db] 인덱스 재생성 완료 ({reason})")
+            return True
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"[bt_db] 인덱스 재생성 실패 ({reason}): {e}")
+            return False
+
+
+def _check_bt_indexes() -> None:
+    """기동 시 1회: bt_sku_event 인덱스 무결성 점검 → 이상 시 REINDEX."""
+    try:
+        with _connect() as conn:
+            bad = [r[0] for r in conn.execute("PRAGMA quick_check(20)").fetchall() if r[0] != "ok"]
+        if any(ix in msg for msg in bad for ix in _BT_INDEXES):
+            _reindex_bt("startup quick_check")
+    except sqlite3.DatabaseError as e:
+        _reindex_bt(f"startup: {e}")
+
+
+def _read(sql: str, args=()) -> list[dict]:
+    """읽기 전용 조회 — 손상(malformed) 시 인덱스 재생성 후 1회 재시도."""
+    for attempt in (1, 2):
+        try:
+            with _connect() as conn:
+                return [dict(r) for r in conn.execute(sql, args).fetchall()]
+        except sqlite3.DatabaseError as e:
+            if attempt == 2 or "malformed" not in str(e):
+                raise
+            _reindex_bt(str(e))
+    return []
 
 
 def _now() -> str:
@@ -181,6 +231,7 @@ def init() -> None:
                     PRIMARY KEY (product_code, platform)
                 );
             """)
+        _check_bt_indexes()
         _initialized = True
 
 
@@ -386,8 +437,7 @@ def list_events(days: int = 7, event_type: str = "", unacked_only: bool = False,
         args = [product_code]
     sql = f"SELECT * FROM bt_sku_event WHERE {' AND '.join(where)} ORDER BY event_ts DESC, event_id DESC LIMIT ?"
     args.append(int(limit))
-    with _connect() as conn:
-        return [dict(r) for r in conn.execute(sql, args).fetchall()]
+    return _read(sql, args)
 
 
 def ack_events(event_ids: list[int], ack_by: str, ack_note: str = "") -> int:
