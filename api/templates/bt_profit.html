@@ -89,7 +89,7 @@ function rows(){const kw=document.getElementById('kw').value.trim().toLowerCase(
 function draw(){
   const R=rows(), S=100, G=isGross();
   document.getElementById('tb').innerHTML=R.slice((PAGE-1)*S,PAGE*S).map(r=>`<tr><td><span class="code">${esc(r.product_code)}</span> ${esc(r.product_name)}</td><td class="muted">${esc(r.category)}</td>
-    <td class="num">${demHtml(r.demand_daily,r.demand_plants,3)}</td><td class="num">${won(r.buy_price)}</td><td class="num">${won(r.our_price)}</td><td class="num">${gpTxt(G?r.gross_gp_pct:r.gp_pct)}</td>
+    <td class="num">${demHtml(r.demand_daily,r.demand_plants,3)}</td><td class="num">${buyTxt(r)}</td><td class="num">${won(r.our_price)}</td><td class="num">${gpTxt(G?r.gross_gp_pct:r.gp_pct)}</td>
     <td class="num" title="${esc(pnlTip(r.our_price,r.buy_price,PF))}">${cmTxt(r.cm_pct)}</td><td class="num" title="${esc(pnlTip(r.our_price,r.buy_price,PF))}">${opTxt(r.op_pct)}</td><td class="num">${won(r.list_price)}</td>
     <td>${esc(r.comp_seller)}<div class="num" style="text-align:left">${won(G?r.comp_list_price:r.comp_net)}</div></td><td>${vBadge(r.verdict)} ${pct(r.diff_pct)}</td>
     <td class="num">${won(r.floor)}</td><td class="num">${won(r.win_price)}</td><td class="num"><b>${won(r.rec_price)}</b></td><td class="num">${pct(r.rec_change_pct)}</td>

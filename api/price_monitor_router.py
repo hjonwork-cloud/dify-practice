@@ -187,9 +187,213 @@ _CACHE_TTL        = 300     # 메모리 TTL: 5분
 _CACHE_TTL_DISK   = 7200    # 디스크 TTL: 2시간
 
 
+T_DIPS = "h_hmfo_fsi.gd_prc.dips_unit_price_status_by_item_d"
+_W2_SALES = ("CAST(`년월` AS INT) >= YEAR(DATE_SUB(CURRENT_DATE(), 14)) * 100 "
+             "+ MONTH(DATE_SUB(CURRENT_DATE(), 14))")
+_base_build_lock = threading.Lock()
+
+
+def _dips_buy_sql(plants: list[str]) -> str:
+    """수발주(ZSDR0017) 공급 경로 → 구매 플랜트·협력사 → DIPS 실단가.
+    1) 판매 플랜트 수발주 행: 보류/삭제 아님 → 4121은 배치03·22시 우선 → 시작일 최신
+    2) 공급플랜트가 있고 자기 자신이 아니면 그 플랜트로 이동(타창고상품, 최대 3단계)
+    3) 최종 플랜트의 공급업체 = 구매 협력사
+    4) DIPS: ①(구매플랜트·품목·협력사) → ②(타 플랜트·품목·협력사) → ③(구매플랜트·품목) 단일 협력사
+    DIPS 계약은 거의 모든 플랜트에 복제되어 있어 플랜트만으로는 공급 관계를 알 수 없음."""
+    import main as _main
+    pl_in = ", ".join(repr(p) for p in plants)
+    held = "IF(COALESCE(`사용보류`,'')='X' OR COALESCE(`삭제구분`,'')='X', 1, 0)"
+    today = "date_format(current_date(), 'yyyyMMdd')"
+
+    def nxt(a: str, b: str, prev_plant: str) -> str:
+        return (f"LEFT JOIN z {b} ON {a}.splant <> '' AND {a}.splant <> {prev_plant} "
+                f"AND {b}.plant = {a}.splant AND {b}.code = s.code")
+
+    return f"""
+    WITH s AS (
+        SELECT DISTINCT CAST(`플랜트` AS STRING) AS plant, CAST(`자재` AS STRING) AS code
+        FROM {_main.T_MAIN}
+        WHERE `플랜트` IN ({pl_in}) AND {_W2_SALES} AND `자재` IS NOT NULL AND `매출수량` > 0
+    ),
+    codes AS (SELECT DISTINCT code FROM s),
+    z AS (
+        SELECT plant, code, splant, vkey FROM (
+            SELECT CAST(`플랜트` AS STRING) AS plant, CAST(`상품코드` AS STRING) AS code,
+                   COALESCE(CAST(`공급플랜트` AS STRING), '') AS splant,
+                   regexp_replace(COALESCE(CAST(`공급업체코드` AS STRING), ''), '^0+', '') AS vkey,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY `플랜트`, `상품코드`
+                       ORDER BY {held},
+                                IF(`플랜트` = '4121' AND `배치` = '03' AND `마감시간` = '220000', 0, 1),
+                                `시작일` DESC) AS rn
+            FROM {T_ZSDR}
+            WHERE `종료일` >= current_date()
+              AND CAST(`상품코드` AS STRING) IN (SELECT code FROM codes)
+        ) WHERE rn = 1
+    ),
+    ch AS (
+        SELECT s.plant, s.code,
+            CASE
+                WHEN z0.plant IS NULL THEN s.plant
+                WHEN z0.splant = '' OR z0.splant = s.plant THEN s.plant
+                WHEN z1.plant IS NULL THEN z0.splant
+                WHEN z1.splant = '' OR z1.splant = z1.plant THEN z1.plant
+                WHEN z2.plant IS NULL THEN z1.splant
+                WHEN z2.splant = '' OR z2.splant = z2.plant THEN z2.plant
+                WHEN z3.plant IS NULL THEN z2.splant
+                ELSE z3.plant
+            END AS fp,
+            CASE
+                WHEN z0.plant IS NULL THEN ''
+                WHEN z0.splant = '' OR z0.splant = s.plant THEN z0.vkey
+                WHEN z1.plant IS NULL THEN ''
+                WHEN z1.splant = '' OR z1.splant = z1.plant THEN z1.vkey
+                WHEN z2.plant IS NULL THEN ''
+                WHEN z2.splant = '' OR z2.splant = z2.plant THEN z2.vkey
+                WHEN z3.plant IS NULL THEN ''
+                WHEN z3.splant = '' OR z3.splant = z3.plant THEN z3.vkey
+                ELSE ''
+            END AS fv
+        FROM s
+        LEFT JOIN z z0 ON z0.plant = s.plant AND z0.code = s.code
+        {nxt('z0', 'z1', 's.plant')}
+        {nxt('z1', 'z2', 'z1.plant')}
+        {nxt('z2', 'z3', 'z2.plant')}
+    ),
+    d AS (
+        SELECT CAST(`플랜트` AS STRING) AS plant, CAST(`품목코드` AS STRING) AS code,
+               regexp_replace(COALESCE(CAST(`SAP협력사코드` AS STRING), ''), '^0+', '') AS vkey,
+               `협력사명` AS vname, CAST(`실단가` AS DOUBLE) AS rp, `유효시작일` AS st, `계약번호` AS cno
+        FROM {T_DIPS}
+        WHERE `유효여부` = 'Y' AND `유효시작일` <= {today} AND `유효종료일` >= {today}
+          AND `실단가` IS NOT NULL
+          AND CAST(`품목코드` AS STRING) IN (SELECT code FROM codes)
+    ),
+    d1 AS (SELECT * FROM (SELECT d.*, ROW_NUMBER() OVER (PARTITION BY plant, code, vkey ORDER BY st DESC, rp) rn FROM d) WHERE rn = 1),
+    d2 AS (SELECT * FROM (SELECT d.*, ROW_NUMBER() OVER (PARTITION BY code, vkey ORDER BY st DESC, rp) rn FROM d) WHERE rn = 1),
+    d3 AS (
+        SELECT * FROM (
+            SELECT d.*, ROW_NUMBER() OVER (PARTITION BY plant, code ORDER BY st DESC, rp) rn,
+                   MIN(vkey) OVER (PARTITION BY plant, code) v_min,
+                   MAX(vkey) OVER (PARTITION BY plant, code) v_max
+            FROM d) WHERE rn = 1 AND v_min = v_max
+    )
+    SELECT ch.plant, ch.code, ch.fp AS buy_plant, ch.fv AS zsdr_vendor,
+           COALESCE(a.rp, b.rp, c.rp)          AS real_price,
+           CASE WHEN a.rp IS NOT NULL THEN 1 WHEN b.rp IS NOT NULL THEN 2
+                WHEN c.rp IS NOT NULL THEN 3 END AS match_lv,
+           COALESCE(a.vname, b.vname, c.vname) AS vendor_name,
+           COALESCE(a.cno, b.cno, c.cno)       AS contract_no
+    FROM ch
+    LEFT JOIN d1 a ON ch.fv <> '' AND a.plant = ch.fp AND a.code = ch.code AND a.vkey = ch.fv
+    LEFT JOIN d2 b ON ch.fv <> '' AND b.code = ch.code AND b.vkey = ch.fv
+    LEFT JOIN d3 c ON c.plant = ch.fp AND c.code = ch.code
+    """
+
+
+def _build_base_prices() -> tuple[dict[str, list[dict]], bool]:
+    """PLANTS_REAL + ALL 기준가/구매가 일괄 생성.
+    avg_sale_price: 최근 2주 매출액/매출수량
+    avg_buy_price : DIPS 실단가(수발주 공급 경로 매칭) → 없으면 매출원가/매출수량 추정
+    ALL 구매가     : 판매 플랜트별 실단가 단순평균 (실단가가 하나도 없으면 전체 추정)"""
+    import main as _main
+    pl_in = ", ".join(repr(p) for p in PLANTS_REAL)
+    sales = _q(f"""
+        SELECT CAST(`플랜트` AS STRING) AS plant, CAST(`자재` AS STRING) AS product_code,
+               SUM(CAST(`매출액` AS DOUBLE))   AS amt,
+               SUM(CAST(`매출원가` AS DOUBLE)) AS cost,
+               SUM(CAST(`매출수량` AS DOUBLE)) AS qty
+        FROM {_main.T_MAIN}
+        WHERE `플랜트` IN ({pl_in}) AND {_W2_SALES}
+          AND `자재` IS NOT NULL AND `매출수량` > 0 AND `매출원가` IS NOT NULL
+        GROUP BY 1, 2
+    """) or []
+    dips: dict[tuple[str, str], dict] = {}
+    dips_ok = True
+    try:
+        for r in _q(_dips_buy_sql(PLANTS_REAL)) or []:
+            if r.get("real_price") is not None:
+                dips[(str(r["plant"]), str(r["code"]))] = r
+    except Exception as e:
+        dips_ok = False
+        logger.warning(f"[price_monitor] DIPS 실단가 조회 실패 → 추정 구매가 사용: {e}")
+
+    def _r(v):
+        return round(float(v), 2) if v is not None else None
+
+    out: dict[str, list[dict]] = {p: [] for p in PLANTS_REAL}
+    agg: dict[str, dict] = {}
+    for s in sales:
+        p, c = str(s["plant"]), str(s["product_code"])
+        amt, cost, qty = float(s["amt"] or 0), float(s["cost"] or 0), float(s["qty"] or 0)
+        if qty <= 0:
+            continue
+        est = _r(cost / qty * 100)
+        d = dips.get((p, c))
+        row = {
+            "product_code":    c,
+            "avg_sale_price":  _r(amt / qty * 100),
+            "avg_buy_price":   _r(d["real_price"]) if d else est,
+            "est_buy_price":   est,
+            "buy_price_src":   "dips" if d else "est",
+            "buy_plant":       (d or {}).get("buy_plant") or "",
+            "buy_vendor":      (d or {}).get("vendor_name") or "",
+            "buy_contract":    (d or {}).get("contract_no") or "",
+            "buy_match_lv":    (d or {}).get("match_lv"),
+        }
+        if p in out:
+            out[p].append(row)
+        a = agg.setdefault(c, {"amt": 0.0, "cost": 0.0, "qty": 0.0, "real": [], "vendors": set()})
+        a["amt"] += amt
+        a["cost"] += cost
+        a["qty"] += qty
+        if d:
+            a["real"].append(float(d["real_price"]))
+            if d.get("vendor_name"):
+                a["vendors"].add(d["vendor_name"])
+    all_rows = []
+    for c, a in agg.items():
+        est = _r(a["cost"] / a["qty"] * 100)
+        real = a["real"]
+        all_rows.append({
+            "product_code":   c,
+            "avg_sale_price": _r(a["amt"] / a["qty"] * 100),
+            "avg_buy_price":  _r(sum(real) / len(real)) if real else est,
+            "est_buy_price":  est,
+            "buy_price_src":  "dips" if real else "est",
+            "buy_plant":      "",
+            "buy_vendor":     ", ".join(sorted(a["vendors"])),
+            "buy_contract":   "",
+            "buy_match_lv":   None,
+        })
+    out["ALL"] = all_rows
+    return out, dips_ok
+
+
+def _rebuild_base_prices() -> dict[str, list[dict]] | None:
+    """일괄 재생성 후 4개 플랜트 캐시 저장 (동시 실행 방지)."""
+    if not _base_build_lock.acquire(blocking=False):
+        with _base_build_lock:   # 다른 스레드가 생성 중 → 끝나길 기다렸다 그 결과 사용
+            return None
+    try:
+        built, dips_ok = _build_base_prices()
+        now = time.time()
+        # DIPS 실패 시 추정치만 담긴 결과는 10분 후 만료되도록 타임스탬프를 앞당김
+        ts = now if dips_ok else now - _CACHE_TTL_DISK + 600
+        for p, rows in built.items():
+            _price_cache[f"base_prices_v2_{p}"] = (max(ts, now - _CACHE_TTL + 60), rows)
+            _disk_set(f"base_prices_v2_{p}", ts, rows)
+        return built
+    except Exception as e:
+        logger.warning(f"[price_monitor] base_prices 일괄 생성 실패: {e}")
+        return None
+    finally:
+        _base_build_lock.release()
+
+
 def _get_base_prices(plant: str) -> list[dict]:
-    """최근 2주 기준가(매출액/매출수량) + 구매단가(매출원가/매출수량) (플랜트별)"""
-    cache_key = f"base_prices_{plant}"
+    """최근 2주 기준가(매출액/매출수량) + 구매가(DIPS 실단가, 없으면 매출원가/매출수량 추정)"""
+    cache_key = f"base_prices_v2_{plant}"
     # 1) 메모리 캐시
     if cache_key in _price_cache:
         ts, data = _price_cache[cache_key]
@@ -200,6 +404,18 @@ def _get_base_prices(plant: str) -> list[dict]:
     if disk and time.time() - disk[0] < _CACHE_TTL_DISK:
         _price_cache[cache_key] = disk  # 메모리에도 올림
         return disk[1]
+    if plant in PLANTS:
+        # 만료된 캐시가 있으면 즉시 반환하고 백그라운드 재생성 (생성 ~40초)
+        stale = disk or _price_cache.get(cache_key)
+        if stale:
+            if not _base_build_lock.locked():
+                threading.Thread(target=_rebuild_base_prices, daemon=True, name="base-prices").start()
+            return stale[1]
+        built = _rebuild_base_prices()
+        if built is not None:
+            return built.get(plant, [])
+        hit = _price_cache.get(cache_key)
+        return hit[1] if hit else []
     try:
         import main as _main
         plant_cond_bp = (f"`플랜트` IN ({', '.join(repr(p) for p in PLANTS_REAL)})"
@@ -791,6 +1007,7 @@ async def pm_dashboard(
             "ext_spec":           pf_data.get("spec", ""),
             "avg_sale_price":     price_info.get("avg_sale_price"),
             "avg_buy_price":      buy_price,
+            "buy_price_src":      price_info.get("buy_price_src") or "",
             "ext_price":          sale_price,
             "gp_pct":             gp,
             "gp_status":          status,
@@ -1162,6 +1379,7 @@ async def api_our_products(request: Request, plant: str = "ALL", keyword: str = 
                 "prev_sales_qty": _f(s.get("prev_sales_qty")),
                 "avg_sale_price": _f(bp.get("avg_sale_price")),
                 "avg_buy_price":  _f(bp.get("avg_buy_price")),
+                "buy_price_src":  bp.get("buy_price_src") or "",
             })
         products = enriched
         if keyword and products:

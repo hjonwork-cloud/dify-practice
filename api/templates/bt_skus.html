@@ -92,7 +92,7 @@ function render(){
       return `<tr style="cursor:pointer" onclick="if(event.target.type!=='checkbox')openSku('${esc(r.product_code)}')">
       <td><input type="checkbox" class="ck" value="${esc(r.product_code)}"></td><td>${stBadge(r.status)}</td><td>${skuName(r)}</td>
       <td class="muted">${esc(r.category||'')}</td>
-      <td class="num">${won(r.our_price)}${r.price_src==='twin'?'<div class="twin">1배치 단가</div>':''}</td><td class="num">${won(r.buy_price)}</td>
+      <td class="num">${won(r.our_price)}${r.price_src==='twin'?'<div class="twin">1배치 단가</div>':''}</td><td class="num">${buyTxt(r)}</td>
       <td class="num">${gpTxt(isGross()?gpPctOf(r.our_price,r.buy_price,'baemin'):r.gp_pct)}</td>
       <td class="num" title="${esc(pnlTip(r.our_price,r.buy_price,'baemin'))}">${cmTxt(cmPctOf(r.our_price,r.buy_price,'baemin'))}</td>
       <td class="num" title="${esc(pnlTip(r.our_price,r.buy_price,'baemin'))}">${opTxt(opPctOf(r.our_price,r.buy_price,'baemin'))}</td>

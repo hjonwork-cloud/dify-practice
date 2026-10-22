@@ -1002,7 +1002,7 @@ function searchOurChange() {
       let html = '';
       products.slice(0, 30).forEach(p => {
         const saleV  = p.avg_sale_price  ? Math.round(p.avg_sale_price).toLocaleString()+'원' : '-';
-        const buyV   = p.avg_buy_price   ? Math.round(p.avg_buy_price).toLocaleString()+'원'  : '-';
+        const buyV   = p.avg_buy_price   ? Math.round(p.avg_buy_price).toLocaleString()+'원'+(p.buy_price_src==='est'?'(추정)':'')  : '-';
         const salesV = p.prev_sales_amt  ? Math.round(p.prev_sales_amt/10000).toLocaleString()+'만원' : '-';
         const safeCode = escHtml(p.product_code||'');
         const safeName = escHtml(p.product_name||p.product_code||'');

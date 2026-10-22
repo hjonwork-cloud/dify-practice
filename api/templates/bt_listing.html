@@ -80,7 +80,7 @@ function render(){
   const rows=VIEW.slice((PAGE-1)*SIZE,PAGE*SIZE);
   document.getElementById('tb').innerHTML=`<thead><tr><th>SKU</th><th>대분류</th><th class="num">수요/일</th><th class="num">평균 판매단가</th><th class="num">구매가</th>
     <th>배민상회 등록가 결정</th><th>오늘얼마 등록가 결정</th></tr></thead><tbody>`+
-    rows.map(r=>`<tr><td>${skuName(r)}</td><td class="muted">${esc(r.category||'')}</td><td class="num">${num(r.demand_daily,1)}</td><td class="num">${won(r.our_price)}</td><td class="num">${won(r.buy_price)}</td>
+    rows.map(r=>`<tr><td>${skuName(r)}</td><td class="muted">${esc(r.category||'')}</td><td class="num">${num(r.demand_daily,1)}</td><td class="num">${won(r.our_price)}</td><td class="num">${buyTxt(r)}</td>
       <td>${iCell(r,'baemin')}</td><td>${iCell(r,'todaysales')}</td></tr>`).join('')+
     (rows.length?'':'<tr><td colspan="7" class="muted">해당 없음</td></tr>')+'</tbody>';
   pager(document.getElementById('pg'),VIEW.length,SIZE,PAGE,p=>{PAGE=p;render();});

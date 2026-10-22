@@ -164,7 +164,7 @@ function rows(){const f=document.getElementById('fV').value;
 function drawTable(){
   const R=rows(), S=100, pages=Math.max(1,Math.ceil(R.length/S)); if(PAGE>pages)PAGE=1;
   document.getElementById('tb').innerHTML=R.slice((PAGE-1)*S,PAGE*S).map(r=>{const ch=r.p&&r.our_price?(r.p-r.our_price)/r.our_price*100:null;
-    return `<tr><td>${skuName(r)}</td><td class="num">${demHtml(r.demand_daily,r.demand_plants,3)}</td><td class="num">${won(r.buy_price)}</td><td class="num">${won(r.our_price)}</td>
+    return `<tr><td>${skuName(r)}</td><td class="num">${demHtml(r.demand_daily,r.demand_plants,3)}</td><td class="num">${buyTxt(r)}</td><td class="num">${won(r.our_price)}</td>
     <td>${pfBadge(r.bestPf)} ${esc(r.bestSeller)}<div class="num" style="text-align:left"><b>${won(isGross()?r.compList:r.best)}</b> <span class="muted">(${r.comps.length}곳)</span></div></td><td>${vBadge(r.v0)}</td>
     <td class="num"><input class="ovr ${r.ovr?'set':''}" data-c="${esc(r.product_code)}" value="${r.p??''}"></td><td class="num">${pct(ch)}</td><td>${vBadge(r.v1)}</td>
     <td class="num">${gpTxt(r.gpPct1)}</td><td class="num" title="${esc(pnlTip(r.p,r.buy_price,r.bestPf))}">${cmTxt(r.cmPct1)}</td><td class="num" title="${esc(pnlTip(r.p,r.buy_price,r.bestPf))}">${opTxt(r.opPct1)}</td>

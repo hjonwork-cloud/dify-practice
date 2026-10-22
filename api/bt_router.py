@@ -452,8 +452,11 @@ def _build_universe() -> dict:
 
     try:
         base = {str(r["product_code"]): r for r in (pm._get_base_prices("ALL") or [])}
+        # 구매가: 4121(3배치·22시 수발주 경로) DIPS 실단가 우선
+        base_bt = {str(r["product_code"]): r for r in (pm._get_base_prices("4121") or [])
+                   if r.get("buy_price_src") == "dips"}
     except Exception as e:
-        base = {}
+        base, base_bt = {}, {}
         warnings.append(f"평균 판매단가 조회 실패: {e}")
 
     by_code: dict[str, list[dict]] = defaultdict(list)
@@ -500,7 +503,13 @@ def _build_universe() -> dict:
         else:
             bp, price_src = {}, ""
         our = _f(bp.get("avg_sale_price"))
-        buy = _f(bp.get("avg_buy_price"))
+        bb = base_bt.get(code) or (base_bt.get(twin) if twin else None)
+        if bb:
+            buy, buy_src, buy_vendor = _f(bb.get("avg_buy_price")), "dips", bb.get("buy_vendor") or ""
+        else:
+            buy = _f(bp.get("avg_buy_price"))
+            buy_src = bp.get("buy_price_src") or ("est" if buy else "")
+            buy_vendor = bp.get("buy_vendor") or ""
         tax = s.get("tax_class") or "과세"
         vat = 1.1 if tax == "과세" else 1.0
         gp = round((our - buy) / our * 100, 1) if our and buy and our > 0 else None
@@ -569,6 +578,8 @@ def _build_universe() -> dict:
             "twin_name": s.get("twin_name") or "",
             "our_price": round(our, 1) if our else None,
             "buy_price": round(buy, 1) if buy else None,
+            "buy_src": buy_src if buy else "",
+            "buy_vendor": buy_vendor,
             "price_src": price_src,
             "gp_pct": gp,
             "demand_daily": demand_daily,
