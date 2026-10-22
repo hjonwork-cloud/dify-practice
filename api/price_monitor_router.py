@@ -203,6 +203,7 @@ def _dips_buy_sql(plants: list[str]) -> str:
     2) 공급플랜트가 있고 자기 자신이 아니면 그 플랜트로 이동(타창고상품, 최대 3단계)
     3) 최종 플랜트의 공급업체 = 구매 협력사
     4) DIPS: ①(구매플랜트·품목·협력사) → ②(타 플랜트·품목·협력사) → ③(구매플랜트·품목) 단일 협력사
+       → ④(품목 전체 계약) 단일 협력사 — 판매 플랜트에 수발주 행이 없어 경로가 끊긴 경우
     DIPS 계약은 거의 모든 플랜트에 복제되어 있어 플랜트만으로는 공급 관계를 알 수 없음."""
     import main as _main
     pl_in = ", ".join(repr(p) for p in plants)
@@ -281,17 +282,27 @@ def _dips_buy_sql(plants: list[str]) -> str:
                    MIN(vkey) OVER (PARTITION BY plant, code) v_min,
                    MAX(vkey) OVER (PARTITION BY plant, code) v_max
             FROM d) WHERE rn = 1 AND v_min = v_max
+    ),
+    d4 AS (
+        -- 판매 플랜트에 수발주 행이 없어 경로가 끊긴 경우: 품목 전체 계약이 단일 협력사면 그 계약
+        SELECT * FROM (
+            SELECT d.*, ROW_NUMBER() OVER (PARTITION BY code ORDER BY st DESC, rp) rn,
+                   MIN(vkey) OVER (PARTITION BY code) v_min,
+                   MAX(vkey) OVER (PARTITION BY code) v_max
+            FROM d) WHERE rn = 1 AND v_min = v_max
     )
-    SELECT ch.plant, ch.code, ch.fp AS buy_plant, ch.fv AS zsdr_vendor,
-           COALESCE(a.rp, b.rp, c.rp)          AS real_price,
+    SELECT ch.plant, ch.code, COALESCE(IF(a.rp IS NULL AND b.rp IS NULL AND c.rp IS NULL, e.plant, NULL), ch.fp) AS buy_plant,
+           ch.fv AS zsdr_vendor,
+           COALESCE(a.rp, b.rp, c.rp, e.rp)          AS real_price,
            CASE WHEN a.rp IS NOT NULL THEN 1 WHEN b.rp IS NOT NULL THEN 2
-                WHEN c.rp IS NOT NULL THEN 3 END AS match_lv,
-           COALESCE(a.vname, b.vname, c.vname) AS vendor_name,
-           COALESCE(a.cno, b.cno, c.cno)       AS contract_no
+                WHEN c.rp IS NOT NULL THEN 3 WHEN e.rp IS NOT NULL THEN 4 END AS match_lv,
+           COALESCE(a.vname, b.vname, c.vname, e.vname) AS vendor_name,
+           COALESCE(a.cno, b.cno, c.cno, e.cno)       AS contract_no
     FROM ch
     LEFT JOIN d1 a ON ch.fv <> '' AND a.plant = ch.fp AND a.code = ch.code AND a.vkey = ch.fv
     LEFT JOIN d2 b ON ch.fv <> '' AND b.code = ch.code AND b.vkey = ch.fv
     LEFT JOIN d3 c ON c.plant = ch.fp AND c.code = ch.code
+    LEFT JOIN d4 e ON e.code = ch.code
     """
 
 
@@ -466,8 +477,8 @@ def _rebuild_base_prices() -> dict[str, list[dict]] | None:
         # DIPS 실패 시 추정치만 담긴 결과는 10분 후 만료되도록 타임스탬프를 앞당김
         ts = now if dips_ok else now - _CACHE_TTL_DISK + 600
         for p, rows in built.items():
-            _price_cache[f"base_prices_v4_{p}"] = (max(ts, now - _CACHE_TTL + 60), rows)
-            _disk_set(f"base_prices_v4_{p}", ts, rows)
+            _price_cache[f"base_prices_v5_{p}"] = (max(ts, now - _CACHE_TTL + 60), rows)
+            _disk_set(f"base_prices_v5_{p}", ts, rows)
         return built
     except Exception as e:
         logger.warning(f"[price_monitor] base_prices 일괄 생성 실패: {e}")
@@ -478,7 +489,7 @@ def _rebuild_base_prices() -> dict[str, list[dict]] | None:
 
 def _get_base_prices(plant: str) -> list[dict]:
     """최근 2주 기준가(매출액/매출수량) + 구매가(DIPS 실단가, 없으면 매출원가/매출수량 추정)"""
-    cache_key = f"base_prices_v4_{plant}"
+    cache_key = f"base_prices_v5_{plant}"
     # 1) 메모리 캐시
     if cache_key in _price_cache:
         ts, data = _price_cache[cache_key]
