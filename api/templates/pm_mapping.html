@@ -141,7 +141,7 @@ function renderOurResults(data){
   if(!data.length){el.innerHTML='<div style="text-align:center;padding:2rem;color:#94a3b8;font-size:.84rem;">검색 결과 없음</div>';return;}
   el.innerHTML=data.slice(0,50).map(p=>{
     const saleV  = p.avg_sale_price ? Math.round(p.avg_sale_price).toLocaleString()+'원' : '-';
-    const buyV   = p.avg_buy_price  ? Math.round(p.avg_buy_price).toLocaleString()+'원'+(p.buy_price_src==='est'?'(추정)':'')  : '-';
+    const buyV   = p.avg_buy_price  ? Math.round(p.avg_buy_price).toLocaleString()+'원'+({est:'(추정)',transfer:'(이체가)',std:'(표준가)'}[p.buy_price_src]||'')  : '-';
     const salesV = p.prev_sales_amt > 0 ? Math.round(p.prev_sales_amt/10000).toLocaleString()+'만원' : '-';
     return `<div class="result-item${selectedOur&&selectedOur.product_code===p.product_code?' selected-our':''}"
          data-code="${p.product_code}"
@@ -161,7 +161,7 @@ function selectOur(p){
   document.getElementById('ourSelectedInfo').style.display='block';
   document.getElementById('ourSelectedName').textContent=`📦 ${p.product_code} ${p.product_name||''}`;
   const saleV  = p.avg_sale_price ? Math.round(p.avg_sale_price).toLocaleString()+'원' : '-';
-  const buyV   = p.avg_buy_price  ? Math.round(p.avg_buy_price).toLocaleString()+'원'+(p.buy_price_src==='est'?'(추정)':'')  : '-';
+  const buyV   = p.avg_buy_price  ? Math.round(p.avg_buy_price).toLocaleString()+'원'+({est:'(추정)',transfer:'(이체가)',std:'(표준가)'}[p.buy_price_src]||'')  : '-';
   const salesV = p.prev_sales_amt > 0 ? Math.round(p.prev_sales_amt/10000).toLocaleString()+'만원' : '-';
   document.getElementById('ourSelectedMeta').innerHTML=`평균판매가(공급가) <b>${saleV}</b> · 구매가 <b>${buyV}</b> · 전월매출 <b>${salesV}</b> · ${PLANT} 플랜트`;
   document.getElementById('ourSelectedBadge').textContent=p.product_code;

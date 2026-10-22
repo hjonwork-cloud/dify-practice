@@ -452,9 +452,9 @@ def _build_universe() -> dict:
 
     try:
         base = {str(r["product_code"]): r for r in (pm._get_base_prices("ALL") or [])}
-        # 구매가: 4121(3배치·22시 수발주 경로) DIPS 실단가 우선
+        # 구매가: 4121(3배치·22시 수발주 경로) DIPS 실단가·이체가·표준가 우선
         base_bt = {str(r["product_code"]): r for r in (pm._get_base_prices("4121") or [])
-                   if r.get("buy_price_src") == "dips"}
+                   if r.get("buy_price_src") not in (None, "", "est")}
     except Exception as e:
         base, base_bt = {}, {}
         warnings.append(f"평균 판매단가 조회 실패: {e}")
@@ -505,7 +505,7 @@ def _build_universe() -> dict:
         our = _f(bp.get("avg_sale_price"))
         bb = base_bt.get(code) or (base_bt.get(twin) if twin else None)
         if bb:
-            buy, buy_src, buy_vendor = _f(bb.get("avg_buy_price")), "dips", bb.get("buy_vendor") or ""
+            buy, buy_src, buy_vendor = _f(bb.get("avg_buy_price")), bb.get("buy_price_src"), bb.get("buy_vendor") or ""
         else:
             buy = _f(bp.get("avg_buy_price"))
             buy_src = bp.get("buy_price_src") or ("est" if buy else "")

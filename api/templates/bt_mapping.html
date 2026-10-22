@@ -60,7 +60,7 @@ async function searchOur(){
   const j=await btGet(`/api/our-skus?keyword=${encodeURIComponent(kw)}&unmapped_pf=${un}&status=${st}&limit=150`); renderMeta(j);
   document.getElementById('oList').innerHTML=j.rows.map(r=>`<div class="it ${SKU&&SKU.product_code===r.product_code?'sel':''}" data-c="${esc(r.product_code)}">
     ${stBadge(r.status)} ${skuName(r)}
-    <div style="display:flex;gap:.8rem;margin-top:.25rem;flex-wrap:wrap"><span>평균판매단가 ${won(r.our_price)}</span><span>구매 ${won(r.buy_price)}${r.buy_src==='est'?' (추정)':''}</span><span>GP ${gpTxt(r.gp_pct)}</span>
+    <div style="display:flex;gap:.8rem;margin-top:.25rem;flex-wrap:wrap"><span>평균판매단가 ${won(r.our_price)}</span><span>구매 ${won(r.buy_price)}${BUY_SRC[r.buy_src]?' ('+BUY_SRC[r.buy_src][0]+')':''}</span><span>GP ${gpTxt(r.gp_pct)}</span>
     <span>매핑 배민 ${r.map_cnt.baemin} · 오늘 ${r.map_cnt.todaysales} · 식봄 ${r.map_cnt.foodspring}</span></div>
     ${demHtml(r.demand_daily,r.demand_plants,5)}</div>`).join('')||'<div class="bt-loading">결과 없음</div>';
   document.querySelectorAll('#oList .it').forEach(el=>el.onclick=()=>pick(j.rows.find(r=>r.product_code===el.dataset.c)));

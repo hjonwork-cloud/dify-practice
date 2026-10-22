@@ -89,7 +89,8 @@ function curOut(e){return e.cur_present===0?' <span class="chip" style="backgrou
 
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function won(v){return (v===null||v===undefined||isNaN(v))?'-':Math.round(v).toLocaleString();}
-function buyTxt(r){if(!r||r.buy_price==null)return '-';return won(r.buy_price)+(r.buy_src==='est'?'<div class="twin" style="color:#b45309" title="DIPS 실단가 없음 → 최근 2주 매출원가÷매출수량 추정">추정</div>':'');}
+const BUY_SRC={est:['추정','#b45309','DIPS·이체가·표준가 없음 → 최근 2주 매출원가÷매출수량 추정'],transfer:['이체가','#0e7490','DIPS 실단가 없음 → 이체가(제조품)'],std:['표준가','#6d28d9','DIPS·이체가 없음 → 자재마스터 표준가격']};
+function buyTxt(r){if(!r||r.buy_price==null)return '-';const s=BUY_SRC[r.buy_src];return won(r.buy_price)+(s?`<div class="twin" style="color:${s[1]}" title="${s[2]}">${s[0]}</div>`:'');}
 function num(v,d=1){return (v===null||v===undefined||isNaN(v))?'-':Number(v).toLocaleString(undefined,{minimumFractionDigits:d,maximumFractionDigits:d});}
 function pct(v,d=1){return (v===null||v===undefined||isNaN(v))?'-':(v>0?'+':'')+Number(v).toFixed(d)+'%';}
 function man(v){return (v===null||v===undefined||isNaN(v))?'-':(v/10000).toLocaleString(undefined,{maximumFractionDigits:1})+'만';}
