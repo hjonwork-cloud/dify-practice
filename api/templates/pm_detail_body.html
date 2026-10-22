@@ -107,9 +107,9 @@
         <div class="kpi-val" style="color:#1d4ed8;">{% if our_sale %}{{ '{:,.0f}'.format(our_sale) }}원{% else %}—{% endif %}</div>
       </div>
       <div class="hkc-cell">
-{% set _bsrc = {'dips': 'DIPS 실단가', 'transfer': '이체가', 'std': '표준가'} %}
+{% set _bsrc = {'dips': 'DIPS 실단가', 'transfer': '이체가', 'std': '표준가', 'mavg': '이동평균가'} %}
         <div class="kpi-label">구매단가 ({{ _bsrc.get(price_info.buy_price_src, '추정') }}/VAT제외)</div>
-        <div class="kpi-val" style="color:#1e293b;" title="{% if price_info.buy_price_src == 'dips' %}협력사 {{ price_info.buy_vendor or '-' }}{% if price_info.buy_plant %} · 구매플랜트 {{ price_info.buy_plant }}{% endif %}{% if price_info.buy_contract %} · 계약 {{ price_info.buy_contract }}{% endif %}{% elif price_info.buy_price_src == 'transfer' %}이체가 · 공급 {{ price_info.buy_vendor or '-' }}{% elif price_info.buy_price_src == 'std' %}자재마스터 표준가격(÷가격단위×100){% else %}DIPS·이체가·표준가 없음 → 최근 2주 매출원가÷매출수량{% endif %}">{% if our_buy %}{{ '{:,.0f}'.format(our_buy) }}원{% else %}—{% endif %}</div>
+        <div class="kpi-val" style="color:#1e293b;" title="{% if price_info.buy_price_src == 'dips' %}협력사 {{ price_info.buy_vendor or '-' }}{% if price_info.buy_plant %} · 구매플랜트 {{ price_info.buy_plant }}{% endif %}{% if price_info.buy_contract %} · 계약 {{ price_info.buy_contract }}{% endif %}{% elif price_info.buy_price_src == 'transfer' %}이체가 · 공급 {{ price_info.buy_vendor or '-' }}{% elif price_info.buy_price_src == 'std' %}자재마스터 표준가격(÷가격단위×100){% elif price_info.buy_price_src == 'mavg' %}플랜트 자재마스터 이동평균가(÷가격단위×100){% if price_info.buy_vendor %} · {{ price_info.buy_vendor }}{% endif %}{% else %}DIPS·이체가·표준가·이동평균가 없음 → 최근 2주 매출원가÷매출수량{% endif %}">{% if our_buy %}{{ '{:,.0f}'.format(our_buy) }}원{% else %}—{% endif %}</div>
       </div>
       <!-- 2행 -->
       <div class="hkc-cell">

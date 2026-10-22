@@ -190,7 +190,8 @@ _CACHE_TTL_DISK   = 7200    # 디스크 TTL: 2시간
 T_DIPS = "h_hmfo_fsi.gd_prc.dips_unit_price_status_by_item_d"
 T_TRANSFER = "h_hmfo_fsi_dm.gd_rst_ing.pm_transfer_price"   # 이체가 (upload_transfer_price.py로 엑셀 업로드)
 T_MAT_ALL = "h_hmfo_fsi.gd_fsi_ent.sap_zmm60_materials_master_d"  # 표준가격·가격단위
-BUY_SRC_LABEL = {"dips": "DIPS 실단가", "transfer": "이체가", "std": "표준가", "est": "추정"}
+T_MAT_PLANT = "h_hmfo_fsi.gd_fsi_ent.sap_zmm60_plant_materials_master_d"  # 플랜트별 이동평균가
+BUY_SRC_LABEL = {"dips": "DIPS 실단가", "transfer": "이체가", "std": "표준가", "mavg": "이동평균가", "est": "추정"}
 _W2_SALES = ("CAST(`년월` AS INT) >= YEAR(DATE_SUB(CURRENT_DATE(), 14)) * 100 "
              "+ MONTH(DATE_SUB(CURRENT_DATE(), 14))")
 _base_build_lock = threading.Lock()
@@ -300,8 +301,9 @@ def _build_base_prices() -> tuple[dict[str, list[dict]], bool]:
     avg_buy_price : ① DIPS 실단가(수발주 공급 경로 매칭)
                     ② 이체가(pm_transfer_price, 제조품 등 DIPS 미등록)
                     ③ 자재마스터 표준가격 ÷ 가격단위 × 100 (97750.00 / 1000 → 9,775원)
-                    ④ 매출원가/매출수량 추정
-    ALL 구매가     : 판매 플랜트별 구매가(①~③) 단순평균 (하나도 없으면 전체 추정)"""
+                    ④ 플랜트별 자재마스터 이동평균가 ÷ 가격단위 × 100 (판매 플랜트 → 전체 플랜트 중앙값)
+                    ⑤ 매출원가/매출수량 추정
+    ALL 구매가     : 판매 플랜트별 구매가(①~④) 단순평균 (하나도 없으면 전체 추정)"""
     import main as _main
     pl_in = ", ".join(repr(p) for p in PLANTS_REAL)
     sales = _q(f"""
@@ -330,6 +332,8 @@ def _build_base_prices() -> tuple[dict[str, list[dict]], bool]:
                    and str(s["product_code"]).isalnum()})
     transfer: dict[str, dict] = {}
     std: dict[str, float] = {}
+    mavg: dict[tuple[str, str], float] = {}
+    rest: list[str] = []
     if need:
         in_codes = ", ".join(f"'{c}'" for c in need)
         try:
@@ -361,6 +365,27 @@ def _build_base_prices() -> tuple[dict[str, list[dict]], bool]:
                         std[str(r["code"])] = float(r["price"])
             except Exception as e:
                 logger.warning(f"[price_monitor] 표준가격 조회 실패: {e}")
+        # ④ 이동평균가 (플랜트별 자재마스터): 판매 플랜트 값 → 없으면 전체 플랜트 중앙값
+        rest2 = [c for c in rest if c not in std] if rest else []
+        if rest2:
+            try:
+                vals: dict[str, list[float]] = {}
+                for r in _q(f"""
+                    SELECT CAST(`플랜트` AS STRING) AS plant, `상품코드` AS code,
+                           CAST(`이동평균가` AS DOUBLE) / NULLIF(CAST(`가격단위` AS DOUBLE), 0) * 100 AS price
+                    FROM {T_MAT_PLANT}
+                    WHERE `상품코드` IN ({', '.join(repr(c) for c in rest2)}) AND `이동평균가` > 0
+                """) or []:
+                    if r.get("price"):
+                        c, v = str(r["code"]), float(r["price"])
+                        mavg[(str(r["plant"]), c)] = v
+                        vals.setdefault(c, []).append(v)
+                for c, lst in vals.items():
+                    lst.sort()
+                    n = len(lst)
+                    mavg[("*", c)] = lst[n // 2] if n % 2 else (lst[n // 2 - 1] + lst[n // 2]) / 2
+            except Exception as e:
+                logger.warning(f"[price_monitor] 이동평균가 조회 실패: {e}")
 
     def _r(v):
         return round(float(v), 2) if v is not None else None
@@ -383,6 +408,9 @@ def _build_base_prices() -> tuple[dict[str, list[dict]], bool]:
             vendor = " ".join(x for x in (t.get("src_area"), t.get("src_cust")) if x)
         elif c in std:
             buy, src, vendor = _r(std[c]), "std", ""
+        elif (p, c) in mavg or ("*", c) in mavg:
+            buy, src = _r(mavg.get((p, c)) or mavg[("*", c)]), "mavg"
+            vendor = "" if (p, c) in mavg else "타 플랜트 중앙값"
         else:
             buy, src, vendor = est, "est", ""
         row = {
@@ -411,7 +439,7 @@ def _build_base_prices() -> tuple[dict[str, list[dict]], bool]:
     for c, a in agg.items():
         est = _r(a["cost"] / a["qty"] * 100)
         real = a["real"]
-        src = next((x for x in ("dips", "transfer", "std") if x in a["srcs"]), "est")
+        src = next((x for x in ("dips", "transfer", "std", "mavg") if x in a["srcs"]), "est")
         all_rows.append({
             "product_code":   c,
             "avg_sale_price": _r(a["amt"] / a["qty"] * 100),
@@ -438,8 +466,8 @@ def _rebuild_base_prices() -> dict[str, list[dict]] | None:
         # DIPS 실패 시 추정치만 담긴 결과는 10분 후 만료되도록 타임스탬프를 앞당김
         ts = now if dips_ok else now - _CACHE_TTL_DISK + 600
         for p, rows in built.items():
-            _price_cache[f"base_prices_v3_{p}"] = (max(ts, now - _CACHE_TTL + 60), rows)
-            _disk_set(f"base_prices_v3_{p}", ts, rows)
+            _price_cache[f"base_prices_v4_{p}"] = (max(ts, now - _CACHE_TTL + 60), rows)
+            _disk_set(f"base_prices_v4_{p}", ts, rows)
         return built
     except Exception as e:
         logger.warning(f"[price_monitor] base_prices 일괄 생성 실패: {e}")
@@ -450,7 +478,7 @@ def _rebuild_base_prices() -> dict[str, list[dict]] | None:
 
 def _get_base_prices(plant: str) -> list[dict]:
     """최근 2주 기준가(매출액/매출수량) + 구매가(DIPS 실단가, 없으면 매출원가/매출수량 추정)"""
-    cache_key = f"base_prices_v3_{plant}"
+    cache_key = f"base_prices_v4_{plant}"
     # 1) 메모리 캐시
     if cache_key in _price_cache:
         ts, data = _price_cache[cache_key]

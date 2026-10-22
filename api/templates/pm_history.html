@@ -35,7 +35,7 @@
       </div>
     </div>
     <div>
-      <div style="font-size:.75rem;color:#94a3b8;font-weight:600;text-transform:uppercase;letter-spacing:.04em;">구매단가 ({{ {'dips': 'DIPS 실단가', 'transfer': '이체가', 'std': '표준가'}.get(price_info.buy_price_src, '추정·2주 평균') }})</div>
+      <div style="font-size:.75rem;color:#94a3b8;font-weight:600;text-transform:uppercase;letter-spacing:.04em;">구매단가 ({{ {'dips': 'DIPS 실단가', 'transfer': '이체가', 'std': '표준가', 'mavg': '이동평균가'}.get(price_info.buy_price_src, '추정·2주 평균') }})</div>
       <div style="font-size:1.3rem;font-weight:800;color:#475569;">
         {% if price_info.avg_buy_price %}{{ '{:,.0f}'.format(price_info.avg_buy_price) }}원{% else %}-{% endif %}
       </div>
