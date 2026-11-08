@@ -4166,15 +4166,27 @@ def _save_blacklist(bl: list):
     _atomic_save(_BLACKLIST_FILE, bl)
 
 
+# 사업부 관리직(사업부장 등)은 매출 DB의 `부서명`(예: 외식3팀)이 실제 직책과 달라
+# 조직 조회 결과가 우선 적용되면 잘못 표시된다. 이 사번들은 오버라이드 JSON 보다도 우선해 고정한다.
+_PINNED_TEAMS: dict[str, str] = {
+    "20191191": "외식식재사업부",  # 박상천 사업부장
+    "20115029": "외식식재사업부",  # 강동민
+}
+
+
 def _load_team_overrides() -> dict:
-    """관리자가 수정한 조직원 소속 오버라이드. {emp_code: team}"""
+    """관리자가 수정한 조직원 소속 오버라이드. {emp_code: team}
+    _PINNED_TEAMS(사업부 관리직)는 JSON 값보다 우선 적용한다."""
+    data: dict = {}
     if os.path.exists(_TEAM_OVERRIDE_FILE):
         try:
             with open(_TEAM_OVERRIDE_FILE, "r", encoding="utf-8") as f:
-                return json_mod.load(f)
+                loaded = json_mod.load(f)
+            if isinstance(loaded, dict):
+                data = loaded
         except (OSError, ValueError):
-            return {}
-    return {}
+            data = {}
+    return {**data, **_PINNED_TEAMS}
 
 
 def _save_team_overrides(ov: dict):
