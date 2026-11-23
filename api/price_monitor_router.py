@@ -722,7 +722,7 @@ def _get_plat_rows(platform: str, seller_name: str) -> list[dict]:
         raise
 
 T_ZSDR  = "h_hmfo_fsi.gd_fsi_ent.sap_zsdr0017_order_linkage_status_d"
-T_ZMM60 = "h_hmfo_fsi.gd_fsi_ent.sap_zmm60_material_master_d"
+T_ZMM60 = "h_hmfo_fsi.gd_fsi_ent.sap_zmm60_materials_master_d"  # 2026-11: 테이블명 변경(material→materials), 구 이름은 TABLE_OR_VIEW_NOT_FOUND
 T_SILVER = "h_hmfo_fsi_dm.gd_rst_ing.dim_platform_products"
 
 
@@ -1040,11 +1040,16 @@ def pm_dashboard(
         for p in _our_products_cache
     }
 
+    _name_miss: set[str] = set()   # 조회 실패/없음 코드는 요청 내 재조회 금지 (행마다 쿼리 → 504 방지)
+
     def _resolve_name(p_code: str) -> str:
         """our_name_map 미스 시 T_ZMM60 직접 조회 (해당 플랜트가 아닌 상품 대응)"""
         name = our_name_map.get(p_code)
         if name and name != p_code:
             return name
+        if p_code in _name_miss:
+            return p_code
+        _name_miss.add(p_code)
         try:
             rows_fb = _q(f"SELECT MAX(`상품명`) AS nm FROM {T_ZMM60} WHERE `상품코드` = '{p_code}'")
             nm = rows_fb[0]["nm"] if rows_fb else None
