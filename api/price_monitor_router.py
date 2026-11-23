@@ -1009,7 +1009,7 @@ def _gp_status(gp: float | None) -> str:
 # ── 화면 1: 가격 비교 대시보드 ─────────────────────────────────────────────
 
 @router.get("/", response_class=HTMLResponse)
-async def pm_dashboard(
+def pm_dashboard(
     request: Request,
     plant: str = "ALL",
     platform: str = "",
@@ -1164,7 +1164,7 @@ async def pm_dashboard(
 # ── 화면 2: 운영상품 목록 & 매핑 현황 ─────────────────────────────────────
 
 @router.get("/products", response_class=HTMLResponse)
-async def pm_products(
+def pm_products(
     request: Request,
     plant: str = "ALL",
     keyword: str = "",
@@ -1263,7 +1263,7 @@ async def pm_products(
 # ── 화면 3: 매핑 등록 ───────────────────────────────────────────────────────
 
 @router.get("/mapping", response_class=HTMLResponse)
-async def pm_mapping_page(request: Request, plant: str = "ALL"):
+def pm_mapping_page(request: Request, plant: str = "ALL"):
     _require_pm_access(request)
     if plant not in PLANTS:
         plant = "ALL"
@@ -1273,7 +1273,7 @@ async def pm_mapping_page(request: Request, plant: str = "ALL"):
 # ── API: 진단 공개용 (인증 없음, 임시) ────────────────────────────────────
 
 @router.get("/api/debug-pub")
-async def api_debug_pub(request: Request):
+def api_debug_pub(request: Request):
     """인증 없이 테이블 컬럼 확인용 임시 엔드포인트"""
     result = {}
     try:
@@ -1401,7 +1401,7 @@ async def api_debug_pub(request: Request):
 # ── API: 진단 (데이터소스 연결 확인) ─────────────────────────────────────
 
 @router.get("/api/debug")
-async def api_debug(request: Request):
+def api_debug(request: Request):
     _require_pm_access(request)
     result = {}
 
@@ -1439,7 +1439,7 @@ async def api_debug(request: Request):
 # ── API: 우리 상품 검색 (AJAX) ────────────────────────────────────────────
 
 @router.get("/api/our-products")
-async def api_our_products(request: Request, plant: str = "ALL", keyword: str = ""):
+def api_our_products(request: Request, plant: str = "ALL", keyword: str = ""):
     _require_pm_access(request)
     try:
         error_msg = None
@@ -1516,7 +1516,7 @@ async def api_our_products(request: Request, plant: str = "ALL", keyword: str = 
 # ── API: 플랫폼 상품 검색 (AJAX) ─────────────────────────────────────────
 
 @router.get("/api/platform-products")
-async def api_platform_products(
+def api_platform_products(
     request: Request,
     keyword: str = "",
     platform: str = "",
@@ -1591,7 +1591,7 @@ async def api_mapping_add(request: Request):
 # ── API: 매핑 목록 조회 (AJAX) ────────────────────────────────────────────
 
 @router.get("/api/mapping/{our_product_code}")
-async def api_mapping_list(request: Request, our_product_code: str, plant: str = "ALL"):
+def api_mapping_list(request: Request, our_product_code: str, plant: str = "ALL"):
     _require_pm_access(request)
     rows = portal_db.pm_list_mappings(our_product_code, plant)
     return JSONResponse(rows)
@@ -1613,7 +1613,7 @@ async def api_mapping_remove(request: Request):
 # ── 화면 4: 가격 이력 ──────────────────────────────────────────────────────
 
 @router.get("/history/{product_code}", response_class=HTMLResponse)
-async def pm_history(
+def pm_history(
     request: Request,
     product_code: str,
     plant: str = "ALL",
@@ -1678,7 +1678,7 @@ async def pm_history(
 # ── 화면 4-2: 상품 상세 (와이어프레임) ────────────────────────────────────
 
 @router.get("/detail/{product_code}", response_class=HTMLResponse)
-async def pm_detail(
+def pm_detail(
     request: Request,
     product_code: str,
     plant: str = "ALL",
@@ -1934,7 +1934,7 @@ def _build_pm_detail_ctx(product_code: str, plant: str) -> dict:
 
 
 @router.get("/gp-lookup/detail-embed/{product_code}", response_class=HTMLResponse)
-async def pm_gp_lookup_detail_embed(
+def pm_gp_lookup_detail_embed(
     request: Request,
     product_code: str,
     plant: str = "ALL",
@@ -1954,7 +1954,7 @@ async def pm_gp_lookup_detail_embed(
 # 요약된 형태로 확인할 수 있는 전체 계정 공용 화면.
 
 @router.get("/gp-lookup", response_class=HTMLResponse)
-async def pm_gp_lookup_page(request: Request, plant: str = "ALL"):
+def pm_gp_lookup_page(request: Request, plant: str = "ALL"):
     _require_login(request)
     if plant not in PLANTS:
         plant = "ALL"
@@ -1962,7 +1962,7 @@ async def pm_gp_lookup_page(request: Request, plant: str = "ALL"):
 
 
 @router.get("/api/gp-lookup/search")
-async def api_gp_lookup_search(request: Request, keyword: str = "", plant: str = "ALL"):
+def api_gp_lookup_search(request: Request, keyword: str = "", plant: str = "ALL"):
     """상품코드/상품명으로 검색 → 전월 매출액 기준 내림차순 목록 (최대 50건).
     외부상품과 매핑된 우리 상품코드만 조회 대상 (미매핑 상품 제외)."""
     _require_login(request)
@@ -2003,7 +2003,7 @@ async def api_gp_lookup_search(request: Request, keyword: str = "", plant: str =
 
 
 @router.get("/api/gp-lookup/detail/{product_code}")
-async def api_gp_lookup_detail(request: Request, product_code: str, plant: str = "ALL"):
+def api_gp_lookup_detail(request: Request, product_code: str, plant: str = "ALL"):
     """상품 1건에 대한 가격/GP 요약 데이터 (JSON).
     pm_detail 화면 계산 로직을 재사용해 요약형으로 반환."""
     _require_login(request)
@@ -2168,7 +2168,7 @@ async def api_gp_lookup_detail(request: Request, product_code: str, plant: str =
 
 
 @router.get("/api/gp-lookup/platform-search")
-async def api_gp_lookup_platform_search(request: Request, keyword: str = ""):
+def api_gp_lookup_platform_search(request: Request, keyword: str = ""):
     """외부상품 단순 조회 (전체 계정 공용).
     매핑/선택 기능 없이 플랫폼/상품명/판매가/실판매가(수수료차감)/셀러만 조회.
     '*키워드*' 형태 와일드카드 검색 지원."""
@@ -2215,7 +2215,7 @@ async def api_gp_lookup_platform_search(request: Request, keyword: str = ""):
 # ── 화면 5: 매핑 수정요청 (DELETE/REPLACE) ────────────────────────────────
 
 @router.get("/change-request/{product_code}", response_class=HTMLResponse)
-async def pm_change_request_page(
+def pm_change_request_page(
     request: Request,
     product_code: str,
     plant: str = "ALL",
@@ -2267,7 +2267,7 @@ async def api_change_request_submit(request: Request):
 # ── 화면 6: 관리자 수정요청 목록 ─────────────────────────────────────────
 
 @router.get("/admin/requests", response_class=HTMLResponse)
-async def pm_admin_requests(
+def pm_admin_requests(
     request: Request,
     status: str = "PENDING",
 ):
@@ -2345,7 +2345,7 @@ async def api_admin_review_bulk(request: Request):
 # ── 화면 7: 관리자 셀러 설정 ─────────────────────────────────────────────
 
 @router.get("/admin/sellers", response_class=HTMLResponse)
-async def pm_admin_sellers(request: Request):
+def pm_admin_sellers(request: Request):
     _require_pm_access(request)
     sellers = portal_db.pm_list_baemin_sellers()
     return _render(request, "pm_admin_sellers.html", sellers=sellers)
@@ -2374,7 +2374,7 @@ def _check_scheduler_auth(request: Request):
 
 
 @router.get("/api/scheduler/status")
-async def api_scheduler_status(request: Request):
+def api_scheduler_status(request: Request):
     _check_scheduler_auth(request)
     try:
         import crawl_scheduler
@@ -2384,7 +2384,7 @@ async def api_scheduler_status(request: Request):
 
 
 @router.post("/api/scheduler/run-now")
-async def api_scheduler_run_now(request: Request):
+def api_scheduler_run_now(request: Request):
     """즉시 크롤링 실행 (테스트/수동 재수집용)"""
     _check_scheduler_auth(request)
     import threading, crawl_scheduler
@@ -2396,7 +2396,7 @@ async def api_scheduler_run_now(request: Request):
 # ── 화면 6: 플랫폼 경쟁분석 ────────────────────────────────────────────────
 
 @router.get("/competition", response_class=HTMLResponse)
-async def pm_competition(request: Request, plant: str = "ALL"):
+def pm_competition(request: Request, plant: str = "ALL"):
     """셀러별 매핑 상품 경쟁가격 비교 화면."""
     _require_pm_access(request)
     if plant not in PLANTS:
@@ -2406,7 +2406,7 @@ async def pm_competition(request: Request, plant: str = "ALL"):
 
 
 @router.get("/api/competition")
-async def api_competition(request: Request, plant: str = "ALL"):
+def api_competition(request: Request, plant: str = "ALL"):
     """플랫폼 경쟁분석 JSON API.
 
     반환:
@@ -2596,7 +2596,7 @@ async def api_competition(request: Request, plant: str = "ALL"):
 # ── 화면 7: 실전 경쟁 시뮬레이션 ──────────────────────────────────────────
 
 @router.get("/simulation", response_class=HTMLResponse)
-async def pm_simulation(
+def pm_simulation(
     request: Request,
     platform: str = "",
     seller_name: str = "",
@@ -2616,7 +2616,7 @@ async def pm_simulation(
 
 
 @router.get("/api/simulation")
-async def api_simulation(
+def api_simulation(
     request: Request,
     platform: str = "",
     seller_name: str = "",
@@ -2836,7 +2836,7 @@ async def api_simulation(
 
 
 @router.get("/api/simulation/seller-skus")
-async def api_simulation_seller_skus(
+def api_simulation_seller_skus(
     request: Request,
     platform: str = "",
     seller_name: str = "",
@@ -2927,7 +2927,7 @@ async def api_simulation_seller_skus(
 
 
 @router.get("/api/debug/baemin")
-async def api_debug_baemin(request: Request):
+def api_debug_baemin(request: Request):
     """Azure 서버에서 배민 API 직접 호출 테스트."""
     _check_scheduler_auth(request)
     import requests as _req
@@ -2974,7 +2974,7 @@ async def api_debug_baemin(request: Request):
 # ── API: T_SILVER 기준 셀러 목록 (워크스페이스용) ────────────────────────────
 
 @router.get("/api/sellers-from-silver")
-async def api_sellers_from_silver(request: Request, platform: str = ""):
+def api_sellers_from_silver(request: Request, platform: str = ""):
     """실제 크롤링된 모든 셀러 목록 (T_SILVER 기준).
     platform 없으면 실제 platform 목록 반환.
     """
@@ -3040,7 +3040,7 @@ async def api_sellers_from_silver(request: Request, platform: str = ""):
 # ── 화면 8: 매핑 워크스페이스 ────────────────────────────────────────────────
 
 @router.get("/mapping-workspace", response_class=HTMLResponse)
-async def pm_mapping_workspace(
+def pm_mapping_workspace(
     request: Request,
     platform: str = "",
     seller_name: str = "",
@@ -3490,7 +3490,7 @@ def _build_pattern_map(all_mappings, our_products):
 # ── API: AI 매핑 제안 ─────────────────────────────────────────────────────
 
 @router.get("/api/pm-ai/debug")
-async def api_mapping_ai_debug(
+def api_mapping_ai_debug(
     request: Request,
     platform: str = "",
     seller_name: str = "",
@@ -3583,7 +3583,7 @@ async def api_mapping_ai_debug(
 
 # ── AI 매핑 잡 폴링 엔드포인트 ────────────────────────────────────────────────
 @router.get("/api/pm-ai/suggest/poll/{job_id}")
-async def api_suggest_poll(request: Request, job_id: str):
+def api_suggest_poll(request: Request, job_id: str):
     _require_pm_access(request)
     job = _job_store.get(job_id)
     if job is None:
@@ -3656,14 +3656,14 @@ async def api_feedback_save(request: Request):
 
 
 @router.get("/api/pm-ai/feedback")
-async def api_feedback_list(request: Request):
+def api_feedback_list(request: Request):
     """저장된 피드백 목록 조회."""
     _require_pm_access(request)
     return JSONResponse({"data": list(_feedback_cache.values()), "total": len(_feedback_cache)})
 
 
 @router.delete("/api/pm-ai/feedback/{product_key}")
-async def api_feedback_delete(request: Request, product_key: str):
+def api_feedback_delete(request: Request, product_key: str):
     """특정 피드백 삭제."""
     _require_pm_access(request)
     removed = _feedback_cache.pop(product_key, None)
@@ -3679,7 +3679,7 @@ _warmup_store: dict = {}  # warmup_id → {status, error}
 
 
 @router.get("/api/pm-ai/warmup")
-async def api_warmup_start(request: Request):
+def api_warmup_start(request: Request):
     """Databricks 웨어하우스 웜업 시작. 즉시 warmup_id 반환 → /warmup/poll/{id}로 폴링."""
     _require_pm_access(request)
     import uuid as _uuid
@@ -3724,7 +3724,7 @@ async def api_warmup_start(request: Request):
 
 
 @router.get("/api/pm-ai/warmup/poll/{warmup_id}")
-async def api_warmup_poll(request: Request, warmup_id: str):
+def api_warmup_poll(request: Request, warmup_id: str):
     _require_pm_access(request)
     job = _warmup_store.get(warmup_id)
     if job is None:
@@ -3733,7 +3733,7 @@ async def api_warmup_poll(request: Request, warmup_id: str):
 
 
 @router.get("/api/pm-ai/suggest")
-async def api_mapping_ai_suggest(
+def api_mapping_ai_suggest(
     request: Request,
     platform: str = "",
     seller_name: str = "",
@@ -4116,7 +4116,7 @@ def _confidence_label(score: float) -> str:
 
 
 @router.get("/ai-demo", response_class=HTMLResponse)
-async def pm_ai_demo_page(request: Request):
+def pm_ai_demo_page(request: Request):
     _require_login(request)
     return _render(request, "pm_ai_demo.html")
 
@@ -4229,14 +4229,14 @@ async def api_ai_demo_feedback_save(request: Request):
 
 
 @router.get("/admin/ai-demo-feedback", response_class=HTMLResponse)
-async def pm_admin_ai_demo_feedback_page(request: Request):
+def pm_admin_ai_demo_feedback_page(request: Request):
     """AI 코드매핑 데모 피드백 조회 (관리자 전용)."""
     _require_admin(request)
     return _render(request, "pm_ai_demo_admin.html")
 
 
 @router.get("/api/ai-demo/feedback-list")
-async def api_ai_demo_feedback_list(request: Request, rating: str = ""):
+def api_ai_demo_feedback_list(request: Request, rating: str = ""):
     """관리자용 피드백 목록 + 집계 (JSON)."""
     _require_admin(request)
     rating = rating.strip() or None
@@ -4250,7 +4250,7 @@ async def api_ai_demo_feedback_list(request: Request, rating: str = ""):
 # ── API: 유사 플랫폼 상품 조회 (팝업용, 전체 셀러) ─────────────────────────
 
 @router.get("/api/pm-ai/similar")
-async def api_mapping_similar_platform(
+def api_mapping_similar_platform(
     request: Request,
     product_name: str = "",
     platform: str = "",
@@ -4612,7 +4612,7 @@ def poc_run_async(n: int = 100, seed: int = 42, threshold: float = 20.0):
 
 
 @router.get("/api/poc-benchmark")
-async def poc_benchmark(n: int = 100, seed: int = 42, threshold: float = 20.0,
+def poc_benchmark(n: int = 100, seed: int = 42, threshold: float = 20.0,
                         save: int = 0):
     """
     현행(v1) vs 개선(v2) AI 매칭 알고리즘 POC 비교.
