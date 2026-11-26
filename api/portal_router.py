@@ -243,10 +243,19 @@ def _require_user(request: Request) -> dict:
     return user
 
 
+# 화이트리스트 조회 실패(Databricks 콜드스타트/토큰만료 등) 시 6시간 캐시 오염 방지용
+_WL_LAST_GOOD: dict[str, dict] | None = None
+_WL_RETRY_AFTER: float = 0.0   # 이 시각 이전에는 재조회하지 않고 직전 값을 반환
+_WL_RETRY_SEC = 60
+
+
 def _employee_whitelist() -> dict[str, dict]:
+    global _WL_LAST_GOOD, _WL_RETRY_AFTER
     cached = _cache_get("employee_whitelist")
     if cached is not None:
         return cached
+    if _WL_LAST_GOOD is not None and time.time() < _WL_RETRY_AFTER:
+        return _WL_LAST_GOOD
     import main
     import datetime as _dt
     _today = _dt.date.today()
@@ -260,8 +269,10 @@ def _employee_whitelist() -> dict[str, dict]:
             _y -= 1
     _month_in = ", ".join(f"'{ym}'" for ym in _months)
     rows: list[dict] = []
+    _query_ok = False
     try:
-        rows = _q(f"""
+        # _q()/_safe_query 는 예외를 삼키고 [] 를 반환하므로 실패와 구분할 수 없다 → run_query 직접 사용
+        rows = main.run_query(f"""
             SELECT `영업사원` AS emp_code,
                    MAX(`영업사원명`) AS emp_name,
                    MAX(`부서명`) AS dept_name,
@@ -275,7 +286,9 @@ def _employee_whitelist() -> dict[str, dict]:
             GROUP BY `영업사원`
             ORDER BY dept_name, emp_name
         """)
-    except Exception:
+        _query_ok = bool(rows)
+    except Exception as _e:
+        logging.getLogger("portal_whitelist").warning(f"[whitelist] Databricks 조회 실패: {_e}")
         rows = []
     try:
         _team_overrides = main._load_team_overrides()
@@ -321,7 +334,17 @@ def _employee_whitelist() -> dict[str, dict]:
         "customer_count": 0,
         "role": "admin",
     }
-    return _cache_set("employee_whitelist", out)
+    if _query_ok:
+        _WL_LAST_GOOD = out
+        _WL_RETRY_AFTER = 0.0
+        return _cache_set("employee_whitelist", out)
+    # 조회 실패/빈 결과: 6시간 캐시하지 않는다. 직전 정상 값이 있으면 그것을 사용하고 60초 후 재시도.
+    logging.getLogger("portal_whitelist").warning(
+        "[whitelist] 조회 실패/빈 결과 → 캐시하지 않음 (last_good=%s)", _WL_LAST_GOOD is not None)
+    _WL_RETRY_AFTER = time.time() + _WL_RETRY_SEC
+    if _WL_LAST_GOOD is not None:
+        return _WL_LAST_GOOD
+    return out
 
 
 def _team_emp_codes(team_kw: str) -> list[str]:
