@@ -25,6 +25,7 @@ api/admin_console.db-wal
 
 # secrets / generated / accidental files
 api/.token_cache
+api/.baemin_session.json
 api/action_store.db
 api/$null
 .env.local

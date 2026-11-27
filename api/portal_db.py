@@ -455,6 +455,50 @@ def init_db() -> None:
                 (10045790,'삼성웰스토리',1),
                 (10048003,'다봄푸드(직배송)',1);
         """)
+        # price_baemin_sellers: include_parcel(택배배송 SKU도 수집) 컬럼 마이그레이션
+        try:
+            conn.execute("ALTER TABLE price_baemin_sellers ADD COLUMN include_parcel INTEGER DEFAULT 0")
+        except Exception:
+            pass
+        # price_baemin_sellers: requires_login(구매자 로그인 세션이 있어야 상품이 노출되는 셀러) 컬럼 마이그레이션
+        try:
+            conn.execute("ALTER TABLE price_baemin_sellers ADD COLUMN requires_login INTEGER DEFAULT 0")
+        except Exception:
+            pass
+        # 2026-11-12 배민상회 크롤링 대상 보강
+        #  - 직배송 SKU 비중이 높고 상품 200개 이상인 신규 직배송 셀러 16곳 편입
+        #  - 택배배송 셀러 중 '식자재민족'(696)은 택배 SKU까지 수집(include_parcel=1)
+        _new_baemin_sellers = [
+            (1517, "(주)장보고식자재마트 울산옥동점", 0),
+            (1509, "㈜장보고식자재마트(구미인동점)", 0),
+            (1513, "장보고식자재마트 부산신평점", 0),
+            (1523, "(주)장보고식자재마트 포항오천점", 0),
+            (1506, "(주)장보고식자재마트 본점", 0),
+            (2145, "대상 수도권점", 0),
+            (2148, "대상 영남점", 0),
+            (2149, "대상 대전점", 0),
+            (2142, "내가그린푸드", 0),
+            (2071, "동그랑 천안지점", 0),
+            (2126, "한양종합식품", 0),
+            (1292, "소문난유통", 0),
+            (1888, "(주)성원푸드", 0),
+            (2130, "한가족식품", 0),
+            (791,  "엘에프푸드", 0),
+            (2095, "신선한식탁", 0),
+            (696,  "식자재민족", 1),
+        ]
+        for sid, sname, parcel in _new_baemin_sellers:
+            conn.execute(
+                "INSERT OR IGNORE INTO price_baemin_sellers(seller_id,seller_name,region,is_active,include_parcel) "
+                "VALUES (?,?,NULL,1,?)", (sid, sname, parcel),
+            )
+        conn.execute("UPDATE price_baemin_sellers SET include_parcel=1 WHERE seller_id=696 AND COALESCE(include_parcel,0)=0")
+        # 2026-11-27 윤진유통(2146): 비로그인 상태에서는 상품이 0건 → 로그인 세션으로만 수집
+        conn.execute(
+            "INSERT OR IGNORE INTO price_baemin_sellers(seller_id,seller_name,region,is_active,include_parcel) "
+            "VALUES (2146,'윤진유통',NULL,1,0)"
+        )
+        conn.execute("UPDATE price_baemin_sellers SET requires_login=1 WHERE seller_id=2146 AND COALESCE(requires_login,0)=0")
         # price_map_product_link: tag/multiplier 컬럼 마이그레이션
         for col, typedef in [
             ("tag",        "TEXT NOT NULL DEFAULT 'normal'"),
@@ -1602,6 +1646,16 @@ def pm_list_baemin_sellers():
     with _connect() as conn:
         rows = conn.execute("SELECT * FROM price_baemin_sellers ORDER BY seller_id").fetchall()
     return [dict(r) for r in rows]
+
+
+def pm_set_seller_parcel(seller_id: int, include_parcel: int) -> None:
+    """배민 셀러의 택배배송 SKU 수집 여부 설정 (1=포함)."""
+    init_db()
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE price_baemin_sellers SET include_parcel=?, updated_at=datetime('now','localtime') WHERE seller_id=?",
+            (include_parcel, seller_id),
+        )
 
 
 def pm_toggle_seller(seller_id: int, is_active: int) -> None:

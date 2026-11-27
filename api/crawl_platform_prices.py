@@ -11,6 +11,7 @@
 """
 
 import sys, os, time, datetime, json, argparse, re
+from urllib.parse import quote, parse_qs, urlparse, urlencode
 import requests
 
 try:
@@ -231,8 +232,35 @@ BAEMIN_DELIVERY_MAP = {
     "FRESH":           "새벽배송",
     "MARKET_DAY":      "장날배송",
 }
-# 수집 대상 배송유형 (택배 제외)
+# 수집 대상 배송유형 (기본: 택배 제외)
 BAEMIN_COLLECT_TYPES = {"직배송", "새벽배송", "장날배송"}
+# include_parcel=1 로 등록된 셀러(예: 식자재민족)는 택배배송 SKU도 수집
+BAEMIN_PARCEL_TYPE = "택배배송"
+# 셀러당 최대 수집 SKU (2026-11-12: 3만으로 상향). 환경변수로 재정의 가능.
+BAEMIN_MAX_SKU_PER_SELLER = int(os.getenv("BAEMIN_MAX_SKU_PER_SELLER", "30000"))
+BAEMIN_PAGE_SIZE = 40
+# 배민 상품 API는 page*size <= 10,000 까지만 조회 가능 (page>=250 이면 HTTP 400, 2026-11-12 확인).
+# 셀러당 상한을 3만으로 두더라도 실제로는 API 상한(10,000)이 먼저 적용된다.
+BAEMIN_API_MAX_ITEMS = 10000
+
+
+def _baemin_collect_types(seller: dict) -> set:
+    """셀러별 수집 대상 배송유형. include_parcel 셀러는 택배배송 포함."""
+    if seller.get("include_parcel"):
+        return BAEMIN_COLLECT_TYPES | {BAEMIN_PARCEL_TYPE}
+    return BAEMIN_COLLECT_TYPES
+
+
+def _baemin_page_limit(first: dict, test_mode: bool) -> int:
+    """수집할 페이지 수 = min(전체 페이지, 상한 SKU / 페이지크기 올림)."""
+    if test_mode:
+        return 1
+    total_pages = first.get("totalPages", 1) or 1
+    cap_pages = -(-BAEMIN_MAX_SKU_PER_SELLER // BAEMIN_PAGE_SIZE)
+    api_pages = -(-BAEMIN_API_MAX_ITEMS // BAEMIN_PAGE_SIZE)
+    if (first.get("totalElements") or 0) >= BAEMIN_API_MAX_ITEMS:
+        print(f"  ⚠ API 조회 상한({BAEMIN_API_MAX_ITEMS:,}건) 도달 — 이 셀러는 일부만 수집됩니다")
+    return min(total_pages, cap_pages, api_pages)
 
 
 def _get_baemin_sellers() -> list[dict]:
@@ -240,7 +268,9 @@ def _get_baemin_sellers() -> list[dict]:
     if _DB_AVAILABLE:
         try:
             rows = _portal_db.pm_list_baemin_sellers()
-            sellers = [{"id": str(r["seller_id"]), "name": r["seller_name"]}
+            sellers = [{"id": str(r["seller_id"]), "name": r["seller_name"],
+                        "include_parcel": bool(r.get("include_parcel", 0)),
+                        "requires_login": bool(r.get("requires_login", 0))}
                        for r in rows if r.get("is_active", 1)]
             if sellers:
                 return sellers
@@ -260,24 +290,279 @@ def _get_baemin_sellers() -> list[dict]:
     ]
 
 
-def _baemin_fetch_page(seller_id: str, page: int) -> dict | None:
-    url = f"{BAEMIN_API}/{seller_id}/goods/paging"
+# 429/5xx 재시도 대기(초). 기존에는 실패 즉시 셀러를 건너뛰어 이후 셀러가 연쇄적으로 빠졌다(2026-11-12 09:00).
+BAEMIN_RETRY_WAITS = (30, 90, 180)
+# 수집에 실패(또는 일부만 수집)한 셀러 — 리포트 메일에 노출하기 위해 기록
+_BAEMIN_FAILED: list[str] = []
+
+
+# ── 로그인 세션이 필요한 셀러(requires_login=1) ────────────────────────────
+# 예: 윤진유통(2146)은 비로그인이면 goods/paging 이 0건이다(members/profile → noLogin:true).
+# 계정은 환경변수(BAEMIN_LOGIN_ID / BAEMIN_LOGIN_PW, .env.local)로만 받고 코드·로그에 남기지 않는다.
+# 로그인 세션(storage_state)은 로컬 파일에 저장해 재사용하고, 만료되면 자동 재로그인한다.
+BAEMIN_SESSION_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".baemin_session.json")
+BAEMIN_MART_URL = "https://mart.baemin.com"
+BAEMIN_PROFILE_API = "https://gw-api-mart.baemin.com/front-api/v3/members/profile"
+_BM_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+          "(KHTML, like Gecko) Chrome/120.0 Safari/537.36")
+_BM_SESSION: dict = {"pw": None, "browser": None, "ctx": None, "headers": None, "failed": False}
+
+
+def _bm_profile_logged_in(ctx, seller_id: str = "2146") -> bool:
+    """로그인 여부 판정: 웹앱 자신이 호출하는 members/profile 응답을 읽는다.
+    (ctx.request 로 직접 호출하면 앱 전용 헤더가 없어 로그인 상태여도 403 — 2026-11-27 확인)"""
+    pg = ctx.new_page()
+    seen: list = []
+    pg.on("response", lambda r: seen.append(r) if "/members/profile" in r.url else None)
     try:
-        resp = requests.get(
-            url, headers=BAEMIN_HEADERS,
-            params={"page": page, "size": 40, "sortType": "RECOMMEND"},
-            timeout=15,
-        )
-        print(f"  [배민 HTTP] seller={seller_id} page={page} status={resp.status_code}")
-        resp.raise_for_status()
-        data = resp.json()
-        if not data.get("success"):
-            print(f"  [배민 API] success=False: {str(data)[:200]}")
-            return None
-        return data["data"]["goodsList"]
+        pg.goto(f"{BAEMIN_MART_URL}/seller-store?sellerId={seller_id}", wait_until="domcontentloaded", timeout=60000)
+        for _ in range(30):
+            if seen:
+                break
+            pg.wait_for_timeout(500)
+        if not seen:
+            return False
+        d = ((seen[-1].json() or {}).get("data")) or {}
+        return (not d.get("noLogin", True)) and d.get("loginFailType") == "SUCCESS"
+    except Exception:
+        return False
+    finally:
+        try:
+            pg.close()
+        except Exception:
+            pass
+
+
+def _bm_do_login(ctx, probe_seller_id: str) -> bool:
+    """biz-member 통합로그인 폼에 ID/PW 입력. 성공 여부 반환."""
+    uid = os.getenv("BAEMIN_LOGIN_ID", "").strip()
+    upw = os.getenv("BAEMIN_LOGIN_PW", "")
+    if not uid or not upw:
+        # 수동 실행 시에도 .env.local 을 읽는다(스케줄러 run_baemin_crawl.ps1 은 이미 환경변수로 주입).
+        try:
+            _envf = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env.local")
+            if os.path.exists(_envf):
+                with open(_envf, "r", encoding="utf-8") as _f:
+                    for _line in _f:
+                        _m = re.match(r"^\s*(BAEMIN_LOGIN_ID|BAEMIN_LOGIN_PW)\s*=\s*(.*?)\s*$", _line)
+                        if _m:
+                            _v = _m.group(2).strip().strip('"').strip("'")
+                            if _m.group(1) == "BAEMIN_LOGIN_ID" and not uid:
+                                uid = _v
+                            elif _m.group(1) == "BAEMIN_LOGIN_PW" and not upw:
+                                upw = _v
+        except Exception:
+            pass
+    if not uid or not upw:
+        print("  ✗ BAEMIN_LOGIN_ID / BAEMIN_LOGIN_PW 가 설정되지 않았습니다 (.env.local)")
+        return False
+    pg = ctx.new_page()
+    try:
+        # 헤더의 '로그인 / 회원가입' 버튼 클릭은 페이지 준비 전에 눌리면 아무 일도 안 일어나(2026-11-27 확인)
+        # 통합로그인 URL 로 직접 이동한다. 로그인 성공 시 returnUrl 콜백을 거쳐 해당 셀러 페이지로 돌아온다.
+        _success = f"/seller-store?sellerId={probe_seller_id}"
+        _cb = (f"{BAEMIN_MART_URL}/login/callback?successUrl={quote(_success, safe='')}"
+               f"&failUrl={quote(_success, safe='')}")
+        pg.goto(f"https://biz-member.baemin.com/login?channel=mart&returnUrl={quote(_cb, safe='')}",
+                wait_until="domcontentloaded", timeout=60000)
+        pg.wait_for_selector('input[data-testid="id"]', timeout=30000)
+        pg.fill('input[data-testid="id"]', uid)
+        pg.fill('input[data-testid="password"]', upw)
+        pg.locator('button[type="submit"]', has_text="로그인").first.click(timeout=15000)
+        try:
+            pg.wait_for_url(lambda u: u.startswith(BAEMIN_MART_URL), timeout=45000)
+        except Exception:
+            body = ""
+            try:
+                body = pg.evaluate("() => document.body.innerText") or ""
+            except Exception:
+                pass
+            if "일치하지 않" in body:
+                print("  ✗ 배민 로그인 실패: 아이디 또는 비밀번호가 일치하지 않습니다 (BAEMIN_LOGIN_ID/PW 확인)")
+            else:
+                print(f"  ✗ 배민 로그인 후 이동하지 않음 (추가 인증/캡차 가능, url={pg.url.split('?')[0]})")
+            return False
+        pg.wait_for_timeout(4000)
     except Exception as e:
-        print(f"  ⚠ 배민 요청 실패 (seller={seller_id} page={page}): {type(e).__name__}: {e}")
+        # 메시지에 입력값이 섞이지 않도록 예외 종류만 출력
+        print(f"  ✗ 배민 로그인 절차 실패: {type(e).__name__} (추가 인증/캡차/계정 오류 가능, url={pg.url.split('?')[0]})")
+        return False
+    finally:
+        try:
+            pg.close()
+        except Exception:
+            pass
+    return _bm_profile_logged_in(ctx, probe_seller_id)
+
+
+def _bm_capture_paging_headers(ctx, seller_id: str) -> dict | None:
+    """웹앱이 goods/paging 호출 시 실제로 보내는 헤더/추가 쿼리(dongCode 등)/본문을 캡처.
+    반환: {"headers": {...}, "extra_params": {...}, "body": str}"""
+    pg = ctx.new_page()
+    cap: dict = {}
+    meta: dict = {}
+
+    def _on_req(r):
+        if "/goods/paging" in r.url and not cap:
+            cap.update(r.all_headers())
+            try:
+                q = parse_qs(urlparse(r.url).query)
+                meta["extra_params"] = {k: v[0] for k, v in q.items() if k not in ("page", "size", "sortType")}
+                meta["body"] = r.post_data or "[]"
+            except Exception:
+                meta["extra_params"] = {}
+                meta["body"] = "[]"
+
+    pg.on("request", _on_req)
+    try:
+        pg.goto(f"{BAEMIN_MART_URL}/seller-store?sellerId={seller_id}", wait_until="domcontentloaded", timeout=60000)
+        for _ in range(30):
+            if cap:
+                break
+            pg.wait_for_timeout(500)
+    except Exception:
+        pass
+    if not cap:
+        try:
+            pg.close()
+        except Exception:
+            pass
         return None
+    # 페이지 내부 fetch()에서 브라우저가 자동으로 붙이는 헤더/금지 헤더는 제외 (ctx.request 는 봇 차단으로 403)
+    drop = {"host", "content-length", "cookie", "connection", "accept-encoding", "user-agent",
+            "referer", "origin", "priority", "accept-language"}
+    return {
+        "headers": {k: v for k, v in cap.items()
+                    if not k.startswith(":") and not k.lower().startswith("sec-") and k.lower() not in drop},
+        "extra_params": meta.get("extra_params", {}),
+        "body": meta.get("body", "[]"),
+        "page": pg,   # 로그인된 mart.baemin.com 페이지 (여기서 fetch 실행)
+    }
+
+
+def _bm_get_session(seller_id: str):
+    """로그인된 Playwright 컨텍스트 + 헤더를 (필요 시 로그인해서) 반환. 실패하면 None."""
+    if _BM_SESSION["ctx"] is not None:
+        return _BM_SESSION
+    if _BM_SESSION["failed"]:
+        return None
+    try:
+        from playwright.sync_api import sync_playwright
+    except Exception:
+        print("  ✗ playwright 미설치: pip install playwright && playwright install chromium")
+        _BM_SESSION["failed"] = True
+        return None
+    try:
+        pw = sync_playwright().start()
+        browser = pw.chromium.launch(headless=True)
+        state = BAEMIN_SESSION_FILE if os.path.exists(BAEMIN_SESSION_FILE) else None
+        ctx = browser.new_context(user_agent=_BM_UA, viewport={"width": 1440, "height": 900},
+                                  storage_state=state)
+        _BM_SESSION.update(pw=pw, browser=browser)
+        if state and _bm_profile_logged_in(ctx, seller_id):
+            print("  ✓ 저장된 배민 로그인 세션 재사용")
+        else:
+            print("  배민 로그인 시도...")
+            if not _bm_do_login(ctx, seller_id):
+                _bm_close_session()
+                _BM_SESSION["failed"] = True
+                return None
+            ctx.storage_state(path=BAEMIN_SESSION_FILE)
+            print("  ✓ 배민 로그인 성공 (세션 저장)")
+        headers = _bm_capture_paging_headers(ctx, seller_id)  # dict(headers, extra_params, body)
+        if not headers:
+            print("  ✗ goods/paging 요청 헤더 캡처 실패")
+            _bm_close_session()
+            _BM_SESSION["failed"] = True
+            return None
+        _BM_SESSION.update(ctx=ctx, headers=headers)
+        return _BM_SESSION
+    except Exception as e:
+        print(f"  ✗ 배민 로그인 세션 준비 실패: {type(e).__name__}")
+        _bm_close_session()
+        _BM_SESSION["failed"] = True
+        return None
+
+
+def _bm_close_session():
+    for k in ("browser", "pw"):
+        obj = _BM_SESSION.get(k)
+        try:
+            if obj is not None:
+                obj.close() if k == "browser" else obj.stop()
+        except Exception:
+            pass
+    _BM_SESSION.update(pw=None, browser=None, ctx=None, headers=None)
+
+
+class _BmResp:
+    """페이지 내부 fetch 결과를 requests.Response 처럼 쓰기 위한 최소 래퍼."""
+    def __init__(self, status: int, text: str):
+        self.status, self.text = status, text
+        self.ok = 200 <= status < 300
+
+    def json(self):
+        return json.loads(self.text)
+
+
+def _baemin_fetch_page(seller_id: str, page: int, use_login: bool = False) -> dict | None:
+    url = f"{BAEMIN_API}/{seller_id}/goods/paging"
+    params = {"page": page, "size": BAEMIN_PAGE_SIZE, "sortType": "RECOMMEND"}
+    sess = None
+    if use_login:
+        sess = _bm_get_session(seller_id)
+        if sess is None:
+            return None
+    for attempt in range(len(BAEMIN_RETRY_WAITS) + 1):
+        try:
+            if sess is not None:
+                # 웹앱과 동일하게 POST. 캡처한 헤더 + 로그인 쿠키(컨텍스트가 자동 첨부)
+                cap = sess["headers"]
+                qs = urlencode({**cap["extra_params"], **params})
+                res = cap["page"].evaluate(
+                    """async ([url, hdr, body]) => {
+                        const r = await fetch(url, {method: 'POST', credentials: 'include', headers: hdr, body: body});
+                        const t = await r.text();
+                        return {status: r.status, text: t};
+                    }""",
+                    [f"{url}?{qs}", cap["headers"], cap["body"]])
+                status = res["status"]
+                body = _BmResp(status, res["text"])
+            else:
+                resp = requests.get(url, headers=BAEMIN_HEADERS, params=params, timeout=15)
+                status = resp.status_code
+                body = resp
+            print(f"  [배민 HTTP{'/login' if sess is not None else ''}] seller={seller_id} page={page} status={status}")
+            if (status == 429 or status >= 500) and attempt < len(BAEMIN_RETRY_WAITS):
+                wait = BAEMIN_RETRY_WAITS[attempt]
+                print(f"  ⏳ {status} — {wait}초 대기 후 재시도 ({attempt + 1}/{len(BAEMIN_RETRY_WAITS)})")
+                time.sleep(wait)
+                continue
+            if sess is not None:
+                if status in (401, 403):
+                    # 세션 만료 → 저장 세션 폐기 후 다음 실행에서 재로그인
+                    print("  ⚠ 로그인 세션 만료/거부 — 저장된 세션을 삭제합니다 (다음 실행에서 재로그인)")
+                    try:
+                        os.remove(BAEMIN_SESSION_FILE)
+                    except OSError:
+                        pass
+                    _bm_close_session()
+                    _BM_SESSION["failed"] = True
+                    return None
+                if not body.ok:
+                    return None
+                data = body.json()
+            else:
+                body.raise_for_status()
+                data = body.json()
+            if not data.get("success"):
+                print(f"  [배민 API] success=False: {str(data)[:200]}")
+                return None
+            return data["data"]["goodsList"]
+        except Exception as e:
+            print(f"  ⚠ 배민 요청 실패 (seller={seller_id} page={page}): {type(e).__name__}: {e}")
+            return None
+    return None
 
 
 def crawl_baemin(test_mode=False) -> list[dict]:
@@ -290,19 +575,20 @@ def crawl_baemin(test_mode=False) -> list[dict]:
 
     for s in sellers:
         print(f"\n[배민상회] {s['name']} (id={s['id']})")
-        first = _baemin_fetch_page(s["id"], 0)
+        first = _baemin_fetch_page(s["id"], 0, bool(s.get("requires_login")))
         if not first:
             print("  ✗ 첫 페이지 실패, 건너뜀")
             continue
-        total_pages = first.get("totalPages", 1) if not test_mode else 1
+        total_pages = _baemin_page_limit(first, test_mode)
+        collect_types = _baemin_collect_types(s)
         seller_direct = 0
         seller_skip   = 0
-        print(f"  총 {first.get('totalElements',0)}개 / {total_pages}페이지")
+        print(f"  총 {first.get('totalElements',0)}개 / {total_pages}페이지 (상한 {BAEMIN_MAX_SKU_PER_SELLER:,}SKU)")
 
         for page_no in range(total_pages):
             if page_no > 0:
                 time.sleep(0.8)
-                data = _baemin_fetch_page(s["id"], page_no)
+                data = _baemin_fetch_page(s["id"], page_no, bool(s.get("requires_login")))
                 if not data:
                     break
                 items = data.get("content", [])
@@ -312,8 +598,10 @@ def crawl_baemin(test_mode=False) -> list[dict]:
             for item in items:
                 delivery_raw  = item.get("goodsDeliveryType", "")
                 delivery_text = BAEMIN_DELIVERY_MAP.get(delivery_raw, delivery_raw)
-                # 택배배송 제외
-                if delivery_text not in BAEMIN_COLLECT_TYPES:
+                if seller_direct >= BAEMIN_MAX_SKU_PER_SELLER:
+                    break
+                # 택배배송 제외 (include_parcel 셀러는 포함)
+                if delivery_text not in collect_types:
                     seller_skip += 1
                     continue
                 product_id = str(item.get("id", ""))
@@ -334,7 +622,11 @@ def crawl_baemin(test_mode=False) -> list[dict]:
                 seller_direct += 1
 
             print(f"  page {page_no}: 수집 {seller_direct}건 / 제외(택배) {seller_skip}건 (누적 {len(records)}건)")
+            if seller_direct >= BAEMIN_MAX_SKU_PER_SELLER:
+                print(f"  ⚠ 셀러당 상한 {BAEMIN_MAX_SKU_PER_SELLER:,}SKU 도달 — 수집 중단")
+                break
 
+    _bm_close_session()
     print(f"\n✓ 배민상회 수집 완료: {len(records)}건")
     return records
 
@@ -692,28 +984,41 @@ def crawl_todaysales(test_mode=False) -> list[dict]:
 # ══════════════════════════════════════════════════════════════════════════
 # 메인
 # ══════════════════════════════════════════════════════════════════════════
-def _crawl_baemin_per_seller(test_mode: bool):
-    """배민상회 셀러별 (seller_id, records) 제너레이터."""
+def _crawl_baemin_per_seller(test_mode: bool, only_ids: set | None = None):
+    """배민상회 셀러별 (seller_id, records) 제너레이터.
+    only_ids: 수집할 seller_id 집합 (None이면 전체)"""
     sellers = _get_baemin_sellers()
+    if only_ids:
+        sellers = [s for s in sellers if s["id"] in only_ids]
     if test_mode:
         sellers = sellers[:1]
     print(f"배민상회 셀러 {len(sellers)}개 수집 시작")
     for s in sellers:
         print(f"\n[배민상회] {s['name']} (id={s['id']})")
-        first = _baemin_fetch_page(s["id"], 0)
+        use_login = bool(s.get("requires_login"))
+        first = _baemin_fetch_page(s["id"], 0, use_login)
         if not first:
             print("  ✗ 첫 페이지 실패, 건너뜀")
+            _BAEMIN_FAILED.append(
+                f"baemin/{s['name']}({s['id']}) 로그인 필요 셀러 수집 실패(BAEMIN_LOGIN_ID/PW 또는 로그인 상태 확인)"
+                if use_login else
+                f"baemin/{s['name']}({s['id']}) 수집 실패(재시도 후에도 불가)")
             continue
-        total_pages = first.get("totalPages", 1) if not test_mode else 1
+        if use_login and not (first.get("totalElements") or 0):
+            # 로그인 세션이 있는데도 0건 → 세션 무효이거나 실제로 상품이 없는 셀러. 조용히 지나가지 않도록 기록.
+            _BAEMIN_FAILED.append(f"baemin/{s['name']}({s['id']}) 로그인 상태에서도 상품 0건(세션/계정 노출 조건 확인)")
+        total_pages = _baemin_page_limit(first, test_mode)
+        collect_types = _baemin_collect_types(s)
         seller_records = []
         seller_direct = 0
         seller_skip   = 0
-        print(f"  총 {first.get('totalElements',0)}개 / {total_pages}페이지")
+        print(f"  총 {first.get('totalElements',0)}개 / {total_pages}페이지 (상한 {BAEMIN_MAX_SKU_PER_SELLER:,}SKU)")
         for page_no in range(total_pages):
             if page_no > 0:
                 time.sleep(0.8)
-                data = _baemin_fetch_page(s["id"], page_no)
+                data = _baemin_fetch_page(s["id"], page_no, use_login)
                 if not data:
+                    _BAEMIN_FAILED.append(f"baemin/{s['name']}({s['id']}) 일부만 수집({seller_direct}건, page {page_no}에서 중단)")
                     break
                 items = data.get("content", [])
             else:
@@ -721,7 +1026,9 @@ def _crawl_baemin_per_seller(test_mode: bool):
             for item in items:
                 delivery_raw  = item.get("goodsDeliveryType", "")
                 delivery_text = BAEMIN_DELIVERY_MAP.get(delivery_raw, delivery_raw)
-                if delivery_text not in BAEMIN_COLLECT_TYPES:
+                if seller_direct >= BAEMIN_MAX_SKU_PER_SELLER:
+                    break
+                if delivery_text not in collect_types:
                     seller_skip += 1
                     continue
                 product_id = str(item.get("id", ""))
@@ -741,7 +1048,11 @@ def _crawl_baemin_per_seller(test_mode: bool):
                 })
                 seller_direct += 1
             print(f"  page {page_no}: 수집 {seller_direct}건 / 제외(택배) {seller_skip}건")
+            if seller_direct >= BAEMIN_MAX_SKU_PER_SELLER:
+                print(f"  ⚠ 셀러당 상한 {BAEMIN_MAX_SKU_PER_SELLER:,}SKU 도달 — 수집 중단")
+                break
         yield s["id"], s["name"], seller_records
+    _bm_close_session()
 
 
 def _crawl_food_per_seller(test_mode: bool, only_ids: set | None = None):
@@ -906,10 +1217,16 @@ def main():
     if args.cleanup:
         print("\n[정리] 기존 배민 택배배송 데이터 삭제...")
         try:
+            # include_parcel 셀러(식자재민족 등)는 택배배송 SKU가 정상 수집 대상이므로 보호
+            keep_ids = [s["id"] for s in _get_baemin_sellers() if s.get("include_parcel")]
+            keep_sql = ""
+            if keep_ids:
+                keep_sql = " AND platform_seller_id NOT IN (" + ",".join(f"'{k}'" for k in keep_ids) + ")"
+                print(f"  (택배 포함 셀러 보호: {keep_ids})")
             with conn.cursor() as cur:
-                cur.execute(f"DELETE FROM {T_SILVER} WHERE platform='baemin' AND delivery_type='NORMAL_DELIVERY'")
+                cur.execute(f"DELETE FROM {T_SILVER} WHERE platform='baemin' AND delivery_type='NORMAL_DELIVERY'{keep_sql}")
                 print("  ✓ NORMAL_DELIVERY raw값 삭제 완료")
-                cur.execute(f"DELETE FROM {T_SILVER} WHERE platform='baemin' AND delivery_type='택배배송'")
+                cur.execute(f"DELETE FROM {T_SILVER} WHERE platform='baemin' AND delivery_type='택배배송'{keep_sql}")
                 print("  ✓ 택배배송 삭제 완료")
         except Exception as e:
             print(f"  ✗ 정리 실패: {e}")
@@ -959,7 +1276,7 @@ def main():
 
     if run_baemin:
         baemin_ids = seller_filter.get("baemin")
-        for seller_id, seller_name, records in _crawl_baemin_per_seller(test_mode=args.test):
+        for seller_id, seller_name, records in _crawl_baemin_per_seller(test_mode=args.test, only_ids=baemin_ids):
             if baemin_ids and seller_id not in baemin_ids:
                 continue
             if not records:
@@ -972,6 +1289,8 @@ def main():
             except Exception as e:
                 print(f"  ✗ 배민 {seller_name}({seller_id}) 저장 실패: {e}")
                 failed_sellers.append(f"baemin/{seller_name}")
+        # 수집 단계 실패(429 등) 셀러를 리포트에 노출 (조용히 빠지지 않도록)
+        failed_sellers.extend(_BAEMIN_FAILED)
 
     if run_food:
         food_ids = seller_filter.get("foodspring")
